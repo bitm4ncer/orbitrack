@@ -56,6 +56,20 @@ function mergeTrees(a: SampleEntry[], b: SampleEntry[]): SampleEntry[] {
   return result;
 }
 
+function copyDirSync(src: string, dest: string): void {
+  if (!fs.existsSync(src)) return;
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirSync(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
 const MIME_TYPES: Record<string, string> = {
   '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg',
@@ -68,24 +82,28 @@ const MIME_TYPES: Record<string, string> = {
 export function sampleListPlugin(): Plugin {
   let publicDir: string;
   let rootDir: string;
+  let outDir: string;
+  let isBuild: boolean;
 
   return {
     name: 'sample-list',
     configResolved(config) {
       publicDir = config.publicDir;
       rootDir = config.root;
+      outDir = path.resolve(config.root, config.build.outDir);
+      isBuild = config.command === 'build';
     },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = req.url || '';
 
-        // API: list sample tree
-        if (url === '/api/samples') {
+        // API: list sample tree (dev only — production uses static samples.json)
+        if (url === '/api/samples' || url === '/samples.json') {
           const publicSamples = path.join(publicDir, 'samples');
           const rootSamples = path.join(rootDir, 'samples');
 
-          const publicTree = readSampleDir(publicSamples, '/samples');
-          const rootTree = readSampleDir(rootSamples, '/samples');
+          const publicTree = readSampleDir(publicSamples, 'samples');
+          const rootTree = readSampleDir(rootSamples, 'samples');
           const merged = mergeTrees(publicTree, rootTree);
 
           res.setHeader('Content-Type', 'application/json');
@@ -113,6 +131,27 @@ export function sampleListPlugin(): Plugin {
 
         next();
       });
+    },
+    generateBundle() {
+      const publicSamples = path.join(publicDir, 'samples');
+      const rootSamples = path.join(rootDir, 'samples');
+
+      const publicTree = readSampleDir(publicSamples, 'samples');
+      const rootTree = readSampleDir(rootSamples, 'samples');
+      const merged = mergeTrees(publicTree, rootTree);
+
+      this.emitFile({
+        type: 'asset',
+        fileName: 'samples.json',
+        source: JSON.stringify(merged),
+      });
+    },
+    closeBundle() {
+      if (!isBuild) return;
+      // Copy root samples/ dir into dist/samples/ (public/samples/ is already copied by Vite)
+      const rootSamples = path.join(rootDir, 'samples');
+      const distSamples = path.join(outDir, 'samples');
+      copyDirSync(rootSamples, distSamples);
     },
   };
 }
