@@ -1,11 +1,12 @@
 import { create } from 'zustand';
 import { PASTEL_COLORS } from '../canvas/colors';
 import type { Instrument } from '../types/instrument';
-import type { Effect, EffectType, Connection, ConnectionEndpoint } from '../types/effects';
+import type { Effect, EffectType } from '../types/effects';
 import type { SuperdoughSynthParams, SuperdoughSamplerParams } from '../types/superdough';
 import { DEFAULT_SYNTH_PARAMS, DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
 import { DEFAULT_EFFECT_PARAMS } from '../audio/effectParams';
 import { loadSample } from '../audio/sampler';
+import { registerSampleForPlayback } from '../audio/engine';
 
 function generateEvenHits(count: number): number[] {
   return Array.from({ length: count }, (_, i) => i / count);
@@ -100,7 +101,7 @@ const defaultInstruments: Instrument[] = (() => {
   ];
 })();
 
-interface StoreState {
+export interface StoreState {
   // Transport
   bpm: number;
   isPlaying: boolean;
@@ -160,6 +161,7 @@ interface StoreState {
   // Snap to 16th note grid
   snapEnabled: boolean;
   setSnapEnabled: (enabled: boolean) => void;
+  spinMode?: boolean;
 
   // Sample bank
   sampleBankOpen: boolean;
@@ -168,21 +170,21 @@ interface StoreState {
   closeSampleBank: () => void;
   assignSample: (instrumentId: string, samplePath: string, displayName: string) => void;
 
-  // Effects chain
-  effects: Effect[];
-  connections: Connection[];
+  // Custom imported samples
+  customSamples: { key: string; url: string; name: string }[];
+  addCustomSample: (sample: { key: string; url: string; name: string }) => void;
+  removeCustomSample: (key: string) => void;
+
+  // Per-instrument effect chains
+  instrumentEffects: Record<string, Effect[]>;
   masterVolume: number; // 0-1 linear
 
-  addEffect: (type: EffectType) => void;
-  removeEffect: (id: string) => void;
-  updateEffect: (id: string, updates: Partial<Effect>) => void;
-  setEffectParam: (effectId: string, key: string, value: number) => void;
-  toggleEffectEnabled: (id: string) => void;
-  toggleEffectCollapsed: (id: string) => void;
-  reorderEffects: (fromIdx: number, toIdx: number) => void;
-
-  addConnection: (from: ConnectionEndpoint, to: ConnectionEndpoint) => void;
-  removeConnection: (id: string) => void;
+  addEffect: (instrumentId: string, type: EffectType) => void;
+  removeEffect: (instrumentId: string, effectId: string) => void;
+  setEffectParam: (instrumentId: string, effectId: string, key: string, value: number) => void;
+  toggleEffectEnabled: (instrumentId: string, effectId: string) => void;
+  toggleEffectCollapsed: (instrumentId: string, effectId: string) => void;
+  reorderEffects: (instrumentId: string, fromIdx: number, toIdx: number) => void;
 
   setMasterVolume: (vol: number) => void;
 }
@@ -219,10 +221,10 @@ export const useStore = create<StoreState>((set, get) => ({
   // Sample bank
   sampleBankOpen: false,
   sampleBankInstrumentId: null,
+  customSamples: [],
 
-  // Effects
-  effects: [],
-  connections: [],
+  // Per-instrument effects
+  instrumentEffects: {},
   masterVolume: 0.8,
 
   // Transport actions
@@ -385,16 +387,13 @@ export const useStore = create<StoreState>((set, get) => ({
       const { [id]: _gn, ...gridNotes } = s.gridNotes;
       const { [id]: _gg, ...gridGlide } = s.gridGlide;
       const { [id]: _gl, ...gridLengths } = s.gridLengths;
-      // Remove connections referencing this instrument
-      const connections = s.connections.filter(
-        (c) => !(c.from.kind === 'instrument' && c.from.id === id)
-      );
+      const { [id]: _fx, ...instrumentEffects } = s.instrumentEffects;
       return {
         instruments,
         gridNotes,
         gridGlide,
         gridLengths,
-        connections,
+        instrumentEffects,
         selectedInstrumentId: s.selectedInstrumentId === id ? null : s.selectedInstrumentId,
       };
     }),
@@ -571,7 +570,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setOctaveOffset: (offset) => set({ octaveOffset: offset }),
 
-  applyChordPreset: (instrumentId, chords, steps) =>
+  applyChordPreset: (instrumentId, chords, _steps) =>
     set((s) => {
       const inst = s.instruments.find((i) => i.id === instrumentId);
       if (!inst) return s;
@@ -641,18 +640,32 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ sampleBankOpen: false, sampleBankInstrumentId: null }),
 
   assignSample: (instrumentId, samplePath, displayName) => {
+    // For imported samples (blob URLs), look up the actual blob URL from state
+    const customSamples = get().customSamples;
+    const custom = customSamples.find((c) => c.key === samplePath);
+    const sdKey = custom
+      ? registerSampleForPlayback(samplePath, custom.url)
+      : registerSampleForPlayback(samplePath);
+    loadSample(samplePath, custom?.url ?? samplePath);
     set((s) => ({
       instruments: s.instruments.map((inst) =>
         inst.id === instrumentId
-          ? { ...inst, sampleName: samplePath, name: displayName }
+          ? { ...inst, sampleName: sdKey, name: displayName }
           : inst
       ),
     }));
-    loadSample(samplePath, samplePath);
   },
 
-  // Effects actions
-  addEffect: (type) =>
+  addCustomSample: (sample) => {
+    loadSample(sample.key, sample.url);
+    set((s) => ({ customSamples: [...s.customSamples, sample] }));
+  },
+
+  removeCustomSample: (key) =>
+    set((s) => ({ customSamples: s.customSamples.filter((cs) => cs.key !== key) })),
+
+  // Per-instrument effects actions
+  addEffect: (instrumentId, type) =>
     set((s) => {
       const EFFECT_LABELS: Record<EffectType, string> = {
         eq3: 'EQ 3-Band',
@@ -672,62 +685,63 @@ export const useStore = create<StoreState>((set, get) => ({
         params: DEFAULT_EFFECT_PARAMS(type),
         collapsed: false,
       };
-      return { effects: [...s.effects, effect] };
+      const prev = s.instrumentEffects[instrumentId] ?? [];
+      return { instrumentEffects: { ...s.instrumentEffects, [instrumentId]: [...prev, effect] } };
     }),
 
-  removeEffect: (id) =>
-    set((s) => ({
-      effects: s.effects.filter((e) => e.id !== id),
-      connections: s.connections.filter(
-        (c) =>
-          !(c.from.kind === 'effect' && c.from.id === id) &&
-          !(c.to.kind === 'effect' && c.to.id === id)
-      ),
-    })),
-
-  updateEffect: (id, updates) =>
-    set((s) => ({
-      effects: s.effects.map((e) => (e.id === id ? { ...e, ...updates } : e)),
-    })),
-
-  setEffectParam: (effectId, key, value) =>
-    set((s) => ({
-      effects: s.effects.map((e) =>
-        e.id === effectId ? { ...e, params: { ...e.params, [key]: value } } : e
-      ),
-    })),
-
-  toggleEffectEnabled: (id) =>
-    set((s) => ({
-      effects: s.effects.map((e) => (e.id === id ? { ...e, enabled: !e.enabled } : e)),
-    })),
-
-  toggleEffectCollapsed: (id) =>
-    set((s) => ({
-      effects: s.effects.map((e) => (e.id === id ? { ...e, collapsed: !e.collapsed } : e)),
-    })),
-
-  reorderEffects: (fromIdx, toIdx) =>
+  removeEffect: (instrumentId, effectId) =>
     set((s) => {
-      const effects = [...s.effects];
+      const prev = s.instrumentEffects[instrumentId] ?? [];
+      return {
+        instrumentEffects: {
+          ...s.instrumentEffects,
+          [instrumentId]: prev.filter((e) => e.id !== effectId),
+        },
+      };
+    }),
+
+  setEffectParam: (instrumentId, effectId, key, value) =>
+    set((s) => {
+      const prev = s.instrumentEffects[instrumentId] ?? [];
+      return {
+        instrumentEffects: {
+          ...s.instrumentEffects,
+          [instrumentId]: prev.map((e) =>
+            e.id === effectId ? { ...e, params: { ...e.params, [key]: value } } : e
+          ),
+        },
+      };
+    }),
+
+  toggleEffectEnabled: (instrumentId, effectId) =>
+    set((s) => {
+      const prev = s.instrumentEffects[instrumentId] ?? [];
+      return {
+        instrumentEffects: {
+          ...s.instrumentEffects,
+          [instrumentId]: prev.map((e) => (e.id === effectId ? { ...e, enabled: !e.enabled } : e)),
+        },
+      };
+    }),
+
+  toggleEffectCollapsed: (instrumentId, effectId) =>
+    set((s) => {
+      const prev = s.instrumentEffects[instrumentId] ?? [];
+      return {
+        instrumentEffects: {
+          ...s.instrumentEffects,
+          [instrumentId]: prev.map((e) => (e.id === effectId ? { ...e, collapsed: !e.collapsed } : e)),
+        },
+      };
+    }),
+
+  reorderEffects: (instrumentId, fromIdx, toIdx) =>
+    set((s) => {
+      const effects = [...(s.instrumentEffects[instrumentId] ?? [])];
       const [item] = effects.splice(fromIdx, 1);
       effects.splice(toIdx, 0, item);
-      return { effects };
+      return { instrumentEffects: { ...s.instrumentEffects, [instrumentId]: effects } };
     }),
-
-  addConnection: (from, to) =>
-    set((s) => {
-      // Don't add duplicate connections
-      const exists = s.connections.some(
-        (c) => JSON.stringify(c.from) === JSON.stringify(from) && JSON.stringify(c.to) === JSON.stringify(to)
-      );
-      if (exists) return s;
-      const connection: Connection = { id: createId(), from, to };
-      return { connections: [...s.connections, connection] };
-    }),
-
-  removeConnection: (id) =>
-    set((s) => ({ connections: s.connections.filter((c) => c.id !== id) })),
 
   setMasterVolume: (masterVolume) => set({ masterVolume }),
 }));

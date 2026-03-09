@@ -3,6 +3,7 @@ import { useStore } from '../../state/store';
 import { toggleTransport, setBpm } from '../../audio/transport';
 import { initAudio } from '../../audio/engine';
 import { loadSamples } from '../../audio/sampler';
+import orbeatLogo from '/ORBEAT_Logo.svg';
 
 const SHORTCUTS = [
   { key: 'Space', action: 'Play / Stop' },
@@ -30,7 +31,7 @@ function InfoPopup({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4">
-          <div className="text-base font-bold tracking-wider text-text-primary">ORBEAT</div>
+          <img src={orbeatLogo} alt="ORBEAT" className="h-5" />
           <div className="text-[10px] text-text-secondary uppercase tracking-widest mt-0.5">Polyrhythmic Web Sequencer</div>
         </div>
         <table className="w-full border-collapse">
@@ -80,9 +81,7 @@ export function TransportBar() {
   return (
     <div className="transport-bar relative flex items-center gap-6 bg-bg-secondary border-t border-border" style={{ padding: 40 }}>
       <div className="transport-logo flex items-center gap-3">
-        <span className="text-lg font-bold tracking-wider text-text-primary">
-          ORBEAT
-        </span>
+        <img src={orbeatLogo} alt="ORBEAT" className="h-6" />
       </div>
 
       <button

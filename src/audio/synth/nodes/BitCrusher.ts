@@ -3,14 +3,12 @@ import { GainNode_ } from './Gain';
 // BitCrusher implemented as a simple pass-through with bit reduction
 // Uses a WaveShaperNode to approximate bit crushing without ScriptProcessorNode
 export class BitCrusher {
-  private ac: AudioContext;
   private dryGain: GainNode_;
   private wetGain: GainNode_;
   private node: WaveShaperNode;
   private bits = 8;
 
   constructor(ac: AudioContext) {
-    this.ac = ac;
     this.dryGain = new GainNode_(ac);
     this.wetGain = new GainNode_(ac);
     this.node = ac.createWaveShaper();
@@ -42,7 +40,7 @@ export class BitCrusher {
       curve[i] = Math.round(x * steps) / steps;
     }
 
-    this.node.curve = curve;
+    this.node.curve = curve as Float32Array<ArrayBuffer>;
   }
 
   setAmount(val: number): void {

@@ -13,17 +13,15 @@ function createDistCurve(amount = 0): Float32Array {
 }
 
 export class Distortion {
-  private ac: AudioContext;
   private dryGain: GainNode_;
   private wetGain: GainNode_;
   private node: WaveShaperNode;
 
   constructor(ac: AudioContext) {
-    this.ac = ac;
     this.dryGain = new GainNode_(ac);
     this.wetGain = new GainNode_(ac);
     this.node = ac.createWaveShaper();
-    this.node.curve = createDistCurve();
+    this.node.curve = createDistCurve() as Float32Array<ArrayBuffer>;
     this.node.oversample = 'none';
     this.node.connect(this.wetGain.getNode());
   }
@@ -43,7 +41,7 @@ export class Distortion {
 
   setDistortion(val: number): void {
     if (val < 0 || val > 30) return;
-    this.node.curve = createDistCurve(val);
+    this.node.curve = createDistCurve(val) as Float32Array<ArrayBuffer>;
   }
 
   setAmount(val: number): void {

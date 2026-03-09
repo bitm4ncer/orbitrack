@@ -16,14 +16,3 @@ export interface Effect {
   params: Record<string, number>;
   collapsed: boolean;
 }
-
-export type ConnectionEndpoint =
-  | { kind: 'instrument'; id: string }
-  | { kind: 'effect'; id: string; port: 'in' | 'out' }
-  | { kind: 'master'; port: 'in' };
-
-export interface Connection {
-  id: string;
-  from: ConnectionEndpoint;
-  to: ConnectionEndpoint;
-}

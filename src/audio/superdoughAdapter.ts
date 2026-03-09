@@ -1,7 +1,6 @@
 import { superdough } from 'superdough';
 import type { Instrument } from '../types/instrument';
 import type { StoreState } from '../state/store';
-import type { Connection } from '../types/effects';
 import { DEFAULT_SYNTH_PARAMS, DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
 
 function dbToLinear(db: number): number {
@@ -9,44 +8,19 @@ function dbToLinear(db: number): number {
 }
 
 /**
- * Computes the superdough effect params for an instrument based on
- * its cable connections in the effects graph.
- *
- * When an instrument's Out port is cabled to an effect's In port,
- * the effect's params are applied to every note that instrument triggers.
- * Effects can chain: Instrument → Effect A → Effect B → Master.
- * In that case both Effect A and Effect B params are applied.
+ * Computes superdough effect parameter overrides from the instrument's own
+ * effect chain (instrumentEffects[instrument.id]), applied in order.
+ * Only superdough-native params are mapped here (room, delay, distortion, cutoff).
  */
 function getEffectOverrides(
   instrument: Instrument,
-  state: StoreState
+  state: StoreState,
 ): Record<string, number> {
-  const { connections, effects } = state;
+  const effects = state.instrumentEffects[instrument.id] ?? [];
   const overrides: Record<string, number> = {};
 
-  // Traverse the connections graph starting from this instrument's Out port
-  // Collect all effects reachable from this instrument
-  const visited = new Set<string>();
-  const queue: string[] = [];
-
-  // Start: find what the instrument connects to
-  for (const conn of connections) {
-    if (conn.from.kind === 'instrument' && conn.from.id === instrument.id) {
-      if (conn.to.kind === 'effect') {
-        queue.push(conn.to.id);
-      }
-    }
-  }
-
-  while (queue.length > 0) {
-    const effectId = queue.shift()!;
-    if (visited.has(effectId)) continue;
-    visited.add(effectId);
-
-    const effect = effects.find((e) => e.id === effectId);
-    if (!effect || !effect.enabled) continue;
-
-    // Apply this effect's params as superdough per-note overrides
+  for (const effect of effects) {
+    if (!effect.enabled) continue;
     switch (effect.type) {
       case 'reverb':
         overrides.room = effect.params.amount ?? 0;
@@ -64,16 +38,7 @@ function getEffectOverrides(
         overrides.cutoff = effect.params.frequency ?? 20000;
         overrides.resonance = effect.params.q ?? 0;
         break;
-      // eq3, compressor, chorus, phaser: handled by routing engine post-processing
-    }
-
-    // Follow Out → next effect connections
-    for (const conn of connections) {
-      if (conn.from.kind === 'effect' && conn.from.id === effectId && conn.from.port === 'out') {
-        if (conn.to.kind === 'effect') {
-          queue.push(conn.to.id);
-        }
-      }
+      // eq3, compressor, chorus, phaser: superdough has no native equivalent
     }
   }
 
@@ -97,7 +62,6 @@ export function triggerSuperdough(
     superdough({
       s: sp.synthType,
       note: midiNote,
-      duration: noteDuration,
       gain: sp.gain * instGain,
       attack: sp.attack,
       decay: sp.decay,
@@ -105,7 +69,7 @@ export function triggerSuperdough(
       release: sp.release,
       cutoff: sp.cutoff,
       resonance: sp.resonance,
-      pan: sp.pan,
+      pan: (sp.pan + 1) / 2,
       delay: sp.delay,
       delaytime: sp.delaytime,
       delayfeedback: sp.delayfeedback,
@@ -113,19 +77,16 @@ export function triggerSuperdough(
       size: sp.size,
       distortion: sp.distortion,
       orbit: instrument.orbitIndex,
-      // Glide: portamento on consecutive notes
       ...(glide ? { portamento: 0.05 } : {}),
-      // Effect cable overrides (applied on top of instrument defaults)
       ...effectOverrides,
-    }, audioTime);
+    }, audioTime, noteDuration);
   } else if (instrument.type === 'sampler' && instrument.sampleName) {
     const sp = instrument.samplerParams ?? DEFAULT_SAMPLER_PARAMS;
-    // Convert MIDI note to playback rate: MIDI 60 (C4) = rate 1.0
-    const speed = sp.speed * Math.pow(2, (midiNote - 60) / 12);
+    const rootNote = sp.rootNote ?? 60;
+    const speed = sp.speed * Math.pow(2, (midiNote - rootNote) / 12);
 
     superdough({
       s: instrument.sampleName,
-      duration: noteDuration,
       gain: sp.gain * instGain,
       speed,
       begin: sp.begin,
@@ -134,9 +95,9 @@ export function triggerSuperdough(
       release: sp.release,
       cutoff: sp.cutoff,
       resonance: sp.resonance,
-      pan: sp.pan,
+      pan: (sp.pan + 1) / 2,
       orbit: instrument.orbitIndex,
       ...effectOverrides,
-    }, audioTime);
+    }, audioTime, noteDuration);
   }
 }

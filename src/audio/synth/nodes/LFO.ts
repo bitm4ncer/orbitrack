@@ -2,12 +2,10 @@ import { Oscillator } from './Oscillator';
 import { GainNode_ } from './Gain';
 
 export class LFO {
-  private ac: AudioContext;
   private osc: Oscillator;
   private depth: GainNode_;
 
   constructor(ac: AudioContext) {
-    this.ac = ac;
     this.depth = new GainNode_(ac);
     this.osc = new Oscillator(ac);
     this.osc.setType('sine');

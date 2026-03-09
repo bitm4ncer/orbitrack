@@ -17,7 +17,6 @@ function readSampleDir(dirPath: string, urlPrefix: string): SampleEntry[] {
   const entries = fs.readdirSync(dirPath, { withFileTypes: true });
   const result: SampleEntry[] = [];
 
-  // Folders first, then files, alphabetical within each group
   const folders = entries.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
   const files = entries
     .filter((e) => e.isFile() && AUDIO_EXTENSIONS.has(path.extname(e.name).toLowerCase()))
@@ -34,25 +33,6 @@ function readSampleDir(dirPath: string, urlPrefix: string): SampleEntry[] {
     result.push({ name: file.name, path: `${urlPrefix}/${file.name}`, type: 'file' });
   }
 
-  return result;
-}
-
-function mergeTrees(a: SampleEntry[], b: SampleEntry[]): SampleEntry[] {
-  const map = new Map<string, SampleEntry>();
-  for (const entry of a) map.set(entry.name, entry);
-  for (const entry of b) {
-    const existing = map.get(entry.name);
-    if (existing && existing.type === 'folder' && entry.type === 'folder') {
-      existing.children = mergeTrees(existing.children || [], entry.children || []);
-    } else {
-      map.set(entry.name, entry);
-    }
-  }
-  const result = [...map.values()];
-  result.sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
   return result;
 }
 
@@ -80,50 +60,47 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 export function sampleListPlugin(): Plugin {
-  let publicDir: string;
   let rootDir: string;
   let outDir: string;
   let isBuild: boolean;
+  // Normalised base without trailing slash: '/Orbeat/' → '/Orbeat', '/' → ''
+  let basePath: string;
 
   return {
     name: 'sample-list',
     configResolved(config) {
-      publicDir = config.publicDir;
       rootDir = config.root;
       outDir = path.resolve(config.root, config.build.outDir);
       isBuild = config.command === 'build';
+      const b = config.base ?? '/';
+      basePath = b.endsWith('/') ? b.slice(0, -1) : b;
     },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const url = req.url || '';
+        // Strip base prefix so path checks work regardless of base setting
+        const raw = req.url || '';
+        const url = basePath && raw.startsWith(basePath) ? raw.slice(basePath.length) : raw;
 
-        // API: list sample tree (dev only — production uses static samples.json)
-        if (url === '/api/samples' || url === '/samples.json') {
-          const publicSamples = path.join(publicDir, 'samples');
+        // Serve sample tree JSON — only from root samples/ folder
+        if (url === '/samples.json' || url === '/api/samples') {
           const rootSamples = path.join(rootDir, 'samples');
-
-          const publicTree = readSampleDir(publicSamples, 'samples');
-          const rootTree = readSampleDir(rootSamples, 'samples');
-          const merged = mergeTrees(publicTree, rootTree);
-
+          const tree = readSampleDir(rootSamples, 'samples');
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify(merged));
+          res.end(JSON.stringify(tree));
           return;
         }
 
-        // Serve sample files from root /samples/ dir (public/ is already handled by Vite)
+        // Serve individual sample files from root samples/
         if (url.startsWith('/samples/')) {
-          const decodedPath = decodeURIComponent(url);
-          const relativePath = decodedPath.slice('/samples/'.length);
-          // Try root samples dir first (for sample packs not in public/)
-          const rootFile = path.join(rootDir, 'samples', relativePath);
-          if (fs.existsSync(rootFile) && fs.statSync(rootFile).isFile()) {
-            const ext = path.extname(rootFile).toLowerCase();
+          const relativePath = decodeURIComponent(url.slice('/samples/'.length));
+          const file = path.join(rootDir, 'samples', relativePath);
+          if (fs.existsSync(file) && fs.statSync(file).isFile()) {
+            const ext = path.extname(file).toLowerCase();
             const mime = MIME_TYPES[ext];
             if (mime) {
               res.setHeader('Content-Type', mime);
               res.setHeader('Cache-Control', 'public, max-age=31536000');
-              fs.createReadStream(rootFile).pipe(res);
+              fs.createReadStream(file).pipe(res);
               return;
             }
           }
@@ -133,22 +110,18 @@ export function sampleListPlugin(): Plugin {
       });
     },
     generateBundle() {
-      const publicSamples = path.join(publicDir, 'samples');
+      // Emit samples.json from root samples/ only (no public/samples/ merge)
       const rootSamples = path.join(rootDir, 'samples');
-
-      const publicTree = readSampleDir(publicSamples, 'samples');
-      const rootTree = readSampleDir(rootSamples, 'samples');
-      const merged = mergeTrees(publicTree, rootTree);
-
+      const tree = readSampleDir(rootSamples, 'samples');
       this.emitFile({
         type: 'asset',
         fileName: 'samples.json',
-        source: JSON.stringify(merged),
+        source: JSON.stringify(tree),
       });
     },
     closeBundle() {
       if (!isBuild) return;
-      // Copy root samples/ dir into dist/samples/ (public/samples/ is already copied by Vite)
+      // Copy root samples/ into dist/samples/
       const rootSamples = path.join(rootDir, 'samples');
       const distSamples = path.join(outDir, 'samples');
       copyDirSync(rootSamples, distSamples);

@@ -3,11 +3,16 @@ import { useStore } from '../../state/store';
 import { KnobCanvas } from './KnobCanvas';
 
 
+// Slider maps left→right to small→large cards: 120px – 480px
+const MIN_CARD = 120;
+const MAX_CARD = 480;
+
 export function KnobGrid() {
   const instruments = useStore((s) => s.instruments);
   const snapEnabled = useStore((s) => s.snapEnabled);
-  const [sliderVal, setSliderVal] = useState(1);
-  const cols = 13 - sliderVal; // left=1→12 cols (small), right=12→1 col (big)
+  // sliderVal: 1 (left = small cards) … 12 (right = big cards)
+  const [sliderVal, setSliderVal] = useState(4);
+  const cardMinWidth = Math.round(MIN_CARD + (sliderVal - 1) * (MAX_CARD - MIN_CARD) / 11);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -23,11 +28,17 @@ export function KnobGrid() {
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  const selectInstrument = useStore((s) => s.selectInstrument);
+
   return (
-    <div ref={containerRef} className="relative w-full h-full overflow-auto" style={{ padding: 50 }}>
-      {/* Columns slider */}
-      <div className="absolute top-3 left-3 flex items-center gap-2 z-20">
-        <span className="text-[9px] text-text-secondary/50 leading-none">{cols}</span>
+    <div
+      ref={containerRef}
+      className="relative w-full h-full overflow-auto"
+      style={{ padding: 50 }}
+      onClick={() => selectInstrument(null)}
+    >
+      {/* Card-size slider */}
+      <div className="absolute top-3 left-3 flex items-center z-20">
         <input
           type="range"
           min={1}
@@ -52,7 +63,7 @@ export function KnobGrid() {
 
       <div
         className="grid gap-4"
-        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardMinWidth}px, 1fr))` }}
       >
         {instruments.map((inst) => (
           <KnobCanvas key={inst.id} instrumentId={inst.id} />

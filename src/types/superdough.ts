@@ -34,6 +34,7 @@ export interface SuperdoughSamplerParams {
   cutoff: number;    // Hz
   resonance: number; // 0–50
   pan: number;       // -1 to 1
+  rootNote: number;  // MIDI root note (default 60 = C4); affects pitch mapping
 }
 
 export const DEFAULT_SYNTH_PARAMS: SuperdoughSynthParams = {
@@ -64,4 +65,5 @@ export const DEFAULT_SAMPLER_PARAMS: SuperdoughSamplerParams = {
   cutoff: 20000,
   resonance: 0,
   pan: 0,
+  rootNote: 60,
 };

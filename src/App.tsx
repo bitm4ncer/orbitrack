@@ -4,6 +4,7 @@ import { InstrumentRack } from './components/InstrumentRack/InstrumentRack';
 import { GridSequencer } from './components/GridSequencer/GridSequencer';
 import { SynthPanel } from './components/SynthPanel/SynthPanel';
 import { SampleBank } from './components/SampleBank/SampleBank';
+import { EffectsSidebar } from './components/EffectsSidebar/EffectsSidebar';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useResizable } from './hooks/useResizable';
 import { useStore } from './state/store';
@@ -19,55 +20,72 @@ function App() {
   const isSamplerSelected = selectedInstrument?.type === 'sampler';
   const hasSelection = !!selectedInstrument;
 
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const DEFAULT_BOTTOM_H = 24 * 20 + 33; // 513px — 2 octaves + toolbar
+  const [layerSidebarOpen, setLayerSidebarOpen] = useState(true);
+  const [fxSidebarOpen, setFxSidebarOpen] = useState(true);
+  const DEFAULT_BOTTOM_H = 24 * 20 + 33;
   const { height: bottomHeight, onMouseDown: onResizeMouseDown } = useResizable(DEFAULT_BOTTOM_H);
 
   useEffect(() => {
     const startAudio = async () => {
       await Tone.start();
-      console.log('Audio context started');
       window.removeEventListener('mousedown', startAudio);
     };
     window.addEventListener('mousedown', startAudio);
-    return () => {
-      window.removeEventListener('mousedown', startAudio);
-    };
+    return () => window.removeEventListener('mousedown', startAudio);
   }, []);
 
   return (
     <div className="app-root flex flex-col h-full bg-bg">
-      {/* Main area: orbits + sidebar */}
-      <div className="app-main flex flex-1 min-h-0">
+      {/* Main area */}
+      <div className="app-main flex flex-1 min-h-0 overflow-hidden">
+
         {/* Orbit visualization */}
         <div className="orbit-viewport flex-1 relative overflow-hidden min-h-0">
           <KnobGrid />
         </div>
 
-        {/* Sidebar toggle tab */}
+        {/* Layers toggle tab */}
         <button
           className="flex items-center justify-center w-4 shrink-0 bg-bg-secondary border-l border-border hover:bg-white/5 transition-colors cursor-pointer"
-          onClick={() => setSidebarOpen((o) => !o)}
-          title={sidebarOpen ? 'Hide layers' : 'Show layers'}
+          onClick={() => setLayerSidebarOpen((o) => !o)}
+          title={layerSidebarOpen ? 'Hide layers' : 'Show layers'}
         >
           <span className="text-text-secondary text-[10px] leading-none">
-            {sidebarOpen ? '›' : '‹'}
+            {layerSidebarOpen ? '›' : '‹'}
           </span>
         </button>
 
-        {/* Right sidebar: layers */}
+        {/* Layers sidebar */}
         <div
           className="overflow-hidden transition-all duration-300 shrink-0 h-full"
-          style={{ width: sidebarOpen ? 300 : 0 }}
+          style={{ width: layerSidebarOpen ? 300 : 0 }}
         >
           <InstrumentRack />
         </div>
+
+        {/* FX toggle tab */}
+        <button
+          className="flex items-center justify-center w-4 shrink-0 bg-bg-secondary border-l border-border hover:bg-white/5 transition-colors cursor-pointer"
+          onClick={() => setFxSidebarOpen((o) => !o)}
+          title={fxSidebarOpen ? 'Hide FX' : 'Show FX'}
+        >
+          <span className="text-text-secondary text-[10px] leading-none">
+            {fxSidebarOpen ? '›' : '‹'}
+          </span>
+        </button>
+
+        {/* FX Chain sidebar */}
+        <div
+          className="overflow-hidden transition-all duration-300 shrink-0 h-full"
+          style={{ width: fxSidebarOpen ? 280 : 0 }}
+        >
+          <EffectsSidebar />
+        </div>
       </div>
 
-      {/* Grid sequencer + synth panel (shown when instrument selected) */}
+      {/* Grid sequencer + instrument panel */}
       {hasSelection && (
         <>
-          {/* Drag handle */}
           <div
             className="resize-handle h-1.5 cursor-ns-resize border-t border-border flex items-center justify-center group shrink-0 hover:bg-accent/10 transition-colors"
             onMouseDown={onResizeMouseDown}
@@ -85,7 +103,6 @@ function App() {
         </>
       )}
 
-      {/* Transport bar */}
       <TransportBar />
     </div>
   );

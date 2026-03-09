@@ -127,6 +127,7 @@ export function KnobCanvas({ instrumentId }: Props) {
   return (
     <div
       ref={cellRef}
+      onClick={(e) => e.stopPropagation()}
       className={`knob-cell relative flex flex-col items-center gap-1 p-2 rounded-lg select-none
                   ${isSelected ? 'ring-1 ring-white/20 bg-white/5' : 'hover:bg-white/[0.02]'}`}
       style={{ border: `1px solid ${inst.color}22` }}

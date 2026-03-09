@@ -35,6 +35,7 @@ export function InstrumentRack() {
       muted: false,
       solo: false,
       volume: 0,
+      orbitIndex: store.instruments.length,
     };
     store.setInstruments([...store.instruments, newInst]);
     store.selectInstrument(newInst.id);
@@ -57,6 +58,7 @@ export function InstrumentRack() {
       muted: false,
       solo: false,
       volume: 0,
+      orbitIndex: store.instruments.length,
     };
     useStore.setState({
       instruments: [...store.instruments, newInst],
