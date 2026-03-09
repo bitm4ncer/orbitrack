@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0a0a0f;
+  --color-bg-secondary: #12121a;
+  --color-bg-tertiary: #1a1a25;
+  --color-text-primary: #e8e8ed;
+  --color-text-secondary: #8888a0;
+  --color-border: #2a2a3a;
+  --color-accent: #6366f1;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+/* Custom instrument sliders with per-instrument color */
+.inst-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.inst-slider::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-border);
+}
+
+.inst-slider::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-border);
+}
+
+.inst-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--slider-color, var(--color-accent));
+  margin-top: -2.5px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 0 0 0 transparent;
+}
+
+.inst-slider::-moz-range-thumb {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--slider-color, var(--color-accent));
+  border: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 0 0 0 transparent;
+}
+
+.inst-slider:active::-webkit-slider-thumb {
+  transform: scale(1.6);
+  box-shadow: 0 0 6px var(--slider-color, var(--color-accent));
+}
+
+.inst-slider:active::-moz-range-thumb {
+  transform: scale(1.6);
+  box-shadow: 0 0 6px var(--slider-color, var(--color-accent));
+}

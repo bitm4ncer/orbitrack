@@ -1,0 +1,37 @@
+export interface SynthParams {
+  masterVolume: number;
+  gainAttack: number;
+  gainDecay: number;
+  gainSustain: number;
+  gainRelease: number;
+  vcoType: OscillatorType;
+  vcoGain: number;
+  vcoPan: number;
+  sub1Type: OscillatorType;
+  sub1Offset: number;
+  sub1Pan: number;
+  sub1Gain: number;
+  sub2Type: OscillatorType;
+  sub2Offset: number;
+  sub2Pan: number;
+  sub2Gain: number;
+  delayTime: number;
+  delayFeedback: number;
+  delayTone: number;
+  delayAmount: number;
+  filterType: BiquadFilterType;
+  filterFreq: number;
+  filterQ: number;
+  filterAttack: number;
+  filterDecay: number;
+  filterEnvAmount: number;
+  reverbType: string;
+  reverbAmount: number;
+  portamentoSpeed: number;
+  distortionDist: number;
+  distortionAmount: number;
+  vibratoDepth: number;
+  vibratoRate: number;
+  bitCrushDepth: number;
+  bitCrushAmount: number;
+}
