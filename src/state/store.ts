@@ -156,6 +156,8 @@ export interface StoreState {
   // Per-instrument progress (0-1) for polyrhythm
   instrumentProgress: Record<string, number>;
   setInstrumentProgress: (progress: Record<string, number>) => void;
+  // Batched UI update — single set() call instead of three separate dispatches
+  setPlaybackUI: (progress: number, currentStep: number, instProgress: Record<string, number>) => void;
   setLoopSize: (id: string, size: number) => void;
 
   // Snap to 16th note grid
@@ -265,14 +267,19 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       const inst = s.instruments.find((i) => i.id === id);
       if (!inst) return s;
-      const newInstruments = s.instruments.map((i) =>
-        i.id === id
-          ? { ...i, hits, hitPositions: generateEvenHits(hits) }
-          : i
-      );
-      const grid = { ...s.gridNotes };
-      grid[id] = Array.from({ length: hits }, () => [60]);
-      return { instruments: newInstruments, gridNotes: grid };
+      const defaultNote = inst.type === 'sampler' ? (inst.samplerParams?.rootNote ?? 60) : 60;
+      // Preserve existing notes as persistent memory; only initialize genuinely new slots
+      const existingNotes = s.gridNotes[id] || [];
+      const newNotes = [...existingNotes];
+      for (let i = existingNotes.length; i < hits; i++) {
+        newNotes[i] = [defaultNote];
+      }
+      return {
+        instruments: s.instruments.map((i) =>
+          i.id === id ? { ...i, hits, hitPositions: generateEvenHits(hits) } : i
+        ),
+        gridNotes: { ...s.gridNotes, [id]: newNotes },
+      };
     }),
 
   setHitPosition: (id, hitIndex, position) =>
@@ -311,10 +318,12 @@ export const useStore = create<StoreState>((set, get) => ({
       };
     }),
 
-  addSamplerHit: (id, position, midiNote = 60) =>
+  addSamplerHit: (id, position, midiNote?: number) =>
     set((s) => {
       const inst = s.instruments.find((i) => i.id === id);
       if (!inst) return s;
+      // Use caller-supplied note, or fall back to the sample's root note
+      const note = midiNote ?? inst.samplerParams?.rootNote ?? 60;
       const norm = ((position % 1) + 1) % 1;
       const final = s.snapEnabled ? snapToGrid(norm, inst.loopSize) : norm;
       // Guard: don't add if a hit already exists at this step
@@ -326,7 +335,7 @@ export const useStore = create<StoreState>((set, get) => ({
       const grid = { ...s.gridNotes };
       if (!grid[id]) grid[id] = [];
       grid[id] = [...grid[id]];
-      grid[id][newIndex] = [midiNote];
+      grid[id][newIndex] = [note];
       return {
         instruments: s.instruments.map((i) => {
           if (i.id !== id) return i;
@@ -583,6 +592,8 @@ export const useStore = create<StoreState>((set, get) => ({
     }),
 
   setInstrumentProgress: (instrumentProgress) => set({ instrumentProgress }),
+  setPlaybackUI: (transportProgress, currentStep, instrumentProgress) =>
+    set({ transportProgress, currentStep, instrumentProgress }),
 
   setLoopSize: (id, size) =>
     set((s) => {
@@ -594,6 +605,12 @@ export const useStore = create<StoreState>((set, get) => ({
       let gridUpdate: Partial<Pick<StoreState, 'gridNotes' | 'gridGlide' | 'gridLengths'>> = {};
 
       if (inst.type === 'synth') {
+        // Preserve existing notes as persistent memory; only initialize genuinely new step slots
+        const existingNotes = s.gridNotes[id] || [];
+        const newNotes = [...existingNotes];
+        for (let i = existingNotes.length; i < newLoopSize; i++) {
+          newNotes[i] = [60];
+        }
         newInstruments = s.instruments.map((i) =>
           i.id !== id ? i : {
             ...i,
@@ -603,9 +620,9 @@ export const useStore = create<StoreState>((set, get) => ({
           }
         );
         gridUpdate = {
-          gridNotes: { ...s.gridNotes, [id]: Array.from({ length: newLoopSize }, () => [60]) },
-          gridGlide: { ...s.gridGlide, [id]: [] },
-          gridLengths: { ...s.gridLengths, [id]: [] },
+          gridNotes: { ...s.gridNotes, [id]: newNotes },
+          gridGlide: { ...s.gridGlide, [id]: s.gridGlide[id] || [] },
+          gridLengths: { ...s.gridLengths, [id]: s.gridLengths[id] || [] },
         };
       } else {
         const newHits = Math.min(inst.hits, newLoopSize);
@@ -650,7 +667,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({
       instruments: s.instruments.map((inst) =>
         inst.id === instrumentId
-          ? { ...inst, sampleName: sdKey, name: displayName }
+          ? { ...inst, sampleName: sdKey, samplePath: samplePath, name: displayName }
           : inst
       ),
     }));

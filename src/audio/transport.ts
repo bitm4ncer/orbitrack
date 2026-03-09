@@ -5,6 +5,34 @@ import { triggerSuperdough } from './superdoughAdapter';
 let schedulerId: number | null = null;
 let lastTriggered: Map<string, Set<number>> = new Map();
 
+// Position buffer — written by the audio tick (zero React involvement),
+// read by the rAF sync loop which gates UI updates to ~60 fps.
+const _pos = {
+  progress: 0,
+  currentStep: 0,
+  instProgress: {} as Record<string, number>,
+  dirty: false,
+};
+let _rafId: number | null = null;
+
+function startUISync(): void {
+  function sync(): void {
+    if (_pos.dirty) {
+      _pos.dirty = false;
+      useStore.getState().setPlaybackUI(_pos.progress, _pos.currentStep, _pos.instProgress);
+    }
+    _rafId = requestAnimationFrame(sync);
+  }
+  _rafId = requestAnimationFrame(sync);
+}
+
+function stopUISync(): void {
+  if (_rafId !== null) {
+    cancelAnimationFrame(_rafId);
+    _rafId = null;
+  }
+}
+
 export function startTransport(): void {
   const transport = Tone.getTransport();
   const state = useStore.getState();
@@ -23,10 +51,12 @@ export function startTransport(): void {
 
   transport.start();
   useStore.getState().setPlaying(true);
+  startUISync();
 }
 
 export function stopTransport(): void {
   const transport = Tone.getTransport();
+  stopUISync();
   transport.stop();
   transport.position = 0;
   lastTriggered.clear();
@@ -69,9 +99,6 @@ function tick(time: number): void {
   const progress = (totalSteps32 % maxLoopSize) / maxLoopSize;
   const currentStep = globalStep % maxLoopSize;
 
-  state.setTransportProgress(progress);
-  state.setCurrentStep(currentStep);
-
   // Per-instrument progress
   const instProgress: Record<string, number> = {};
 
@@ -84,8 +111,8 @@ function tick(time: number): void {
     // Per-instrument progress (0-1) within its own loop
     instProgress[instrument.id] = (totalSteps32 % loopSize) / loopSize;
 
-    if (instrument.muted) continue;
     if (anySolo && !instrument.solo) continue;
+    if (instrument.muted && !instrument.solo) continue;
 
     const { hitPositions, hits } = instrument;
     if (hits === 0 || hitPositions.length === 0) continue;
@@ -119,5 +146,10 @@ function tick(time: number): void {
     }
   }
 
-  state.setInstrumentProgress(instProgress);
+  // Write position to buffer — the rAF loop will flush to Zustand at ~60 fps.
+  // No Zustand calls here keeps the audio scheduling callback free of React work.
+  _pos.progress = progress;
+  _pos.currentStep = currentStep;
+  _pos.instProgress = instProgress;
+  _pos.dirty = true;
 }

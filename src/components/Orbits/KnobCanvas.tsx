@@ -101,7 +101,7 @@ export function KnobCanvas({ instrumentId }: Props) {
         const newVol = Math.max(-20, Math.min(6, inst.volume + delta));
         store.updateInstrument(instrumentId, { volume: newVol });
       } else {
-        const newHits = Math.max(1, Math.min(inst.loopSize, inst.hits + delta));
+        const newHits = Math.max(0, Math.min(inst.loopSize, inst.hits + delta));
         store.setHitCount(instrumentId, newHits);
       }
     };

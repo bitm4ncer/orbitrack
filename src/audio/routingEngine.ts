@@ -1,22 +1,53 @@
 /**
  * Routing Engine
  *
- * Intercepts superdough's master gainNode output and routes it through
- * a master gain (for volume control) + master analyser (for VUMeter).
+ * Superdough's internal audio chain:
+ *   orbit.output → StereoPanner → ChannelSplitter → channelMerger
+ *                                                         ↓
+ *                                                  destinationGain  ← THIS is the real master GainNode
+ *                                                         ↓
+ *                                                    ctx.destination
  *
- * Per-instrument effects are handled by superdoughAdapter via superdough
- * native parameters (room, delay, distortion, cutoff, etc.).
+ * destinationGain lives at: getSuperdoughAudioController().output.destinationGain
+ * (the .output property on the controller is the AudioController class, not an orbit)
  *
- * Architecture:
- *   [superdough gainNode] → [masterGain] → [masterAnalyser] → destination
+ * We tap destinationGain as a side-connection to masterAnalyser (leaf node).
+ * We set destinationGain.gain.value for master volume control.
+ * No audio path interception, no disconnecting anything.
  */
 
-import { gainNode as superdoughGainNode, getAudioContext } from 'superdough';
+import { getAudioContext, getSuperdoughAudioController } from 'superdough';
 import { useStore } from '../state/store';
 
-let masterGain: GainNode | null = null;
 let masterAnalyser: AnalyserNode | null = null;
 let initialized = false;
+let destinationGainTapped = false;
+
+function getDestinationGain(): GainNode | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return ((getSuperdoughAudioController() as any).output as any).destinationGain as GainNode ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function applyVolume(vol: number): void {
+  const dg = getDestinationGain();
+  if (dg) dg.gain.value = vol;
+}
+
+function tryTapDestinationGain(): void {
+  if (destinationGainTapped || !masterAnalyser) return;
+  const dg = getDestinationGain();
+  if (!dg) return;
+  try {
+    dg.connect(masterAnalyser); // side-tap: dg still outputs to ctx.destination normally
+    destinationGainTapped = true;
+  } catch {
+    // Retry next frame
+  }
+}
 
 export function initRoutingEngine(): void {
   if (initialized) return;
@@ -24,40 +55,23 @@ export function initRoutingEngine(): void {
 
   const ctx = getAudioContext();
 
-  const gain = ctx.createGain();
+  // Metering-only analyser — leaf node, never connected to destination
   const analyser = ctx.createAnalyser();
-  analyser.fftSize = 1024;
-  analyser.smoothingTimeConstant = 0.8;
-
-  gain.connect(analyser);
-  analyser.connect(ctx.destination);
-
-  masterGain = gain;
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.3;
   masterAnalyser = analyser;
 
-  // Route superdough output through our master chain
-  try {
-    const sdGain = superdoughGainNode as GainNode;
-    sdGain.disconnect();
-    sdGain.connect(gain);
-  } catch {
-    const sdGain = superdoughGainNode as GainNode;
-    sdGain.connect(gain);
-  }
+  applyVolume(useStore.getState().masterVolume);
+  useStore.subscribe((state) => applyVolume(state.masterVolume));
 
-  // Apply initial master volume
-  gain.gain.value = useStore.getState().masterVolume;
-
-  // Keep master volume in sync
-  useStore.subscribe((state) => {
-    if (masterGain) masterGain.gain.value = state.masterVolume;
-  });
+  tryTapDestinationGain();
 }
 
 export function getMasterAnalyser(): AnalyserNode | null {
+  tryTapDestinationGain(); // retry each frame until tapped
   return masterAnalyser;
 }
 
 export function getMasterGain(): GainNode | null {
-  return masterGain;
+  return getDestinationGain();
 }

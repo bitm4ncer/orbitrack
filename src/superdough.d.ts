@@ -5,4 +5,9 @@ declare module 'superdough' {
   export const gainNode: AudioNode;
   export function getAudioContext(): AudioContext;
   export function setAudioContext(ctx: AudioContext): AudioContext;
+  export function loadWorklets(): Promise<void>;
+  export function getSuperdoughAudioController(): {
+    getOrbit(index: number, channels?: number[]): { output: GainNode; summingNode: GainNode };
+    nodes: Record<number, { output: GainNode; summingNode: GainNode }>;
+  };
 }

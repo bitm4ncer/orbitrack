@@ -210,7 +210,7 @@ export function InstrumentRack() {
               <span className="text-[9px] text-text-secondary w-6">hits</span>
               <input
                 type="range"
-                min={1}
+                min={0}
                 max={64}
                 value={inst.hits}
                 onClick={(e) => e.stopPropagation()}

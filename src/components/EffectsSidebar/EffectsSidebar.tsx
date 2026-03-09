@@ -57,12 +57,10 @@ export function EffectsSidebar() {
       )}
 
       {/* Master section */}
-      <div className="border-t border-border shrink-0 mx-3 my-3 rounded" style={{ border: '1px solid #94a3b8', padding: 14 }}>
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-[11px] text-text-primary flex-1">Master</span>
-          <VUMeter />
-        </div>
-        <div className="flex items-center gap-1.5">
+      <div className="shrink-0 border-t border-border" style={{ padding: 20 }}>
+        <span className="text-[11px] text-text-primary block mb-2">Master</span>
+        <VUMeter />
+        <div className="flex items-center gap-1.5 mt-3">
           <span className="text-[9px] text-text-secondary w-6">vol</span>
           <input
             type="range"

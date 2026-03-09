@@ -2,6 +2,7 @@ import { superdough } from 'superdough';
 import type { Instrument } from '../types/instrument';
 import type { StoreState } from '../state/store';
 import { DEFAULT_SYNTH_PARAMS, DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
+import { applyOrbitToneEffects } from './orbitEffects';
 
 function dbToLinear(db: number): number {
   return Math.pow(10, db / 20);
@@ -10,7 +11,7 @@ function dbToLinear(db: number): number {
 /**
  * Computes superdough effect parameter overrides from the instrument's own
  * effect chain (instrumentEffects[instrument.id]), applied in order.
- * Only superdough-native params are mapped here (room, delay, distortion, cutoff).
+ * Only superdough-native params are mapped here (room/roomsize, delay, distort, cutoff).
  */
 function getEffectOverrides(
   instrument: Instrument,
@@ -24,7 +25,7 @@ function getEffectOverrides(
     switch (effect.type) {
       case 'reverb':
         overrides.room = effect.params.amount ?? 0;
-        overrides.size = effect.params.size ?? 0.5;
+        overrides.roomsize = effect.params.size ?? 0.5;
         break;
       case 'delay':
         overrides.delay = effect.params.amount ?? 0;
@@ -32,13 +33,27 @@ function getEffectOverrides(
         overrides.delayfeedback = effect.params.feedback ?? 0.4;
         break;
       case 'distortion':
-        overrides.distortion = effect.params.drive ?? 0;
+        overrides.distort = effect.params.drive ?? 0;
         break;
       case 'filter':
         overrides.cutoff = effect.params.frequency ?? 20000;
         overrides.resonance = effect.params.q ?? 0;
         break;
-      // eq3, compressor, chorus, phaser: superdough has no native equivalent
+      case 'compressor':
+        // superdough native: compressor = threshold; triggers the compressor node
+        overrides.compressor = effect.params.threshold ?? -24;
+        overrides.compressorRatio = effect.params.ratio ?? 4;
+        overrides.compressorKnee = effect.params.knee ?? 6;
+        overrides.compressorAttack = effect.params.attack ?? 0.003;
+        overrides.compressorRelease = effect.params.release ?? 0.25;
+        break;
+      case 'phaser':
+        overrides.phaserrate = effect.params.rate ?? 0.5;
+        overrides.phaserdepth = effect.params.depth ?? 0.7;
+        overrides.phasercenter = effect.params.baseFreq ?? 1000;
+        overrides.phasersweep = effect.params.depth ?? 0.7;
+        break;
+      // eq3, chorus: superdough has no native equivalent
     }
   }
 
@@ -54,7 +69,11 @@ export function triggerSuperdough(
   state: StoreState,
 ): void {
   const instGain = dbToLinear(instrument.volume);
+  const effects = state.instrumentEffects[instrument.id] ?? [];
   const effectOverrides = getEffectOverrides(instrument, state);
+
+  // Apply EQ3 and Chorus via per-orbit Web Audio intercept (not natively in superdough)
+  applyOrbitToneEffects(instrument.orbitIndex, effects);
 
   if (instrument.type === 'synth') {
     const sp = instrument.synthParams ?? DEFAULT_SYNTH_PARAMS;
@@ -74,8 +93,8 @@ export function triggerSuperdough(
       delaytime: sp.delaytime,
       delayfeedback: sp.delayfeedback,
       room: sp.room,
-      size: sp.size,
-      distortion: sp.distortion,
+      roomsize: sp.size,
+      distort: sp.distortion,
       orbit: instrument.orbitIndex,
       ...(glide ? { portamento: 0.05 } : {}),
       ...effectOverrides,

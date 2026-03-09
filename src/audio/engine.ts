@@ -1,5 +1,6 @@
 import * as Tone from 'tone';
-import { samples, loadBuffer, getAudioContext as getSdAudioContext, setAudioContext } from 'superdough';
+import { samples, loadBuffer, getAudioContext as getSdAudioContext, setAudioContext, loadWorklets } from 'superdough';
+import { initRoutingEngine } from './routingEngine';
 
 let initialized = false;
 
@@ -28,6 +29,18 @@ export async function initAudio(): Promise<void> {
   const nativeCtx = (Tone.context.rawContext as unknown as { _nativeContext: AudioContext })._nativeContext;
   if (nativeCtx) setAudioContext(nativeCtx);
 
+  // Increase lookahead from default ~100ms to 200ms so brief main-thread
+  // blocks (heavy React renders, scrolling) don't cause audio dropouts.
+  Tone.getContext().lookAhead = 0.2;
+
+  // Load superdough's AudioWorklet processors (needed for distort, crush, etc.)
+  // This also causes superdough to fully initialize its internal gainNode.
+  try {
+    await loadWorklets();
+  } catch (e) {
+    console.warn('[engine] superdough worklets failed to load:', e);
+  }
+
   // Pre-decode all default samples into superdough's buffer cache so the
   // first note plays immediately without a loading delay.
   const base = window.location.origin + import.meta.env.BASE_URL;
@@ -35,6 +48,12 @@ export async function initAudio(): Promise<void> {
   await Promise.all(
     DEFAULT_SAMPLES.map((name) => loadBuffer(`${base}samples/${name}.wav`, ac, name, 0))
   );
+
+  // Wire superdough output → masterGain → masterAnalyser → destination.
+  // Called after loadWorklets() so superdough's gainNode is guaranteed to exist.
+  // getMasterAnalyser() also retries lazily on each VU meter frame as a fallback.
+  initRoutingEngine();
+
   initialized = true;
 }
 

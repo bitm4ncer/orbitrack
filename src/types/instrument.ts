@@ -4,7 +4,8 @@ export interface Instrument {
   id: string;
   name: string;
   type: 'sampler' | 'synth';
-  sampleName?: string;
+  sampleName?: string;   // superdough sound key (sanitized filename, e.g. 'clap')
+  samplePath?: string;   // original file path for waveform display (e.g. 'Folder/clap.wav')
   color: string;
   hits: number;
   hitPositions: number[]; // normalized [0..1) angular positions
