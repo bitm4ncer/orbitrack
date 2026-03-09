@@ -4,5 +4,6 @@ import tailwindcss from '@tailwindcss/vite'
 import { sampleListPlugin } from './src/vite-plugins/sampleListPlugin'
 
 export default defineConfig({
+  base: '/Orbeat/',
   plugins: [react(), tailwindcss(), sampleListPlugin()],
 })
