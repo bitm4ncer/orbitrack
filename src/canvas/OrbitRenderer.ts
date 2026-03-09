@@ -88,6 +88,7 @@ export class OrbitRenderer {
     const rect = this.canvas.getBoundingClientRect();
     const w = rect.width;
     const h = rect.height;
+    if (w <= 0 || h <= 0) return;
     const state = useStore.getState();
     const { instruments, isPlaying, spinMode, bpm } = state;
 

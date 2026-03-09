@@ -80,8 +80,10 @@ export class KnobRenderer {
     const rect = this.canvas.getBoundingClientRect();
     const w = rect.width;
     const h = rect.height;
+    if (w <= 0 || h <= 0) return;
     const ctx = this.ctx;
     const { cx, cy, radius } = this.getLayout();
+    if (radius <= 0) return;
 
     ctx.clearRect(0, 0, w, h);
 
