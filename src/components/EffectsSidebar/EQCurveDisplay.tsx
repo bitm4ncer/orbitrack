@@ -29,12 +29,13 @@ interface EQCurveDisplayProps {
   highGain: number;
   lowFreq: number;
   midFreq: number;
+  midQ: number;
   highFreq: number;
   color: string;
 }
 
 export function EQCurveDisplay({
-  lowGain, midGain, highGain, lowFreq, midFreq, highFreq, color,
+  lowGain, midGain, highGain, lowFreq, midFreq, midQ, highFreq, color,
 }: EQCurveDisplayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -74,7 +75,7 @@ export function EQCurveDisplay({
       const fMid = ac.createBiquadFilter();
       fMid.type = 'peaking';
       fMid.frequency.value = midFreq;
-      fMid.Q.value = 1;
+      fMid.Q.value = midQ;
       fMid.gain.value = midGain;
       fMid.getFrequencyResponse(FREQS, magMid, phase);
 
@@ -165,7 +166,7 @@ export function EQCurveDisplay({
       }
     }
 
-  }, [lowGain, midGain, highGain, lowFreq, midFreq, highFreq, color]);
+  }, [lowGain, midGain, highGain, lowFreq, midFreq, midQ, highFreq, color]);
 
   return (
     <div ref={containerRef} className="w-full rounded overflow-hidden" style={{ height: H }}>

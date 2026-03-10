@@ -92,7 +92,7 @@ const defaultInstruments: Instrument[] = (() => {
       hitPositions: generateEvenHits(clapHits),
       loopSize: 16,
       loopSizeLocked: false,
-      muted: false,
+      muted: true,
       solo: false,
       volume: -2,
       orbitIndex: orbitCounter++,

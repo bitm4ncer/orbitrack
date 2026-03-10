@@ -79,7 +79,7 @@ export function TransportBar() {
   };
 
   return (
-    <div className="transport-bar relative flex items-center gap-6 bg-bg-secondary" style={{ padding: 40 }}>
+    <div className="transport-bar relative flex items-center gap-6 bg-bg-secondary border-t border-border" style={{ padding: 40 }}>
       <div className="transport-logo flex items-center gap-3">
         <img src={orbeatLogo} alt="ORBEAT" className="h-6" />
       </div>

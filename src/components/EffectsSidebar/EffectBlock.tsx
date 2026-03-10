@@ -3,6 +3,7 @@ import type { Effect } from '../../types/effects';
 import { EFFECT_PARAM_DEFS } from '../../audio/effectParams';
 import { EffectKnob } from './EffectKnob';
 import { EQCurveDisplay } from './EQCurveDisplay';
+import { FilterCurveDisplay } from './FilterCurveDisplay';
 
 export const EFFECT_COLORS: Record<string, string> = {
   eq3:         '#BAF2FF',
@@ -49,13 +50,39 @@ function knobFor(
   );
 }
 
+// Shared discrete button row (filter type, distortion type, phaser stages)
+function TypeButtons({
+  labels, value, color, onChange,
+}: { labels: string[]; value: number; color: string; onChange: (i: number) => void }) {
+  return (
+    <>
+      {labels.map((label, i) => (
+        <button
+          key={i}
+          onClick={() => onChange(i)}
+          className="fx-stages-btn"
+          style={{
+            background: value === i ? `${color}28` : 'transparent',
+            border: `1px solid ${value === i ? color : '#2a2a3a'}`,
+            color: value === i ? color : '#8888a0',
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </>
+  );
+}
+
+// ── EQ3 — 3-band parametric with adjustable mid Q ─────────────────────────
+
 function EQ3Body({ effect, color, onChange }: BodyProps) {
   const p = effect.params;
   return (
     <div className="flex flex-col gap-2">
       <EQCurveDisplay
         lowGain={p.low ?? 0} midGain={p.mid ?? 0} highGain={p.high ?? 0}
-        lowFreq={p.lowFreq ?? 200} midFreq={p.midFreq ?? 1000} highFreq={p.highFreq ?? 4000}
+        lowFreq={p.lowFreq ?? 200} midFreq={p.midFreq ?? 1000} midQ={p.midQ ?? 1} highFreq={p.highFreq ?? 4000}
         color={color}
       />
       <div className="flex justify-around pt-1">
@@ -66,11 +93,14 @@ function EQ3Body({ effect, color, onChange }: BodyProps) {
       <div className="flex justify-around">
         {knobFor(effect, 'lowFreq',  color, onChange, 'sm')}
         {knobFor(effect, 'midFreq',  color, onChange, 'sm')}
+        {knobFor(effect, 'midQ',     color, onChange, 'sm')}
         {knobFor(effect, 'highFreq', color, onChange, 'sm')}
       </div>
     </div>
   );
 }
+
+// ── Compressor ─────────────────────────────────────────────────────────────
 
 function CompressorBody({ effect, color, onChange }: BodyProps) {
   const defs    = EFFECT_PARAM_DEFS.compressor;
@@ -79,7 +109,7 @@ function CompressorBody({ effect, color, onChange }: BodyProps) {
   const threshT = (thresh - thDef.min) / (thDef.max - thDef.min);
   return (
     <div className="flex flex-col gap-3">
-      {/* Threshold — horizontal slider (dB range is clearer linearly) */}
+      {/* Threshold — horizontal slider */}
       <div className="flex flex-col gap-1">
         <div className="flex justify-between">
           <span className="fx-param-label">Threshold</span>
@@ -113,40 +143,65 @@ function CompressorBody({ effect, color, onChange }: BodyProps) {
   );
 }
 
+// ── Reverb — Schroeder comb-filter reverb with pre-delay and damping ───────
+
 function ReverbBody({ effect, color, onChange }: BodyProps) {
   return (
-    <div className="flex justify-around">
-      {knobFor(effect, 'amount', color, onChange, 'lg')}
-      {knobFor(effect, 'size',   color, onChange, 'md')}
-      {knobFor(effect, 'fade',   color, onChange, 'md')}
+    <div className="flex flex-col gap-2">
+      <div className="flex justify-around">
+        {knobFor(effect, 'amount',   color, onChange, 'lg')}
+        {knobFor(effect, 'predelay', color, onChange, 'md')}
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'size', color, onChange, 'md')}
+        {knobFor(effect, 'damp', color, onChange, 'md')}
+      </div>
     </div>
   );
 }
+
+// ── Delay — feedback delay with hi-cut filter (tape character) ─────────────
 
 function DelayBody({ effect, color, onChange }: BodyProps) {
   return (
-    <div className="flex justify-around">
-      {knobFor(effect, 'time',     color, onChange, 'lg')}
-      {knobFor(effect, 'amount',   color, onChange, 'md')}
-      {knobFor(effect, 'feedback', color, onChange, 'md')}
-      {knobFor(effect, 'tone',     color, onChange, 'sm')}
+    <div className="flex flex-col gap-2">
+      <div className="flex justify-around">
+        {knobFor(effect, 'time',   color, onChange, 'lg')}
+        {knobFor(effect, 'amount', color, onChange, 'md')}
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'feedback', color, onChange, 'md')}
+        {knobFor(effect, 'tone',     color, onChange, 'md')}
+      </div>
     </div>
   );
 }
+
+// ── Chorus — dual-voice LFO chorus with spread ─────────────────────────────
 
 function ChorusBody({ effect, color, onChange }: BodyProps) {
   return (
-    <div className="flex justify-around">
-      {knobFor(effect, 'amount', color, onChange, 'md')}
-      {knobFor(effect, 'rate',   color, onChange, 'md')}
-      {knobFor(effect, 'depth',  color, onChange, 'md')}
-      {knobFor(effect, 'delay',  color, onChange, 'sm')}
+    <div className="flex flex-col gap-2">
+      <div className="flex justify-around">
+        {knobFor(effect, 'amount', color, onChange, 'lg')}
+        {knobFor(effect, 'rate',   color, onChange, 'md')}
+        {knobFor(effect, 'depth',  color, onChange, 'md')}
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'delay',  color, onChange, 'sm')}
+        {knobFor(effect, 'spread', color, onChange, 'sm')}
+      </div>
     </div>
   );
 }
 
+// ── Phaser — all-pass chain with feedback ──────────────────────────────────
+
+const STAGE_VALUES = [2, 4, 6, 8, 10, 12];
+
 function PhaserBody({ effect, color, onChange }: BodyProps) {
-  const stages = effect.params.stages ?? 4;
+  const stages    = Math.round(effect.params.stages ?? 4);
+  const stageIdx  = STAGE_VALUES.indexOf(stages);
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-around">
@@ -155,43 +210,94 @@ function PhaserBody({ effect, color, onChange }: BodyProps) {
         {knobFor(effect, 'depth',    color, onChange, 'md')}
         {knobFor(effect, 'baseFreq', color, onChange, 'sm')}
       </div>
-      {/* Stages — discrete button group */}
-      <div className="flex items-center gap-1">
-        <span className="fx-param-label" style={{ marginRight: 2, flexShrink: 0 }}>Stages</span>
-        {[2, 4, 6, 8, 10, 12].map((n) => (
-          <button
-            key={n}
-            onClick={() => onChange('stages', n)}
-            className="fx-stages-btn"
-            style={{
-              background: stages === n ? `${color}28` : 'transparent',
-              border: `1px solid ${stages === n ? color : '#2a2a3a'}`,
-              color: stages === n ? color : '#8888a0',
-            }}
-          >
-            {n}
-          </button>
-        ))}
+      <div className="flex items-center gap-2">
+        {knobFor(effect, 'feedback', color, onChange, 'sm')}
+        <div className="flex flex-col gap-1 flex-1">
+          <div className="flex items-center gap-1">
+            <span className="fx-param-label" style={{ marginRight: 2, flexShrink: 0 }}>Stages</span>
+            <TypeButtons
+              labels={STAGE_VALUES.map(String)}
+              value={stageIdx >= 0 ? stageIdx : 1}
+              color={color}
+              onChange={(i) => onChange('stages', STAGE_VALUES[i])}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
+// ── Distortion — WaveShaperNode with 4 types ───────────────────────────────
+
+const DISTORT_TYPE_LABELS = ['Soft', 'Hard', 'Tube', 'Fuzz'];
+
 function DistortionBody({ effect, color, onChange }: BodyProps) {
+  const distType = Math.round(effect.params.type ?? 0);
   return (
-    <div className="flex justify-around items-end">
-      {knobFor(effect, 'drive',  color, onChange, 'lg')}
-      {knobFor(effect, 'amount', color, onChange, 'md')}
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1">
+        <span className="fx-param-label" style={{ marginRight: 2, flexShrink: 0 }}>Type</span>
+        <TypeButtons
+          labels={DISTORT_TYPE_LABELS}
+          value={distType}
+          color={color}
+          onChange={(i) => onChange('type', i)}
+        />
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'drive',  color, onChange, 'lg')}
+        {knobFor(effect, 'tone',   color, onChange, 'md')}
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'output', color, onChange, 'sm')}
+        {knobFor(effect, 'amount', color, onChange, 'sm')}
+      </div>
     </div>
   );
 }
 
+// ── Filter — BiquadFilter with curve display, type selector, and LFO ───────
+
+const FILTER_TYPE_LABELS = ['LP', 'HP', 'BP', 'Notch'];
+
 function FilterBody({ effect, color, onChange }: BodyProps) {
+  const filterType = Math.round(effect.params.filterType ?? 0);
+  const lfoDepth   = effect.params.lfoDepth ?? 0;
   return (
-    <div className="flex justify-around">
-      {knobFor(effect, 'frequency', color, onChange, 'lg')}
-      {knobFor(effect, 'q',         color, onChange, 'md')}
-      {knobFor(effect, 'amount',    color, onChange, 'md')}
+    <div className="flex flex-col gap-2">
+      <FilterCurveDisplay
+        filterType={filterType}
+        frequency={effect.params.frequency ?? 2000}
+        q={effect.params.q ?? 1}
+        color={color}
+      />
+      <div className="flex items-center gap-1">
+        <span className="fx-param-label" style={{ marginRight: 2, flexShrink: 0 }}>Type</span>
+        <TypeButtons
+          labels={FILTER_TYPE_LABELS}
+          value={filterType}
+          color={color}
+          onChange={(i) => onChange('filterType', i)}
+        />
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'frequency', color, onChange, 'lg')}
+        {knobFor(effect, 'q',         color, onChange, 'md')}
+        {knobFor(effect, 'amount',    color, onChange, 'md')}
+      </div>
+      {/* LFO section */}
+      <div className="flex items-center gap-2 pt-0.5">
+        <span className="fx-param-label" style={{ flexShrink: 0 }}>LFO</span>
+        <div
+          className="h-px flex-1 rounded-full"
+          style={{ background: lfoDepth > 0.01 ? `${color}50` : '#2a2a3a' }}
+        />
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'lfoRate',  color, onChange, 'sm')}
+        {knobFor(effect, 'lfoDepth', color, onChange, 'sm')}
+      </div>
     </div>
   );
 }
@@ -213,15 +319,21 @@ interface EffectBlockProps {
   effect: Effect;
   instrumentId: string;
   index: number;
-  totalEffects: number;
+  isDragOver: boolean;
+  onDragStart: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
 }
 
-export function EffectBlock({ effect, instrumentId, index, totalEffects }: EffectBlockProps) {
+export function EffectBlock({
+  effect, instrumentId, index, isDragOver,
+  onDragStart, onDragOver, onDrop, onDragEnd,
+}: EffectBlockProps) {
   const toggleEffectEnabled   = useStore((s) => s.toggleEffectEnabled);
   const toggleEffectCollapsed = useStore((s) => s.toggleEffectCollapsed);
   const setEffectParam        = useStore((s) => s.setEffectParam);
   const removeEffect          = useStore((s) => s.removeEffect);
-  const reorderEffects        = useStore((s) => s.reorderEffects);
 
   const color    = EFFECT_COLORS[effect.type] ?? '#94a3b8';
   const onChange = (key: string, val: number) =>
@@ -229,18 +341,34 @@ export function EffectBlock({ effect, instrumentId, index, totalEffects }: Effec
 
   const BodyComponent = BODY_MAP[effect.type] ?? null;
 
+  // suppress unused warning — index kept for potential future use
+  void index;
+
   return (
     <div
-      className={`rounded transition-opacity select-none overflow-hidden ${effect.enabled ? '' : 'opacity-40'}`}
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      className={`rounded select-none overflow-hidden transition-all ${effect.enabled ? '' : 'opacity-40'}`}
       style={{
-        border: `1px solid ${color}50`,
-        background: `${color}07`,
+        border: `1px solid ${isDragOver ? color : `${color}50`}`,
+        background: isDragOver ? `${color}14` : `${color}07`,
         padding: '10px 10px 12px',
         marginBottom: 6,
+        opacity: effect.enabled ? 1 : 0.4,
       }}
     >
       {/* Header */}
       <div className="flex items-center gap-2 mb-2">
+        <span
+          className="shrink-0 text-white/20 hover:text-white/50 cursor-grab active:cursor-grabbing transition-colors leading-none"
+          style={{ fontSize: 13, letterSpacing: '-1px' }}
+          title="Drag to reorder"
+        >
+          ⠿
+        </span>
         <button
           onClick={() => toggleEffectEnabled(instrumentId, effect.id)}
           className="shrink-0 transition-all hover:scale-125"
@@ -256,22 +384,6 @@ export function EffectBlock({ effect, instrumentId, index, totalEffects }: Effec
         <span className="fx-block-label flex-1 truncate min-w-0" style={{ color }}>
           {effect.label}
         </span>
-        <button
-          onClick={() => reorderEffects(instrumentId, index, index - 1)}
-          disabled={index === 0}
-          className="fx-block-btn text-white/20 hover:text-white/50 disabled:opacity-10 disabled:cursor-default"
-          title="Move up"
-        >
-          ↑
-        </button>
-        <button
-          onClick={() => reorderEffects(instrumentId, index, index + 1)}
-          disabled={index === totalEffects - 1}
-          className="fx-block-btn text-white/20 hover:text-white/50 disabled:opacity-10 disabled:cursor-default"
-          title="Move down"
-        >
-          ↓
-        </button>
         <button
           onClick={() => toggleEffectCollapsed(instrumentId, effect.id)}
           className="fx-block-btn text-white/20 hover:text-white/50"

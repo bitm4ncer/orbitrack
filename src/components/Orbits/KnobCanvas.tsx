@@ -101,7 +101,7 @@ export function KnobCanvas({ instrumentId }: Props) {
       if (e.ctrlKey) {
         store.setLoopSize(instrumentId, inst.loopSize + delta);
       } else if (e.altKey) {
-        const newVol = Math.max(-20, Math.min(6, inst.volume + delta));
+        const newVol = Math.max(-20, Math.min(20, inst.volume + delta));
         store.updateInstrument(instrumentId, { volume: newVol });
       } else {
         const newHits = Math.max(0, Math.min(inst.loopSize, inst.hits + delta));

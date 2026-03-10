@@ -6,7 +6,11 @@ export type EffectType =
   | 'chorus'
   | 'phaser'
   | 'distortion'
-  | 'filter';
+  | 'filter'
+  | 'bitcrusher'
+  | 'parame'
+  | 'tremolo'
+  | 'ringmod';
 
 export interface Effect {
   id: string;

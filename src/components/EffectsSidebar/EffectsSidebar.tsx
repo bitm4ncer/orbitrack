@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import { EffectBlock } from './EffectBlock';
 import { AddEffectMenu } from './AddEffectMenu';
@@ -9,9 +10,13 @@ export function EffectsSidebar() {
   const instrumentEffects = useStore((s) => s.instrumentEffects);
   const masterVolume = useStore((s) => s.masterVolume);
   const setMasterVolume = useStore((s) => s.setMasterVolume);
+  const reorderEffects = useStore((s) => s.reorderEffects);
 
   const selectedInstrument = instruments.find((i) => i.id === selectedId);
   const effects = selectedId ? (instrumentEffects[selectedId] ?? []) : [];
+
+  const dragIndex = useRef<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   return (
     <div className="flex flex-col h-full w-[300px] bg-bg-secondary border-l border-border shrink-0 select-none">
@@ -44,7 +49,22 @@ export function EffectsSidebar() {
           </div>
         ) : (
           effects.map((effect, i) => (
-            <EffectBlock key={effect.id} effect={effect} instrumentId={selectedId} index={i} totalEffects={effects.length} />
+            <EffectBlock
+              key={effect.id}
+              effect={effect}
+              instrumentId={selectedId}
+              index={i}
+              isDragOver={dragOverIndex === i}
+              onDragStart={() => { dragIndex.current = i; }}
+              onDragOver={(e) => { e.preventDefault(); setDragOverIndex(i); }}
+              onDrop={() => {
+                if (dragIndex.current !== null && dragIndex.current !== i) {
+                  reorderEffects(selectedId, dragIndex.current, i);
+                }
+                setDragOverIndex(null);
+              }}
+              onDragEnd={() => { dragIndex.current = null; setDragOverIndex(null); }}
+            />
           ))
         )}
       </div>

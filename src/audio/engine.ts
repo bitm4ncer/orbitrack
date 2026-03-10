@@ -4,6 +4,15 @@ import { initRoutingEngine } from './routingEngine';
 
 let initialized = false;
 
+// Suppress superdough's internal "node.onended" deprecation warning — it fires
+// from inside the library's own legacy code path, not from our code, and there
+// is no API to opt out. All other console.warn calls pass through unchanged.
+const _origWarn = console.warn.bind(console);
+console.warn = (...args: unknown[]) => {
+  if (typeof args[0] === 'string' && args[0].includes('node.onended')) return;
+  _origWarn(...args);
+};
+
 // Register the 4 default drum samples with superdough immediately at module load.
 // superdough looks up `s: 'kick'` etc. in its internal soundMap — without this
 // registration those sounds are never found and playback silently fails.

@@ -1,6 +1,73 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../../state/store';
 import { PASTEL_COLORS } from '../../canvas/colors';
+
+function Knob28({ label, value, min, max, step = 1, color, format, onChange }: {
+  label: string; value: number; min: number; max: number; step?: number;
+  color: string; format?: (v: number) => string; onChange: (v: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [inputVal, setInputVal] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const norm = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  const angleDeg = -135 + norm * 270;
+  const angleRad = (angleDeg * Math.PI) / 180;
+  const lx = Math.sin(angleRad) * 0.62;
+  const ly = -Math.cos(angleRad) * 0.62;
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startVal = value;
+    const range = max - min;
+    const onMove = (ev: MouseEvent) => {
+      const dy = startY - ev.clientY;
+      const raw = startVal + Math.round((dy / 80) * range / step) * step;
+      onChange(Math.max(min, Math.min(max, raw)));
+    };
+    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const commit = () => {
+    const n = parseFloat(inputVal);
+    if (!isNaN(n)) onChange(Math.max(min, Math.min(max, Math.round(n / step) * step)));
+    setEditing(false);
+  };
+
+  useEffect(() => {
+    if (editing) { setInputVal(String(value)); inputRef.current?.focus(); inputRef.current?.select(); }
+  }, [editing]);
+
+  const displayVal = format ? format(value) : String(value);
+
+  return (
+    <div className="flex flex-col items-center gap-0.5 select-none">
+      <span className="text-[8px] text-text-secondary uppercase tracking-wider">{label}</span>
+      <svg width="28" height="28" viewBox="-1 -1 2 2" onMouseDown={handleMouseDown} style={{ cursor: 'ns-resize' }}>
+        <circle cx="0" cy="0" r="0.80" fill="none" stroke={color} strokeWidth="0.10" opacity="0.6" />
+        <line x1="0" y1="0" x2={lx} y2={ly} stroke={color} strokeWidth="0.14" strokeLinecap="round" />
+      </svg>
+      {editing ? (
+        <input
+          ref={inputRef} type="number" value={inputVal} min={min} max={max} step={step}
+          onChange={(e) => setInputVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+          className="w-10 text-center text-[8px] font-mono bg-bg-tertiary border border-border rounded px-0.5 py-0 text-text-primary outline-none"
+          style={{ MozAppearance: 'textfield' } as React.CSSProperties}
+        />
+      ) : (
+        <span className="text-[8px] text-text-secondary font-mono cursor-text hover:text-text-primary transition-colors"
+          onClick={() => setEditing(true)} title="Click to enter value">
+          {displayVal}
+        </span>
+      )}
+    </div>
+  );
+}
 
 function createId(): string {
   return Math.random().toString(36).slice(2, 9);
@@ -12,12 +79,6 @@ export function InstrumentRack() {
   const selectedId = useStore((s) => s.selectedInstrumentId);
   const dragIdx = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
-  // Per-instrument size slider step: 1 = 32nd, 2 = 16th, 4 = 8th
-  const [sizeSteps, setSizeSteps] = useState<Record<string, 1 | 2 | 4>>({});
-  const getSizeStep = (id: string): 1 | 2 | 4 => sizeSteps[id] ?? 1;
-  const toggleSizeStep = (id: string, step: 2 | 4) => {
-    setSizeSteps((prev) => ({ ...prev, [id]: prev[id] === step ? 1 : step }));
-  };
 
   const addSampler = () => {
     const store = useStore.getState();
@@ -146,7 +207,7 @@ export function InstrumentRack() {
               </div>
             </div>
 
-            {/* Row 1: color dot, solo, name, type */}
+            {/* Row 1: mute dot, name, type, solo dot */}
             <div className="layer-header flex items-center gap-2">
               <button
                 onClick={(e) => {
@@ -157,83 +218,44 @@ export function InstrumentRack() {
                 style={{ backgroundColor: inst.muted ? '#555' : inst.color }}
                 title={inst.muted ? 'Unmute' : 'Mute'}
               />
+              <span className="layer-name text-[11px] text-text-primary truncate flex-1">{inst.name}</span>
+              <span className="layer-type text-[9px] text-text-secondary shrink-0">{inst.type}</span>
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   useStore.getState().toggleSolo(inst.id);
                 }}
-                className={`layer-solo-btn text-[8px] font-bold px-1 py-0.5 rounded shrink-0 transition-colors
-                           ${inst.solo
-                             ? 'bg-yellow-500/30 text-yellow-400'
-                             : 'text-white/25 hover:text-white/50'}`}
+                className="w-[14px] h-[14px] rounded-full border border-white/20 flex items-center justify-center shrink-0 transition-all hover:opacity-90"
+                style={{ background: inst.solo ? '#ffd700' : inst.color, opacity: inst.solo ? 0.9 : 0.4 }}
                 title={inst.solo ? 'Unsolo' : 'Solo'}
               >
-                S
+                <span className="text-[8px] font-bold text-black/70 leading-none select-none">S</span>
               </button>
-              <span className="layer-name text-[11px] text-text-primary truncate flex-1">{inst.name}</span>
-              <span className="layer-type text-[9px] text-text-secondary shrink-0">{inst.type}</span>
             </div>
 
-            {/* Row 2: size slider (loop length) */}
-            <div className="layer-size flex items-center gap-1.5">
-              <span className="text-[9px] text-text-secondary w-6">steps</span>
-              <input
-                type="range"
-                min={1}
-                max={64}
-                step={getSizeStep(inst.id)}
-                value={inst.loopSize}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => useStore.getState().setLoopSize(inst.id, Number(e.target.value))}
-                className="layer-size-slider inst-slider flex-1 h-1"
-                style={{ '--slider-color': inst.color } as React.CSSProperties}
-              />
-              <span className="text-[9px] text-text-secondary w-4 text-right">{inst.loopSize}</span>
-              {([4, 2] as const).map((step) => {
-                const label = step === 4 ? 'Q' : '8th';
-                const active = getSizeStep(inst.id) === step;
-                return (
-                  <button
-                    key={step}
-                    onClick={(e) => { e.stopPropagation(); toggleSizeStep(inst.id, step); }}
-                    className={`text-[8px] px-1 py-0.5 rounded transition-colors shrink-0
-                               ${active ? 'text-white/80 bg-white/10' : 'text-white/25 hover:text-white/50'}`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Row 3: hits slider */}
-            <div className="layer-hits flex items-center gap-1.5">
-              <span className="text-[9px] text-text-secondary w-6">hits</span>
-              <input
-                type="range"
-                min={0}
-                max={64}
-                value={inst.hits}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => useStore.getState().setHitCount(inst.id, Number(e.target.value))}
-                className="layer-hits-slider inst-slider flex-1 h-1"
-                style={{ '--slider-color': inst.color } as React.CSSProperties}
-              />
-              <span className="text-[9px] text-text-secondary w-4 text-right">{inst.hits}</span>
-            </div>
-
-            {/* Row 4: volume slider */}
-            <div className="layer-volume flex items-center gap-1.5">
-              <span className="text-[9px] text-text-secondary w-6">vol</span>
-              <input
-                type="range"
-                min={-20}
-                max={6}
-                value={inst.volume}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => useStore.getState().updateInstrument(inst.id, { volume: Number(e.target.value) })}
-                className="layer-vol-slider inst-slider flex-1 h-1"
-                style={{ '--slider-color': inst.color } as React.CSSProperties}
-              />
+            {/* Row 2: steps + hits + gain knobs */}
+            <div className="flex items-end justify-between" style={{ pointerEvents: 'none' }}>
+              <div className="flex gap-3">
+                <div style={{ pointerEvents: 'auto' }}>
+                  <Knob28
+                    label="steps" value={inst.loopSize} min={1} max={64} color={inst.color}
+                    onChange={(v) => useStore.getState().setLoopSize(inst.id, v)}
+                  />
+                </div>
+                <div style={{ pointerEvents: 'auto' }}>
+                  <Knob28
+                    label="hits" value={inst.hits} min={0} max={inst.loopSize} color={inst.color}
+                    onChange={(v) => useStore.getState().setHitCount(inst.id, v)}
+                  />
+                </div>
+              </div>
+              <div style={{ pointerEvents: 'auto' }}>
+                <Knob28
+                  label="gain" value={inst.volume} min={-20} max={20} color={inst.color}
+                  format={(v) => `${v > 0 ? '+' : ''}${v}dB`}
+                  onChange={(v) => useStore.getState().updateInstrument(inst.id, { volume: v })}
+                />
+              </div>
             </div>
           </div>
         ))}

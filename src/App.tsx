@@ -8,8 +8,18 @@ import { EffectsSidebar } from './components/EffectsSidebar/EffectsSidebar';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useResizable } from './hooks/useResizable';
 import { useStore } from './state/store';
+import { fetchSampleTree, type SampleEntry } from './audio/sampleApi';
 import { useEffect, useState } from 'react';
 import * as Tone from 'tone';
+
+function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
+  const result: SampleEntry[] = [];
+  for (const e of entries) {
+    if (e.type === 'file') result.push(e);
+    else if (e.children) result.push(...flattenFiles(e.children));
+  }
+  return result;
+}
 
 function App() {
   useKeyboardShortcuts();
@@ -32,6 +42,30 @@ function App() {
     };
     window.addEventListener('mousedown', startAudio);
     return () => window.removeEventListener('mousedown', startAudio);
+  }, []);
+
+  useEffect(() => {
+    const CATEGORIES = [
+      { keywords: ['kick'],          index: 0 },
+      { keywords: ['snare', 'clap'], index: 1 },
+      { keywords: ['hat', 'hh'],     index: 2 },
+      { keywords: ['conga'],         index: 3 },
+    ];
+    fetchSampleTree().then((tree) => {
+      const files = flattenFiles(tree);
+      const store = useStore.getState();
+      const instruments = store.instruments;
+      for (const { keywords, index } of CATEGORIES) {
+        const inst = instruments[index];
+        if (!inst) continue;
+        const matches = files.filter((f) =>
+          keywords.some((kw) => f.name.toLowerCase().includes(kw))
+        );
+        if (matches.length === 0) continue;
+        const pick = matches[Math.floor(Math.random() * matches.length)];
+        store.assignSample(inst.id, pick.path, pick.name.replace(/\.[^.]+$/, ''));
+      }
+    });
   }, []);
 
   return (
