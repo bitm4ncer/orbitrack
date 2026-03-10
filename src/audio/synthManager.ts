@@ -1,5 +1,6 @@
 import { SynthEngine } from './synth/SynthEngine';
 import { getSynthOrbitInput } from './orbitEffects';
+import type { SynthParams } from './synth/types';
 import * as Tone from 'tone';
 
 interface EngineEntry {
@@ -10,7 +11,7 @@ interface EngineEntry {
 
 const engines: Map<string, EngineEntry> = new Map();
 
-export function getSynthEngine(instrumentId: string, orbitIndex: number): SynthEngine {
+export function getSynthEngine(instrumentId: string, orbitIndex: number, initialParams?: SynthParams): SynthEngine {
   const existing = engines.get(instrumentId);
 
   if (existing) {
@@ -36,6 +37,13 @@ export function getSynthEngine(instrumentId: string, orbitIndex: number): SynthE
   const ac: AudioContext = rawCtx._nativeContext ?? (Tone.getContext().rawContext as unknown as AudioContext);
   const engine = new SynthEngine(ac);
   engine.init();
+
+  // Restore saved params if provided (e.g. from autosave / set load)
+  if (initialParams) {
+    for (const key of Object.keys(initialParams) as (keyof SynthParams)[]) {
+      engine.setParam(key, initialParams[key] as never);
+    }
+  }
 
   // Connect engine output → orbit effects chain input (may be null if audio not ready yet)
   const orbitInput = getSynthOrbitInput(orbitIndex);

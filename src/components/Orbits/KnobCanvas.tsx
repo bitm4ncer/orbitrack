@@ -135,14 +135,13 @@ function EffectPill({ effect, instrumentId }: { effect: Effect; instrumentId: st
 
 function EffectStrip({ instrumentId }: { instrumentId: string }) {
   const effects = useStore((s) => s.instrumentEffects[instrumentId]);
-  if (!effects || effects.length === 0) return null;
 
   return (
     <div
-      className="flex flex-wrap gap-1 justify-center w-full px-1"
+      className="flex flex-wrap gap-1 justify-center w-full px-1 min-h-[20px]"
       onClick={(e) => e.stopPropagation()}
     >
-      {effects.map((fx) => (
+      {effects?.map((fx) => (
         <EffectPill key={fx.id} effect={fx} instrumentId={instrumentId} />
       ))}
     </div>
@@ -409,8 +408,8 @@ export function KnobCanvas({ instrumentId }: Props) {
       </button>
       {/* Mute (top-right) */}
       <button
-        className="absolute top-1 right-1 w-[18px] h-[18px] rounded-full border border-white/20 cursor-pointer z-10 flex items-center justify-center transition-all hover:!opacity-90"
-        style={{ background: inst.muted ? '#555' : inst.color, opacity: inst.muted ? 0.9 : 0.4 }}
+        className="absolute top-1 right-1 w-[18px] h-[18px] rounded-full border border-white/20 cursor-pointer z-10 flex items-center justify-center transition-all hover:opacity-70"
+        style={{ background: inst.color, opacity: inst.muted ? 0.3 : 1 }}
         title="Mute"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); useStore.getState().toggleMute(instrumentId); }}

@@ -1,11 +1,16 @@
 import { useState, useMemo, useReducer } from 'react';
 import { useStore } from '../../state/store';
 import { getSynthEngine } from '../../audio/synthManager';
-import { SYNTH_PRESETS } from '../../audio/synth/presets';
 import type { SynthParams, LFODestination } from '../../audio/synth/types';
+import { ALL_WAVE_SHAPES, ALL_WAVE_LABELS } from '../../audio/synth/wavetables';
 import { EffectKnob } from '../EffectsSidebar/EffectKnob';
 import { FilterCurveDisplay } from '../EffectsSidebar/FilterCurveDisplay';
 import { EnvelopeDisplay } from './EnvelopeDisplay';
+import { OscDisplay } from './OscDisplay';
+import { LFODisplay } from './LFODisplay';
+import { SynthVisualizer } from './SynthVisualizer';
+import { PresetBrowser } from './PresetBrowser';
+import { usePresetStore } from '../../state/presetStore';
 
 // ─── Shared sub-components ───────────────────────────────────────────────────
 
@@ -94,13 +99,19 @@ export function SynthPanel() {
   // when the instrument id/orbit actually changes, not on every render.
   const engine = useMemo(() => {
     if (!instrument || instrument.type !== 'synth') return null;
-    try { return getSynthEngine(instrument.id, instrument.orbitIndex); }
+    try { return getSynthEngine(instrument.id, instrument.orbitIndex, instrument.engineParams); }
     catch { return null; }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instrument?.id, instrument?.orbitIndex]);
 
   // Force re-render when a param is mutated directly on the engine.
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
+  const updateEngineParams = useStore((s) => s.updateEngineParams);
+
+  // Track selected preset name from presetStore
+  const selectedPresetId = usePresetStore((s) => s.selectedPresetId);
+  const presets = usePresetStore((s) => s.presets);
+  const currentPresetName = presets.find((p) => p.id === selectedPresetId)?.name ?? 'INIT';
 
   if (!instrument || instrument.type !== 'synth' || !engine) return null;
 
@@ -109,6 +120,7 @@ export function SynthPanel() {
 
   const set = <K extends keyof SynthParams>(key: K, value: SynthParams[K]) => {
     engine.setParam(key, value);
+    updateEngineParams(instrument.id, engine.getParams());
     forceUpdate();
   };
 
@@ -121,6 +133,11 @@ export function SynthPanel() {
       className="synth-panel bg-bg-secondary border-l border-border overflow-y-auto shrink-0 flex flex-col"
       style={{ width: 300 }}
     >
+      {/* ─── Visualizer ─────────────────────────────────────────────── */}
+      <div className="shrink-0" style={{ borderBottom: `1px solid ${color}20` }}>
+        <SynthVisualizer orbitIndex={instrument.orbitIndex} color={color} />
+      </div>
+
       {/* ─── Preset bar ─────────────────────────────────────────────── */}
       <div
         className="flex items-center gap-2 px-4 py-2 shrink-0"
@@ -129,32 +146,68 @@ export function SynthPanel() {
         <span className="text-[9px] uppercase tracking-wider shrink-0" style={{ color }}>
           Preset
         </span>
-        <select
-          onChange={(e) => {
-            const preset = SYNTH_PRESETS[e.target.value];
-            if (preset) { engine.loadPreset(preset); forceUpdate(); }
+        <PresetBrowser
+          engine={engine}
+          color={color}
+          currentPresetName={currentPresetName}
+          onPresetLoaded={() => {
+            updateEngineParams(instrument.id, engine.getParams());
+            forceUpdate();
           }}
-          className="flex-1 bg-bg-tertiary text-text-primary text-[10px] px-2 py-1 rounded border border-border"
-        >
-          {Object.keys(SYNTH_PRESETS).map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
+        />
       </div>
 
       {/* ─── OSC ────────────────────────────────────────────────────── */}
       <Section label="Oscillator" color={color} defaultOpen>
-        <TypeButtons
-          labels={WAVE_LABELS}
-          value={WAVE_TYPES.indexOf(params.vcoType)}
-          color={color}
-          onChange={(i) => set('vcoType', WAVE_TYPES[i])}
-        />
+        {/* Shape selector — 2 rows of 5 */}
+        {[0, 1].map((row) => (
+          <div key={row} className="flex gap-0.5 w-full">
+            {ALL_WAVE_SHAPES.slice(row * 5, row * 5 + 5).map((shape, i) => {
+              const idx = row * 5 + i;
+              const active = params.vcoType === shape;
+              return (
+                <button
+                  key={shape}
+                  onClick={() => set('vcoType', shape)}
+                  className="flex-1 text-[8px] uppercase tracking-wider py-0.5 rounded transition-all"
+                  style={{
+                    background: active ? `${color}28` : 'transparent',
+                    border: `1px solid ${active ? color : '#2a2a3a'}`,
+                    color: active ? color : '#8888a0',
+                  }}
+                >
+                  {ALL_WAVE_LABELS[idx]}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+        <OscDisplay waveType={params.vcoType} color={color} />
         <KnobRow>
           <SynthKnob label="Gain" value={params.vcoGain} min={0} max={1} defaultValue={1} color={color} onChange={(v) => set('vcoGain', v)} />
           <SynthKnob label="Pan" value={params.vcoPan} min={-1} max={1} defaultValue={0} color={color} onChange={(v) => set('vcoPan', v)} />
           <SynthKnob label="Tune" value={params.vcoDetune} min={-100} max={100} step={1} unit="¢" defaultValue={0} color={color} onChange={(v) => set('vcoDetune', v)} />
         </KnobRow>
+        {/* Octave */}
+        <div>
+          <span className="text-[8px] text-text-secondary/60 uppercase tracking-wider">Octave</span>
+          <div className="flex gap-0.5 mt-1">
+            {[-2, -1, 0, 1, 2].map((n) => (
+              <button
+                key={n}
+                onClick={() => set('vcoOctave', n)}
+                className="flex-1 text-[8px] py-0.5 rounded transition-all"
+                style={{
+                  background: Math.round(params.vcoOctave ?? 0) === n ? `${color}28` : 'transparent',
+                  border: `1px solid ${Math.round(params.vcoOctave ?? 0) === n ? color : '#2a2a3a'}`,
+                  color: Math.round(params.vcoOctave ?? 0) === n ? color : '#8888a0',
+                }}
+              >
+                {n > 0 ? `+${n}` : n}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Unison */}
         <div>
@@ -258,6 +311,7 @@ export function SynthPanel() {
       {/* ─── LFO ────────────────────────────────────────────────────── */}
       <Section label="LFO" color={color}>
         <span className="text-[8px] text-text-secondary/60 uppercase tracking-wider">LFO 1</span>
+        <LFODisplay shape={params.lfo1Shape} rate={params.lfo1Rate} color={color} />
         <TypeButtons
           labels={WAVE_LABELS}
           value={WAVE_TYPES.indexOf(params.lfo1Shape)}
@@ -276,6 +330,7 @@ export function SynthPanel() {
         </KnobRow>
 
         <span className="text-[8px] text-text-secondary/60 uppercase tracking-wider mt-1">LFO 2</span>
+        <LFODisplay shape={params.lfo2Shape} rate={params.lfo2Rate} color={color} />
         <TypeButtons
           labels={WAVE_LABELS}
           value={WAVE_TYPES.indexOf(params.lfo2Shape)}

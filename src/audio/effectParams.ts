@@ -12,7 +12,7 @@ export interface EffectParamDef {
 
 export const EFFECT_PARAM_DEFS: Partial<Record<EffectType, EffectParamDef[]>> & Record<
   'eq3'|'compressor'|'reverb'|'delay'|'chorus'|'phaser'|'distortion'|'filter'|
-  'bitcrusher'|'parame'|'tremolo'|'ringmod',
+  'bitcrusher'|'parame'|'tremolo'|'ringmod'|'trancegate'|'pingpong',
   EffectParamDef[]
 > = {
   reverb: [
@@ -40,7 +40,7 @@ export const EFFECT_PARAM_DEFS: Partial<Record<EffectType, EffectParamDef[]>> & 
     { key: 'threshold', label: 'Threshold', min: -60,  max: 0,   step: 1,     defaultValue: -24,  unit: 'dB' },
     { key: 'ratio',     label: 'Ratio',     min: 1,    max: 20,  step: 0.5,   defaultValue: 4 },
     { key: 'attack',    label: 'Attack',    min: 0.001,max: 0.5, step: 0.001, defaultValue: 0.003, unit: 's' },
-    { key: 'release',   label: 'Release',   min: 0.01, max: 2,   step: 0.01,  defaultValue: 0.25, unit: 's' },
+    { key: 'release',   label: 'Release',   min: 0.01, max: 1,   step: 0.01,  defaultValue: 0.25, unit: 's' },
     { key: 'knee',      label: 'Knee',      min: 0,    max: 40,  step: 1,     defaultValue: 6,    unit: 'dB' },
     { key: 'makeupGain',label: 'Makeup',    min: 0,    max: 24,  step: 0.5,   defaultValue: 0,    unit: 'dB' },
   ],
@@ -121,6 +121,24 @@ export const EFFECT_PARAM_DEFS: Partial<Record<EffectType, EffectParamDef[]>> & 
     { key: 'amount',    label: 'Mix',  min: 0,   max: 1,    step: 0.01, defaultValue: 1 },
     { key: 'waveform',  label: 'Wave', min: 0,   max: 2,    step: 1,    defaultValue: 0 },
   ],
+  trancegate: [
+    { key: 'amount',  label: 'Mix',     min: 0,   max: 1,    step: 0.01, defaultValue: 1 },
+    { key: 'steps',   label: 'Steps',   min: 4,   max: 16,   step: 4,    defaultValue: 16 },
+    { key: 'rate',    label: 'Rate',    min: 4,   max: 32,   step: 4,    defaultValue: 16 },
+    { key: 'attack',  label: 'Attack',  min: 0,   max: 0.49, step: 0.01, defaultValue: 0.02 },
+    { key: 'release', label: 'Release', min: 0,   max: 0.49, step: 0.01, defaultValue: 0.2 },
+    // s0–s15: step on/off — not listed as knobs, handled by circular sequencer UI
+    ...Array.from({ length: 16 }, (_, i) => ({
+      key: `s${i}`, label: `S${i}`, min: 0, max: 1, step: 1, defaultValue: 1,
+    })),
+  ],
+  pingpong: [
+    { key: 'amount',   label: 'Mix',      min: 0,   max: 1,     step: 0.01,  defaultValue: 0.4 },
+    { key: 'time',     label: 'Time',     min: 0.01, max: 2,    step: 0.001, defaultValue: 0.25, unit: 's' },
+    { key: 'feedback', label: 'Feedback', min: 0,   max: 0.9,   step: 0.01,  defaultValue: 0.45 },
+    { key: 'tone',     label: 'Hi-Cut',   min: 500, max: 20000, step: 100,   defaultValue: 8000, unit: 'Hz' },
+    { key: 'spread',   label: 'Spread',   min: 0,   max: 1,     step: 0.01,  defaultValue: 1 },
+  ],
 };
 
 /** 2-3 most important param keys per effect for quick-access UI */
@@ -137,6 +155,8 @@ export const QUICK_PARAM_KEYS: Partial<Record<EffectType, string[]>> = {
   bitcrusher: ['bits', 'downsample'],
   tremolo:    ['amount', 'rate'],
   ringmod:    ['frequency', 'amount'],
+  trancegate: ['amount', 'steps'],
+  pingpong:   ['amount', 'time', 'feedback'],
 };
 
 export function DEFAULT_EFFECT_PARAMS(type: EffectType): Record<string, number> {

@@ -6,6 +6,9 @@ import { EQCurveDisplay } from './EQCurveDisplay';
 import { FilterCurveDisplay } from './FilterCurveDisplay';
 import { ParamEQDisplay, ParamEQTypeRow } from './ParamEQDisplay';
 import type { BandParam } from './ParamEQDisplay';
+import { CompressorDisplay } from './CompressorDisplay';
+import { TranceGateDisplay } from './TranceGateDisplay';
+import { PingPongDisplay } from './PingPongDisplay';
 
 export const EFFECT_COLORS: Record<string, string> = {
   eq3:         '#BAF2FF',
@@ -20,12 +23,15 @@ export const EFFECT_COLORS: Record<string, string> = {
   bitcrusher:  '#C8BAFF',
   tremolo:     '#FFE0BA',
   ringmod:     '#BAFFF0',
+  trancegate:  '#FF9EBA',
+  pingpong:    '#BAF0FF',
 };
 
 export const EFFECT_ICONS: Record<string, string> = {
   eq3: '≡', parame: '≋', compressor: '⊓', reverb: '~', delay: '◷',
   chorus: '≈', phaser: '⊕', distortion: '⋀', filter: '◡',
   bitcrusher: '⊞', tremolo: '∿', ringmod: '⊗',
+  trancegate: '◉', pingpong: '⇄',
 };
 
 // ── per-effect body components ─────────────────────────────────────────────
@@ -84,11 +90,13 @@ function TypeButtons({
 
 // ── EQ3 — 3-band parametric with adjustable mid Q ─────────────────────────
 
-function EQ3Body({ effect, color, onChange }: BodyProps) {
+function EQ3Body({ effect, color, onChange, instrumentId }: BodyProps) {
+  const orbitIndex = useStore(s => s.instruments.find(i => i.id === instrumentId)?.orbitIndex ?? 0);
   const p = effect.params;
   return (
     <div className="flex flex-col gap-2">
       <EQCurveDisplay
+        orbitIndex={orbitIndex}
         lowGain={p.low ?? 0} midGain={p.mid ?? 0} highGain={p.high ?? 0}
         lowFreq={p.lowFreq ?? 200} midFreq={p.midFreq ?? 1000} midQ={p.midQ ?? 1} highFreq={p.highFreq ?? 4000}
         color={color}
@@ -110,40 +118,23 @@ function EQ3Body({ effect, color, onChange }: BodyProps) {
 
 // ── Compressor ─────────────────────────────────────────────────────────────
 
-function CompressorBody({ effect, color, onChange }: BodyProps) {
-  const defs    = EFFECT_PARAM_DEFS.compressor;
-  const thDef   = defs.find((d) => d.key === 'threshold')!;
-  const thresh  = effect.params.threshold ?? thDef.defaultValue;
-  const threshT = (thresh - thDef.min) / (thDef.max - thDef.min);
+function CompressorBody({ effect, color, onChange, instrumentId }: BodyProps) {
+  const orbitIndex = useStore(s => s.instruments.find(i => i.id === instrumentId)?.orbitIndex ?? 0);
+  const p = effect.params;
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <div className="flex justify-between">
-          <span className="fx-param-label">Threshold</span>
-          <span className="fx-param-value" style={{ color }}>{thresh.toFixed(0)} dB</span>
-        </div>
-        <div className="relative h-3 flex items-center">
-          <div className="w-full h-[3px] rounded-full" style={{ background: `${color}28` }} />
-          <div
-            className="absolute left-0 h-[3px] rounded-full"
-            style={{ width: `${threshT * 100}%`, background: color }}
-          />
-          <input
-            type="range"
-            min={thDef.min} max={thDef.max} step={thDef.step}
-            value={thresh}
-            onChange={(e) => onChange('threshold', parseFloat(e.target.value))}
-            className="absolute inset-0 opacity-0 w-full cursor-pointer"
-          />
-        </div>
-      </div>
+    <div className="flex flex-col gap-2">
+      <CompressorDisplay
+        orbitIndex={orbitIndex}
+        color={color}
+        threshold={p.threshold ?? -24}
+        knee={p.knee ?? 6}
+        ratio={p.ratio ?? 4}
+        onThresholdChange={(db) => onChange('threshold', db)}
+      />
       <div className="flex justify-around">
-        {knobFor(effect, 'ratio',   color, onChange, 'sm')}
-        {knobFor(effect, 'attack',  color, onChange, 'sm')}
-        {knobFor(effect, 'release', color, onChange, 'sm')}
-        {knobFor(effect, 'knee',    color, onChange, 'sm')}
-      </div>
-      <div className="flex justify-start">
+        {knobFor(effect, 'ratio',      color, onChange, 'sm')}
+        {knobFor(effect, 'attack',     color, onChange, 'sm')}
+        {knobFor(effect, 'release',    color, onChange, 'sm')}
         {knobFor(effect, 'makeupGain', color, onChange, 'sm')}
       </div>
     </div>
@@ -405,6 +396,94 @@ function RingModBody({ effect, color, onChange }: BodyProps) {
   );
 }
 
+// ── Trance Gate — circular step sequencer ──────────────────────────────────
+
+const TRANCE_STEPS_OPTIONS = [4, 8, 12, 16];
+const TRANCE_RATE_OPTIONS  = [{ label: '1/4', v: 4 }, { label: '1/8', v: 8 }, { label: '1/16', v: 16 }, { label: '1/32', v: 32 }];
+
+function TranceGateBody({ effect, color, instrumentId, onChange }: BodyProps) {
+  const orbitIndex = useStore((s) => s.instruments.find((i) => i.id === instrumentId)?.orbitIndex ?? 0);
+  const steps   = Math.round(effect.params.steps ?? 8);
+  const rate    = Math.round(effect.params.rate  ?? 8);
+  const rateIdx = TRANCE_RATE_OPTIONS.findIndex((r) => r.v === rate);
+  return (
+    <div className="flex flex-col gap-2">
+      <TranceGateDisplay
+        params={effect.params}
+        color={color}
+        orbitIndex={orbitIndex}
+        onChange={onChange}
+      />
+      <div className="flex items-center gap-2">
+        <span className="fx-param-label shrink-0">Steps</span>
+        <div className="flex gap-0.5 flex-1">
+          {TRANCE_STEPS_OPTIONS.map((n) => (
+            <button
+              key={n}
+              onClick={() => onChange('steps', n)}
+              className="fx-stages-btn flex-1"
+              style={{
+                background: steps === n ? `${color}28` : 'transparent',
+                border: `1px solid ${steps === n ? color : '#2a2a3a'}`,
+                color: steps === n ? color : '#8888a0',
+              }}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="fx-param-label shrink-0">Rate</span>
+        <div className="flex gap-0.5 flex-1">
+          {TRANCE_RATE_OPTIONS.map((r, i) => (
+            <button
+              key={r.v}
+              onClick={() => onChange('rate', r.v)}
+              className="fx-stages-btn flex-1"
+              style={{
+                background: rateIdx === i ? `${color}28` : 'transparent',
+                border: `1px solid ${rateIdx === i ? color : '#2a2a3a'}`,
+                color: rateIdx === i ? color : '#8888a0',
+              }}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'attack',  color, onChange, 'sm')}
+        {knobFor(effect, 'release', color, onChange, 'sm')}
+        {knobFor(effect, 'amount',  color, onChange, 'sm')}
+      </div>
+    </div>
+  );
+}
+
+// ── Ping Pong Delay ─────────────────────────────────────────────────────────
+
+function PingPongBody({ effect, color, onChange }: BodyProps) {
+  return (
+    <div className="flex flex-col gap-2">
+      <PingPongDisplay
+        time={effect.params.time ?? 0.25}
+        feedback={effect.params.feedback ?? 0.45}
+        color={color}
+      />
+      <div className="flex justify-around">
+        {knobFor(effect, 'time',     color, onChange, 'lg')}
+        {knobFor(effect, 'amount',   color, onChange, 'md')}
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'feedback', color, onChange, 'md')}
+        {knobFor(effect, 'tone',     color, onChange, 'sm')}
+        {knobFor(effect, 'spread',   color, onChange, 'sm')}
+      </div>
+    </div>
+  );
+}
+
 const BODY_MAP: Record<string, React.ComponentType<BodyProps>> = {
   eq3:        EQ3Body,
   compressor: CompressorBody,
@@ -418,6 +497,8 @@ const BODY_MAP: Record<string, React.ComponentType<BodyProps>> = {
   parame:     ParaEQBody,
   tremolo:    TremoloBody,
   ringmod:    RingModBody,
+  trancegate: TranceGateBody,
+  pingpong:   PingPongBody,
 };
 
 // ── main component ─────────────────────────────────────────────────────────

@@ -103,15 +103,19 @@ export function ParamEQDisplay({ orbitIndex, color, bands, onChange }: Props) {
         analyser.getByteFrequencyData(buf);
         const nyquist = analyser.context.sampleRate / 2;
 
-        ctx.fillStyle = `${color}1a`;
+        ctx.beginPath();
+        ctx.moveTo(0, H);
         for (let i = 1; i < binCount; i++) {
           const freq = (i / binCount) * nyquist;
           if (freq < MIN_FREQ || freq > MAX_FREQ) continue;
-          const x    = freqToX(freq, W);
-          const mag  = buf[i] / 255;
-          const barH = mag * H;
-          ctx.fillRect(x, H - barH, 1.5, barH);
+          const x = freqToX(freq, W);
+          const y = H - (buf[i] / 255) * H;
+          ctx.lineTo(x, y);
         }
+        ctx.lineTo(W, H);
+        ctx.closePath();
+        ctx.fillStyle = `${color}20`;
+        ctx.fill();
       }
 
       // ── dB grid ─────────────────────────────────────────────────────────

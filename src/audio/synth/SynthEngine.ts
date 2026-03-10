@@ -26,6 +26,7 @@ import { Distortion } from './nodes/Distortion';
 import { BitCrusher } from './nodes/BitCrusher';
 import { SYNTH_PRESETS } from './presets';
 import type { SynthParams, LFODestination } from './types';
+import { isNativeType, getPeriodicWave } from './wavetables';
 import { midiNoteToFreq } from '../../utils/music';
 
 const MAX_VOICES = 8;
@@ -136,7 +137,7 @@ class PolyVoice {
   }
 
   setFrequencies(midiNote: number, p: SynthParams, when: number): void {
-    const freq = midiNoteToFreq(midiNote);
+    const freq = midiNoteToFreq(midiNote + Math.round(p.vcoOctave ?? 0) * 12);
     const glideTime = p.portamentoSpeed > 0 ? p.portamentoSpeed : 0;
 
     // Unison main oscillators
@@ -151,7 +152,12 @@ class PolyVoice {
         const detuneCents = t * detuneSpread * 0.5 + p.vcoDetune;
         const panVal = t * spreadWidth;
 
-        this.mainOscs[i].type = p.vcoType;
+        if (isNativeType(p.vcoType)) {
+          this.mainOscs[i].type = p.vcoType;
+        } else {
+          const wave = getPeriodicWave(this.ac, p.vcoType);
+          if (wave) this.mainOscs[i].setPeriodicWave(wave);
+        }
         this.mainOscs[i].detune.cancelScheduledValues(when);
         this.mainOscs[i].detune.setValueAtTime(detuneCents, when);
 

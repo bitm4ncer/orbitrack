@@ -38,7 +38,7 @@ export function findSiblings(currentPath: string, tree: SampleEntry[]): SampleEn
 
   const siblings = walk(tree);
   if (!siblings) {
-    // Fallback: root-level files (e.g. public/samples defaults)
+    // Fallback: root-level files
     return tree.filter((e) => e.type === 'file');
   }
   return siblings;

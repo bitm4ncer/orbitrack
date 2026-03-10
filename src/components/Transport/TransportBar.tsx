@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import { toggleTransport, setBpm } from '../../audio/transport';
 import { initAudio } from '../../audio/engine';
 import { loadSamples } from '../../audio/sampler';
-import orbeatLogo from '/ORBEAT_Logo.svg';
+import { FilesMenu } from './FilesMenu';
+const orbeatLogo = `${import.meta.env.BASE_URL}ORBEAT_Logo.svg`;
 
 const SHORTCUTS = [
   { key: 'Space', action: 'Play / Stop' },
@@ -68,6 +69,8 @@ export function TransportBar() {
   const isPlaying = useStore((s) => s.isPlaying);
   const bpm = useStore((s) => s.bpm);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const filesRef = useRef<HTMLButtonElement>(null);
 
   const handlePlayStop = async () => {
     await ensureAudio();
@@ -79,9 +82,17 @@ export function TransportBar() {
   };
 
   return (
-    <div className="transport-bar relative flex items-center gap-6 bg-bg-secondary border-t border-border" style={{ padding: 40 }}>
+    <div className="transport-bar relative flex items-center bg-bg-secondary border-t border-border">
       <div className="transport-logo flex items-center gap-3">
         <img src={orbeatLogo} alt="ORBEAT" className="h-6" />
+        <button
+          ref={filesRef}
+          onClick={() => setFilesOpen((o) => !o)}
+          className="text-[10px] uppercase tracking-wider text-text-secondary/60 hover:text-text-primary px-2 py-1 transition-colors"
+        >
+          Files
+        </button>
+        {filesOpen && <FilesMenu anchorRef={filesRef} onClose={() => setFilesOpen(false)} />}
       </div>
 
       <button

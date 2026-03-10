@@ -15,6 +15,8 @@ const EFFECT_OPTIONS: { type: EffectType; label: string; icon: string }[] = [
   { type: 'bitcrusher', label: 'Bit Crusher', icon: '⊞' },
   { type: 'tremolo',    label: 'Tremolo',     icon: '∿' },
   { type: 'ringmod',    label: 'Ring Mod',    icon: '⊗' },
+  { type: 'trancegate', label: 'Orb Gate',    icon: '◉' },
+  { type: 'pingpong',   label: 'Ping Pong',   icon: '⇄' },
 ];
 
 export function AddEffectMenu({ instrumentId }: { instrumentId: string }) {

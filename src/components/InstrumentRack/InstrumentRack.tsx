@@ -315,7 +315,7 @@ function ChannelStrip({ inst, selectedId }: { inst: Instrument; selectedId: stri
       >
         <button
           onClick={(e) => { e.stopPropagation(); useStore.getState().toggleMute(inst.id); }}
-          className="w-[11px] h-[11px] rounded-full shrink-0 transition-all hover:scale-125 cursor-pointer"
+          className={`w-[11px] h-[11px] rounded-full shrink-0 transition-all hover:scale-125 cursor-pointer ${inst.muted ? '' : 'hover:opacity-70'}`}
           style={{
             backgroundColor: inst.muted ? '#3a3a3a' : inst.color,
             boxShadow: inst.muted ? 'none' : `0 0 4px ${inst.color}60`,
@@ -354,6 +354,7 @@ export function InstrumentRack() {
   const dragIdx = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [levelMode, setLevelMode] = useState(false);
+  const [activeAddType, setActiveAddType] = useState<'synth' | 'sampler' | 'looper'>('synth');
 
   const addSampler = () => {
     const store = useStore.getState();
@@ -406,6 +407,28 @@ export function InstrumentRack() {
     store.selectInstrument(newInst.id);
   };
 
+  const addLooper = () => {
+    const store = useStore.getState();
+    const color = PASTEL_COLORS[store.instruments.length % PASTEL_COLORS.length];
+    const newInst = {
+      id: createId(),
+      name: `Loop ${store.instruments.filter((i) => i.type === 'looper').length + 1}`,
+      type: 'looper' as const,
+      color,
+      hits: 0,
+      hitPositions: [] as number[],
+      loopSize: 16,
+      loopSizeLocked: false,
+      muted: false,
+      solo: false,
+      volume: 0,
+      orbitIndex: store.instruments.length,
+      looperParams: { gain: 0.9, speed: 1, attack: 0.001, release: 0.05, pan: 0, cutoff: 20000, resonance: 0 },
+    };
+    store.setInstruments([...store.instruments, newInst]);
+    store.selectInstrument(newInst.id);
+  };
+
   const removeInstrument = (id: string) => {
     const store = useStore.getState();
     store.setInstruments(store.instruments.filter((i) => i.id !== id));
@@ -419,7 +442,7 @@ export function InstrumentRack() {
     >
       {/* Header */}
       <div className="layers-header px-4 py-3 border-b border-border/50 flex items-center" style={{ margin: '0 -20px 20px' }}>
-        <span className="text-[10px] text-text-secondary uppercase tracking-wider font-medium flex-1 pl-1">Layers</span>
+        <span className="text-[10px] text-text-secondary uppercase tracking-wider font-medium flex-1 pl-1">Orb Rack</span>
         <div className="flex items-center gap-0.5 pr-1">
           {/* Card view toggle */}
           <button
@@ -525,7 +548,7 @@ export function InstrumentRack() {
               <div className="layer-header flex items-center gap-2">
                 <button
                   onClick={(e) => { e.stopPropagation(); useStore.getState().toggleMute(inst.id); }}
-                  className="layer-mute-btn w-3 h-3 rounded-full shrink-0 transition-all hover:scale-125 border border-transparent hover:border-white/20 cursor-pointer"
+                  className={`layer-mute-btn w-3 h-3 rounded-full shrink-0 transition-all hover:scale-125 cursor-pointer ${inst.muted ? 'border border-transparent hover:border-white/20' : 'hover:opacity-70'}`}
                   style={{ backgroundColor: inst.muted ? '#555' : inst.color }}
                   title={inst.muted ? 'Unmute' : 'Mute'}
                 />
@@ -572,21 +595,29 @@ export function InstrumentRack() {
       )}
 
       {/* Add buttons */}
-      <div className="layers-add-bar flex items-center gap-2 px-3 py-3 border-t border-border/50" style={{ margin: '0 -20px' }}>
-        <button
-          onClick={addSynth}
-          style={{ padding: '3px 10px' }}
-          className="add-synth-btn text-[10px] rounded border border-border hover:border-white/20 text-text-secondary hover:text-text-primary transition-colors flex-1"
-        >
-          + Synth
-        </button>
-        <button
-          onClick={addSampler}
-          style={{ padding: '3px 10px' }}
-          className="add-sampler-btn text-[10px] rounded border border-border hover:border-white/20 text-text-secondary hover:text-text-primary transition-colors flex-1"
-        >
-          + Sampler
-        </button>
+      <div className="layers-add-bar flex items-center gap-1.5 px-3 py-2.5 border-t border-border/50" style={{ margin: '0 -20px' }}>
+        {([
+          { type: 'synth',   label: 'Synth',   fn: addSynth   },
+          { type: 'sampler', label: 'Sampler',  fn: addSampler },
+          { type: 'looper',  label: 'Looper',   fn: addLooper  },
+        ] as const).map(({ type, label, fn }) => {
+          const active = activeAddType === type;
+          return (
+            <button
+              key={type}
+              onClick={() => { setActiveAddType(type); fn(); }}
+              className="flex-1 text-[9px] uppercase tracking-wider rounded transition-all cursor-pointer"
+              style={{
+                padding: '3px 0',
+                color: active ? 'rgba(255,255,255,0.82)' : 'rgba(255,255,255,0.28)',
+                border: active ? '1px solid rgba(255,255,255,0.22)' : '1px solid rgba(255,255,255,0.06)',
+                background: active ? 'rgba(255,255,255,0.05)' : 'transparent',
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

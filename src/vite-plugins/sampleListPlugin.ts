@@ -106,17 +106,51 @@ export function sampleListPlugin(): Plugin {
           }
         }
 
+        // Serve loop tree JSON — from root loops/ folder
+        if (url === '/loops.json' || url === '/api/loops') {
+          const rootLoops = path.join(rootDir, 'loops');
+          const tree = readSampleDir(rootLoops, 'loops');
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(tree));
+          return;
+        }
+
+        // Serve individual loop files from root loops/
+        if (url.startsWith('/loops/')) {
+          const relativePath = decodeURIComponent(url.slice('/loops/'.length));
+          const file = path.join(rootDir, 'loops', relativePath);
+          if (fs.existsSync(file) && fs.statSync(file).isFile()) {
+            const ext = path.extname(file).toLowerCase();
+            const mime = MIME_TYPES[ext];
+            if (mime) {
+              res.setHeader('Content-Type', mime);
+              res.setHeader('Cache-Control', 'public, max-age=31536000');
+              fs.createReadStream(file).pipe(res);
+              return;
+            }
+          }
+        }
+
         next();
       });
     },
     generateBundle() {
       // Emit samples.json from root samples/ only (no public/samples/ merge)
       const rootSamples = path.join(rootDir, 'samples');
-      const tree = readSampleDir(rootSamples, 'samples');
+      const sampleTree = readSampleDir(rootSamples, 'samples');
       this.emitFile({
         type: 'asset',
         fileName: 'samples.json',
-        source: JSON.stringify(tree),
+        source: JSON.stringify(sampleTree),
+      });
+
+      // Emit loops.json from root loops/
+      const rootLoops = path.join(rootDir, 'loops');
+      const loopTree = readSampleDir(rootLoops, 'loops');
+      this.emitFile({
+        type: 'asset',
+        fileName: 'loops.json',
+        source: JSON.stringify(loopTree),
       });
     },
     closeBundle() {
@@ -125,6 +159,11 @@ export function sampleListPlugin(): Plugin {
       const rootSamples = path.join(rootDir, 'samples');
       const distSamples = path.join(outDir, 'samples');
       copyDirSync(rootSamples, distSamples);
+
+      // Copy root loops/ into dist/loops/
+      const rootLoops = path.join(rootDir, 'loops');
+      const distLoops = path.join(outDir, 'loops');
+      copyDirSync(rootLoops, distLoops);
     },
   };
 }

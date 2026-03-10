@@ -1,12 +1,24 @@
-import { superdough } from 'superdough';
+import { superdough, getAudioContext } from 'superdough';
 import type { Instrument } from '../types/instrument';
 import type { StoreState } from '../state/store';
 import { DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
-import { applyOrbitToneEffects } from './orbitEffects';
+import { DEFAULT_LOOPER_PARAMS } from '../types/looper';
 import { getSynthEngine } from './synthManager';
 
 function dbToLinear(db: number): number {
   return Math.pow(10, db / 20);
+}
+
+/** Clamp a scheduled time so it's never in the past (avoids superdough's
+ *  "cannot schedule sounds in the past" error caused by Tone.js / native
+ *  AudioContext clock drift). */
+function safeTime(t: number): number {
+  try {
+    const now = getAudioContext().currentTime;
+    return t < now ? now + 0.001 : t;
+  } catch {
+    return t;
+  }
 }
 
 /**
@@ -49,11 +61,6 @@ export function triggerSuperdough(
   glide: boolean,
   state: StoreState,
 ): void {
-  const effects = state.instrumentEffects[instrument.id] ?? [];
-
-  // Always set up / sync the orbit effects chain first
-  applyOrbitToneEffects(instrument.orbitIndex, effects);
-
   if (instrument.type === 'synth') {
     // Route through the custom SynthEngine — NOT superdough.
     // This fixes "sound supersaw not found" and enables poly, LFO, FM, unison.
@@ -82,6 +89,57 @@ export function triggerSuperdough(
       pan: (sp.pan + 1) / 2,
       orbit: instrument.orbitIndex,
       ...effectOverrides,
-    }, audioTime, noteDuration);
+    }, safeTime(audioTime), noteDuration);
   }
+}
+
+/**
+ * Trigger a looper slice. Called from transport for looper instruments.
+ * Computes slice begin/end from sorted hit positions and adjusts playback speed
+ * so the slice fills exactly the available time between this marker and the next.
+ */
+export function triggerLooperSlice(
+  instrument: Instrument,
+  hitIndex: number,
+  sortedHits: number[],
+  secondsPer16th: number,
+  audioTime: number,
+  state: StoreState,
+): void {
+  if (!instrument.sampleName) return;
+
+  const lp = instrument.looperParams ?? DEFAULT_LOOPER_PARAMS;
+
+  const sliceBegin = sortedHits[hitIndex];
+  const sliceEnd = hitIndex + 1 < sortedHits.length ? sortedHits[hitIndex + 1] : 1;
+
+  // Compute time-stretch speed
+  const editorState = state.looperEditors[instrument.id];
+  const bufferDuration = editorState?.audioBuffer?.duration ?? 1;
+  const originalSliceSec = (sliceEnd - sliceBegin) * bufferDuration;
+
+  const thisStep = Math.round(sortedHits[hitIndex] * instrument.loopSize);
+  const nextStep = hitIndex + 1 < sortedHits.length
+    ? Math.round(sortedHits[hitIndex + 1] * instrument.loopSize)
+    : instrument.loopSize;
+  const availableSec = (nextStep - thisStep) * secondsPer16th;
+
+  const sliceSpeed = lp.speed * (originalSliceSec / Math.max(availableSec, 0.01));
+  const instGain = dbToLinear(instrument.volume);
+  const effectOverrides = getEffectOverrides(instrument, state);
+
+  superdough({
+    s: instrument.sampleName,
+    gain: lp.gain * instGain,
+    speed: sliceSpeed,
+    begin: sliceBegin,
+    end: sliceEnd,
+    attack: lp.attack,
+    release: lp.release,
+    cutoff: lp.cutoff,
+    resonance: lp.resonance,
+    pan: (lp.pan + 1) / 2,
+    orbit: instrument.orbitIndex,
+    ...effectOverrides,
+  }, safeTime(audioTime), availableSec);
 }

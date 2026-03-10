@@ -10,10 +10,11 @@ export interface SynthParams {
   gainRelease: number;
 
   // VCO (main oscillator)
-  vcoType: OscillatorType;
+  vcoType: string; // OscillatorType or custom wavetable key
   vcoGain: number;
   vcoPan: number;
   vcoDetune: number; // cents, -100 to +100
+  vcoOctave: number; // integer, -2 to +2
 
   // Sub 1
   sub1Type: OscillatorType;

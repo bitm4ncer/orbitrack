@@ -13,10 +13,10 @@ function midiToLabel(note: number): string {
 
 // Built-in sample alias → actual file path (relative, no leading slash)
 const ALIAS_PATHS: Record<string, string> = {
-  kick: 'samples/kick.wav',
-  snare: 'samples/snare.wav',
-  hihat: 'samples/hihat.wav',
-  clap: 'samples/clap.wav',
+  kick: 'samples/Default/kick.wav',
+  snare: 'samples/Default/snare.wav',
+  hihat: 'samples/Default/hihat.wav',
+  clap: 'samples/Default/clap.wav',
 };
 
 // Circular SVG knob — border and indicator inherit color prop.
@@ -313,31 +313,8 @@ export function SampleBank() {
       className="sample-bank bg-bg-secondary border-l border-border flex flex-col shrink-0 h-full min-h-0 outline-none overflow-hidden"
       style={{ width: 300 }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-border/50 shrink-0">
-        <span className="text-[10px] text-text-secondary uppercase tracking-wider font-medium">
-          Sample Bank
-        </span>
-        <label
-          htmlFor={fileInputId}
-          className="text-[9px] px-2 py-0.5 rounded border border-border hover:border-white/20
-                     text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
-          title="Import audio files"
-        >
-          + Import
-          <input
-            id={fileInputId}
-            type="file"
-            accept=".wav,.mp3,.ogg,.flac,.aiff"
-            multiple
-            className="hidden"
-            onChange={handleFileImport}
-          />
-        </label>
-      </div>
-
       {/* Target instrument indicator */}
-      <div className="text-[9px] text-text-secondary px-4 py-1.5 shrink-0">
+      <div className="text-[9px] text-text-secondary px-4 pt-3 pb-1.5 shrink-0">
         <span className="text-text-secondary/60">target: </span>
         <span style={{ color }}>{targetInst.name}</span>
       </div>
@@ -405,6 +382,29 @@ export function SampleBank() {
           </div>
         </div>
       )}
+
+      {/* Header — Sample Bank title + Import */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border/50 shrink-0">
+        <span className="text-[10px] text-text-secondary uppercase tracking-wider font-medium">
+          Sample Bank
+        </span>
+        <label
+          htmlFor={fileInputId}
+          className="text-[9px] px-2 py-0.5 rounded border border-border hover:border-white/20
+                     text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
+          title="Import audio files"
+        >
+          + Import
+          <input
+            id={fileInputId}
+            type="file"
+            accept=".wav,.mp3,.ogg,.flac,.aiff"
+            multiple
+            className="hidden"
+            onChange={handleFileImport}
+          />
+        </label>
+      </div>
 
       {/* Search */}
       <div className="px-4 py-2 border-b border-border/50 shrink-0">
@@ -518,7 +518,7 @@ export function SampleBank() {
             ? <div className="text-[10px] text-text-secondary/50 text-center py-8">No samples match &ldquo;{searchQuery}&rdquo;</div>
             : <div className="text-[10px] text-text-secondary/50 text-center py-8">
                 No samples found.<br />
-                <span className="text-[9px]">Drop samples in /public/samples/ or use + Import</span>
+                <span className="text-[9px]">Drop samples in /samples/ or use + Import</span>
               </div>
         )}
       </div>

@@ -1,9 +1,18 @@
 import * as Tone from 'tone';
 import { useStore } from '../state/store';
-import { triggerSuperdough } from './superdoughAdapter';
+import { triggerSuperdough, triggerLooperSlice } from './superdoughAdapter';
+import { applyOrbitToneEffects } from './orbitEffects';
 
 let schedulerId: number | null = null;
-let lastTriggered: Map<string, Set<number>> = new Map();
+let effectSyncId: ReturnType<typeof setInterval> | null = null;
+
+// Simple monotonic step counter — incremented exactly once per scheduleRepeat
+// callback. Eliminates all floating-point time→step drift.
+let _globalStep = 0;
+
+// Per-instrument: last globalStep at which each hit index was triggered.
+// Prevents double-fires even if the callback is invoked twice for the same step.
+let _lastFired: Map<string, Map<number, number>> = new Map();
 
 // Position buffer — written by the audio tick (zero React involvement),
 // read by the rAF sync loop which gates UI updates to ~60 fps.
@@ -39,7 +48,8 @@ export function startTransport(): void {
 
   transport.bpm.value = state.bpm;
   transport.timeSignature = 4;
-  lastTriggered.clear();
+  _globalStep = 0;
+  _lastFired.clear();
 
   if (schedulerId !== null) {
     transport.clear(schedulerId);
@@ -52,14 +62,40 @@ export function startTransport(): void {
   transport.start();
   useStore.getState().setPlaying(true);
   startUISync();
+  startEffectSync();
+}
+
+/** Sync orbit effect chains at ~25 Hz — outside the audio callback so the
+ *  tick() stays lightweight.  This keeps continuous effects like Trance Gate
+ *  running even when no notes are firing. */
+function startEffectSync(): void {
+  stopEffectSync();
+  effectSyncId = setInterval(() => {
+    try {
+      const state = useStore.getState();
+      for (const inst of state.instruments) {
+        const effects = state.instrumentEffects[inst.id] ?? [];
+        applyOrbitToneEffects(inst.orbitIndex, effects, state.bpm);
+      }
+    } catch { /* safe to ignore */ }
+  }, 40);
+}
+
+function stopEffectSync(): void {
+  if (effectSyncId !== null) {
+    clearInterval(effectSyncId);
+    effectSyncId = null;
+  }
 }
 
 export function stopTransport(): void {
   const transport = Tone.getTransport();
   stopUISync();
+  stopEffectSync();
   transport.stop();
   transport.position = 0;
-  lastTriggered.clear();
+  _globalStep = 0;
+  _lastFired.clear();
 
   if (schedulerId !== null) {
     transport.clear(schedulerId);
@@ -89,33 +125,20 @@ function tick(time: number): void {
   try {
     _tick(time);
   } catch (e) {
-    // Swallow scheduling errors (e.g. InvalidAccessError from Tone.js internals)
-    // so the transport loop is never silently killed.
     console.warn('[transport] tick error:', e);
   }
 }
 
 function _tick(time: number): void {
-  const transport = Tone.getTransport();
   const state = useStore.getState();
+  const globalStep = _globalStep++;
 
   const secondsPer16th = 60 / state.bpm / 4;
 
-  // AUDIO: Use the scheduled audio time to determine which step to trigger.
-  // transport.seconds returns the current context time, which is behind the
-  // scheduled `time` by the lookahead amount — using it here would cause hits
-  // to be computed for the wrong step.
-  const scheduledSec = transport.getSecondsAtTime(time);
-  const globalStep = Math.floor(scheduledSec / secondsPer16th);
-
-  // UI: Use current transport position (what the user hears right now), not the
-  // scheduled position (which is lookahead ms ahead). This keeps the playhead
-  // and step indicators in sync with what you actually hear.
-  const uiSec = transport.seconds;
-  const uiTotalSteps = uiSec / secondsPer16th;
+  // UI position — use globalStep (not transport.seconds) for consistency
   const maxLoopSize = state.instruments.reduce((m, i) => Math.max(m, i.loopSize), 1);
-  const progress = (uiTotalSteps % maxLoopSize) / maxLoopSize;
-  const currentStep = Math.floor(uiTotalSteps) % maxLoopSize;
+  const progress = (globalStep % maxLoopSize) / maxLoopSize;
+  const currentStep = globalStep % maxLoopSize;
 
   // Per-instrument progress
   const instProgress: Record<string, number> = {};
@@ -126,8 +149,8 @@ function _tick(time: number): void {
   for (const instrument of state.instruments) {
     const loopSize = instrument.loopSize;
 
-    // Per-instrument progress (0-1) within its own loop — UI, uses current time
-    instProgress[instrument.id] = (uiTotalSteps % loopSize) / loopSize;
+    // Per-instrument progress (0-1) within its own loop
+    instProgress[instrument.id] = (globalStep % loopSize) / loopSize;
 
     if (anySolo && !instrument.solo) continue;
     if (instrument.muted && !instrument.solo) continue;
@@ -135,10 +158,10 @@ function _tick(time: number): void {
     const { hitPositions, hits } = instrument;
     if (hits === 0 || hitPositions.length === 0) continue;
 
-    if (!lastTriggered.has(instrument.id)) {
-      lastTriggered.set(instrument.id, new Set());
+    if (!_lastFired.has(instrument.id)) {
+      _lastFired.set(instrument.id, new Map());
     }
-    const triggered = lastTriggered.get(instrument.id)!;
+    const fired = _lastFired.get(instrument.id)!;
 
     const instStep = globalStep % loopSize;
 
@@ -147,25 +170,33 @@ function _tick(time: number): void {
       const hitStep = Math.round(hitPos * loopSize) % loopSize;
 
       if (hitStep === instStep) {
-        if (triggered.has(i)) continue;
-        triggered.add(i);
+        // Skip if this exact hit was already fired on this globalStep
+        if (fired.get(i) === globalStep) continue;
+        fired.set(i, globalStep);
 
-        const notes = state.gridNotes[instrument.id]?.[i];
-        if (notes && notes.length > 0) {
-          const glide = state.gridGlide[instrument.id]?.[i] ?? false;
-          const noteLength = state.gridLengths[instrument.id]?.[i] ?? 1;
-          const noteDuration = secondsPer16th * noteLength * 0.9;
+        if (instrument.type === 'looper') {
+          const sortedHits = [...hitPositions].sort((a, b) => a - b);
+          const sortedIdx = sortedHits.indexOf(hitPos);
+          if (sortedIdx >= 0) {
+            triggerLooperSlice(instrument, sortedIdx, sortedHits, secondsPer16th, time, state);
+          }
+        } else {
+          const notes = state.gridNotes[instrument.id]?.[i];
+          if (notes && notes.length > 0) {
+            const glide = state.gridGlide[instrument.id]?.[i] ?? false;
+            const noteLength = state.gridLengths[instrument.id]?.[i] ?? 1;
+            const noteDuration = secondsPer16th * noteLength * 0.9;
 
-          triggerSuperdough(instrument, notes[0], noteDuration, time, glide, state);
+            for (const midiNote of notes) {
+              triggerSuperdough(instrument, midiNote, noteDuration, time, glide, state);
+            }
+          }
         }
-      } else {
-        triggered.delete(i);
       }
     }
   }
 
   // Write position to buffer — the rAF loop will flush to Zustand at ~60 fps.
-  // No Zustand calls here keeps the audio scheduling callback free of React work.
   _pos.progress = progress;
   _pos.currentStep = currentStep;
   _pos.instProgress = instProgress;

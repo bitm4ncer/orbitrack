@@ -18,13 +18,18 @@ console.warn = (...args: unknown[]) => {
 // registration those sounds are never found and playback silently fails.
 samples({
   _base: window.location.origin + import.meta.env.BASE_URL,
-  kick: 'samples/kick.wav',
-  snare: 'samples/snare.wav',
-  hihat: 'samples/hihat.wav',
-  clap: 'samples/clap.wav',
+  kick: 'samples/Default/kick.wav',
+  snare: 'samples/Default/snare.wav',
+  hihat: 'samples/Default/hihat.wav',
+  clap: 'samples/Default/clap.wav',
 });
 
-const DEFAULT_SAMPLES = ['kick', 'snare', 'hihat', 'clap'] as const;
+const DEFAULT_SAMPLES: Record<string, string> = {
+  kick: 'samples/Default/kick.wav',
+  snare: 'samples/Default/snare.wav',
+  hihat: 'samples/Default/hihat.wav',
+  clap: 'samples/Default/clap.wav',
+};
 
 export async function initAudio(): Promise<void> {
   if (initialized) return;
@@ -65,7 +70,7 @@ export async function initAudio(): Promise<void> {
   const base = window.location.origin + import.meta.env.BASE_URL;
   const ac = getSdAudioContext();
   await Promise.all(
-    DEFAULT_SAMPLES.map((name) => loadBuffer(`${base}samples/${name}.wav`, ac, name, 0))
+    Object.entries(DEFAULT_SAMPLES).map(([name, path]) => loadBuffer(`${base}${path}`, ac, name, 0))
   );
 
   // Wire superdough output → masterGain → masterAnalyser → destination.

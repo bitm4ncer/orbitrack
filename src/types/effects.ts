@@ -10,7 +10,9 @@ export type EffectType =
   | 'bitcrusher'
   | 'parame'
   | 'tremolo'
-  | 'ringmod';
+  | 'ringmod'
+  | 'trancegate'
+  | 'pingpong';
 
 export interface Effect {
   id: string;

@@ -1,9 +1,11 @@
 import type { SuperdoughSynthParams, SuperdoughSamplerParams } from './superdough';
+import type { LooperParams } from './looper';
+import type { SynthParams } from '../audio/synth/types';
 
 export interface Instrument {
   id: string;
   name: string;
-  type: 'sampler' | 'synth';
+  type: 'sampler' | 'synth' | 'looper';
   sampleName?: string;   // superdough sound key (sanitized filename, e.g. 'clap')
   samplePath?: string;   // original file path for waveform display (e.g. 'Folder/clap.wav')
   color: string;
@@ -16,5 +18,7 @@ export interface Instrument {
   volume: number; // dB
   orbitIndex: number; // superdough orbit channel index (unique per instrument)
   synthParams?: SuperdoughSynthParams;
+  engineParams?: SynthParams;
   samplerParams?: SuperdoughSamplerParams;
+  looperParams?: LooperParams;
 }

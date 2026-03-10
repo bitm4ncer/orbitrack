@@ -6,10 +6,10 @@ let previewPlayer: Tone.Player | null = null;
 
 // Legacy aliases for default instruments
 const LEGACY_ALIASES: Record<string, string> = {
-  kick: 'samples/kick.wav',
-  snare: 'samples/snare.wav',
-  hihat: 'samples/hihat.wav',
-  clap: 'samples/clap.wav',
+  kick: 'samples/Default/kick.wav',
+  snare: 'samples/Default/snare.wav',
+  hihat: 'samples/Default/hihat.wav',
+  clap: 'samples/Default/clap.wav',
 };
 
 function ensureOutput(): Tone.Gain {

@@ -23,6 +23,90 @@ import { isAudioReady } from './engine';
 
 const MAX_PHASER_STAGES = 12;
 
+// ── Trance Gate Scheduler ─────────────────────────────────────────────────
+// Schedules gain automation on a GainNode to create a rhythmic gate.
+class TranceGateScheduler {
+  private readonly ac: AudioContext;
+  private readonly gain: GainNode;
+  private params: Record<string, number> = {};
+  private bpm = 120;
+  private running = false;
+  private intervalId: ReturnType<typeof setInterval> | null = null;
+  private nextStepTime = 0;
+  private currentStep = 0;
+  private readonly LOOKAHEAD = 0.15; // schedule this many seconds ahead
+  private readonly TICK_MS   = 40;   // check interval
+
+  constructor(ac: AudioContext, gain: GainNode) {
+    this.ac   = ac;
+    this.gain = gain;
+  }
+
+  update(params: Record<string, number>, bpm: number) {
+    this.params = params;
+    this.bpm    = bpm;
+    if (!this.running) {
+      this.running       = true;
+      this.nextStepTime  = this.ac.currentTime;
+      this.currentStep   = 0;
+      this.intervalId    = setInterval(() => this.tick(), this.TICK_MS);
+    }
+  }
+
+  stop() {
+    if (this.intervalId !== null) { clearInterval(this.intervalId); this.intervalId = null; }
+    this.running = false;
+    const now = this.ac.currentTime;
+    this.gain.gain.cancelScheduledValues(now);
+    this.gain.gain.setValueAtTime(1, now);
+  }
+
+  private tick() {
+    // Guard against tab-backgrounded drift
+    const now = this.ac.currentTime;
+    if (this.nextStepTime < now - 1.0) { this.nextStepTime = now; this.currentStep = 0; }
+    const until = now + this.LOOKAHEAD;
+    while (this.nextStepTime < until) {
+      this.scheduleStep(this.nextStepTime);
+    }
+  }
+
+  private scheduleStep(time: number) {
+    const steps   = Math.max(1, Math.round(this.params.steps ?? 8));
+    const rate    = Math.max(1, this.params.rate ?? 8);
+    const stepDur = (60 / this.bpm) * (4 / rate);
+    const stepIdx = this.currentStep % steps;
+
+    const isOn = (this.params[`s${stepIdx}`] ?? 1) > 0.5;
+    const attack  = Math.max(0.002, Math.min(0.499, this.params.attack  ?? 0.02)) * stepDur;
+    const release = Math.max(0.002, Math.min(0.499, this.params.release ?? 0.2))  * stepDur;
+
+    if (isOn) {
+      this.gain.gain.setValueAtTime(0, time);
+      this.gain.gain.linearRampToValueAtTime(1, time + attack);
+      this.gain.gain.setValueAtTime(1, time + stepDur - release);
+      this.gain.gain.linearRampToValueAtTime(0, time + stepDur);
+    } else {
+      this.gain.gain.setValueAtTime(0, time);
+    }
+
+    this.currentStep++;
+    this.nextStepTime = time + stepDur;
+  }
+}
+
+/** Expose current scheduler phase (0–1 through pattern) for the UI playhead. */
+const tranceGatePhaseRef = new Map<number, { bpm: number; rate: number; steps: number }>();
+
+export function getTranceGatePhase(orbitIndex: number): number {
+  const ref = tranceGatePhaseRef.get(orbitIndex);
+  if (!ref) return 0;
+  const { bpm, rate, steps } = ref;
+  const stepDurMs = (60000 / bpm) * (4 / rate);
+  const patternMs = stepDurMs * steps;
+  return (performance.now() % patternMs) / patternMs;
+}
+
 // Schroeder reverb comb filter delay times (seconds)
 const COMB_DELAY_TIMES = [0.0297, 0.0371, 0.0411, 0.0437];
 
@@ -130,6 +214,22 @@ interface OrbitEffectChain {
   // Compressor — DynamicsCompressorNode at chain tail
   compressor: DynamicsCompressorNode;
   compressorMakeup: GainNode;
+  // Trance Gate — rhythmic gate via scheduled GainNode automation
+  tranceGateScheduler: TranceGateScheduler;
+  tranceGateGain: GainNode;
+  tranceDryGain: GainNode;
+  tranceWetGain: GainNode;
+  tranceMix: GainNode;
+  // Ping Pong Delay — stereo alternating delay
+  ppDelay1: DelayNode;
+  ppDelay2: DelayNode;
+  ppFeedGain: GainNode;
+  ppHiCut: BiquadFilterNode;
+  ppPanL: StereoPannerNode;
+  ppPanR: StereoPannerNode;
+  ppWetGain: GainNode;
+  ppDryGain: GainNode;
+  ppMix: GainNode;
 
   synthInputGain: GainNode;
   intercepted: boolean;
@@ -603,7 +703,71 @@ function createChain(ac: AudioContext): OrbitEffectChain {
 
   ringMix.connect(compressor);
   compressor.connect(compressorMakeup);
-  // compressorMakeup → outputNode is wired in ensureIntercepted()
+
+  // ─── Trance Gate — rhythmic gate via GainNode automation ─────────────────
+  const tranceGateGain = ac.createGain();
+  tranceGateGain.gain.value = 1; // transparent until scheduler activates
+
+  const tranceDryGain = ac.createGain();
+  tranceDryGain.gain.value = 1;
+
+  const tranceWetGain = ac.createGain();
+  tranceWetGain.gain.value = 0;
+
+  const tranceMix = ac.createGain();
+  tranceMix.gain.value = 1;
+
+  const tranceGateScheduler = new TranceGateScheduler(ac, tranceGateGain);
+
+  compressorMakeup.connect(tranceDryGain);
+  tranceDryGain.connect(tranceMix);
+  compressorMakeup.connect(tranceGateGain);
+  tranceGateGain.connect(tranceWetGain);
+  tranceWetGain.connect(tranceMix);
+
+  // ─── Ping Pong Delay — stereo alternating delay ───────────────────────────
+  const ppDelay1 = ac.createDelay(2);
+  ppDelay1.delayTime.value = 0.25;
+
+  const ppDelay2 = ac.createDelay(2);
+  ppDelay2.delayTime.value = 0.25;
+
+  const ppFeedGain = ac.createGain();
+  ppFeedGain.gain.value = 0;
+
+  const ppHiCut = ac.createBiquadFilter();
+  ppHiCut.type = 'lowpass';
+  ppHiCut.frequency.value = 8000;
+
+  const ppPanL = ac.createStereoPanner();
+  ppPanL.pan.value = -1;
+
+  const ppPanR = ac.createStereoPanner();
+  ppPanR.pan.value = 1;
+
+  const ppWetGain = ac.createGain();
+  ppWetGain.gain.value = 0;
+
+  const ppDryGain = ac.createGain();
+  ppDryGain.gain.value = 1;
+
+  const ppMix = ac.createGain();
+  ppMix.gain.value = 1;
+
+  // Signal path: input → delay1 (L) → feedGain → hiCut → delay2 (R) → feedGain2 → delay1 (loop)
+  tranceMix.connect(ppDryGain);
+  ppDryGain.connect(ppMix);
+  tranceMix.connect(ppDelay1);
+  ppDelay1.connect(ppPanL);
+  ppPanL.connect(ppWetGain);
+  ppWetGain.connect(ppMix);
+  ppDelay1.connect(ppFeedGain);
+  ppFeedGain.connect(ppHiCut);
+  ppHiCut.connect(ppDelay2);
+  ppDelay2.connect(ppPanR);
+  ppPanR.connect(ppWetGain);
+  ppDelay2.connect(ppFeedGain); // feedback: delay2 → feedGain → hiCut → delay2 (loop)
+  // compressorMakeup → outputNode is wired in ensureIntercepted() (now via ppMix)
 
   return {
     synthInputGain,
@@ -626,6 +790,8 @@ function createChain(ac: AudioContext): OrbitEffectChain {
     tremoloLFO, tremoloLFOGain, tremoloAmpGain,
     ringCarrier, ringModGain, ringDryGain, ringWetGain, ringMix,
     compressor, compressorMakeup,
+    tranceGateScheduler, tranceGateGain, tranceDryGain, tranceWetGain, tranceMix,
+    ppDelay1, ppDelay2, ppFeedGain, ppHiCut, ppPanL, ppPanR, ppWetGain, ppDryGain, ppMix,
     intercepted: false,
   };
 }
@@ -651,8 +817,8 @@ function ensureIntercepted(orbitIndex: number): OrbitEffectChain {
     }
 
     summingNode.connect(chain.eqLow);
-    // Chain tail → outputNode
-    chain.compressorMakeup.connect(outputNode);
+    // Chain tail → outputNode (ppMix is now the final node)
+    chain.ppMix.connect(outputNode);
 
     chain.intercepted = true;
   }
@@ -666,23 +832,26 @@ const BIQUAD_FILTER_TYPES: BiquadFilterType[] = ['lowpass', 'highpass', 'bandpas
  * Apply (or bypass) all orbit-chain effects for the given orbit.
  * Must be called before superdough() so the intercept is in place.
  */
-export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[]): void {
-  const eq3Effect      = effects.find((e) => e.type === 'eq3'         && e.enabled);
-  const chorusEffect   = effects.find((e) => e.type === 'chorus'      && e.enabled);
-  const phaserEffect   = effects.find((e) => e.type === 'phaser'      && e.enabled);
-  const filterEffect   = effects.find((e) => e.type === 'filter'      && e.enabled);
-  const distortEffect  = effects.find((e) => e.type === 'distortion'  && e.enabled);
-  const reverbEffect   = effects.find((e) => e.type === 'reverb'      && e.enabled);
-  const delayEffect    = effects.find((e) => e.type === 'delay'       && e.enabled);
+export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm = 120): void {
+  const eq3Effect        = effects.find((e) => e.type === 'eq3'         && e.enabled);
+  const chorusEffect     = effects.find((e) => e.type === 'chorus'      && e.enabled);
+  const phaserEffect     = effects.find((e) => e.type === 'phaser'      && e.enabled);
+  const filterEffect     = effects.find((e) => e.type === 'filter'      && e.enabled);
+  const distortEffect    = effects.find((e) => e.type === 'distortion'  && e.enabled);
+  const reverbEffect     = effects.find((e) => e.type === 'reverb'      && e.enabled);
+  const delayEffect      = effects.find((e) => e.type === 'delay'       && e.enabled);
   const bcEffect         = effects.find((e) => e.type === 'bitcrusher'  && e.enabled);
   const parameEffect     = effects.find((e) => e.type === 'parame'      && e.enabled);
   const tremoloEffect    = effects.find((e) => e.type === 'tremolo'     && e.enabled);
   const ringmodEffect    = effects.find((e) => e.type === 'ringmod'     && e.enabled);
   const compressorEffect = effects.find((e) => e.type === 'compressor'  && e.enabled);
+  const tranceEffect     = effects.find((e) => e.type === 'trancegate'  && e.enabled);
+  const pingpongEffect   = effects.find((e) => e.type === 'pingpong'    && e.enabled);
 
   const hasAny = eq3Effect || chorusEffect || phaserEffect || filterEffect
     || distortEffect || reverbEffect || delayEffect || bcEffect
-    || parameEffect || tremoloEffect || ringmodEffect || compressorEffect;
+    || parameEffect || tremoloEffect || ringmodEffect || compressorEffect
+    || tranceEffect || pingpongEffect;
 
   if (!hasAny) {
     const chain = ensureIntercepted(orbitIndex);
@@ -714,6 +883,13 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[]): vo
     chain.compressor.threshold.value      = -100;
     chain.compressor.ratio.value          = 1;
     chain.compressorMakeup.gain.value     = 1;
+    chain.tranceGateScheduler.stop();
+    chain.tranceDryGain.gain.value        = 1;
+    chain.tranceWetGain.gain.value        = 0;
+    chain.ppDryGain.gain.value            = 1;
+    chain.ppWetGain.gain.value            = 0;
+    chain.ppFeedGain.gain.value           = 0;
+    tranceGatePhaseRef.delete(orbitIndex);
     return;
   }
 
@@ -968,6 +1144,45 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[]): vo
     chain.compressor.threshold.setTargetAtTime(-100, now, ramp);
     chain.compressor.ratio.setTargetAtTime(1,        now, ramp);
     chain.compressorMakeup.gain.setTargetAtTime(1,   now, ramp);
+  }
+
+  // ─── Trance Gate ─────────────────────────────────────────────────────────
+  if (tranceEffect) {
+    const p      = tranceEffect.params;
+    const amount = Math.max(0, Math.min(1, p.amount ?? 1));
+    const steps  = Math.max(1, Math.round(p.steps ?? 8));
+    const rate   = Math.max(1, p.rate ?? 8);
+    chain.tranceDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
+    chain.tranceWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
+    chain.tranceGateScheduler.update(p, bpm);
+    tranceGatePhaseRef.set(orbitIndex, { bpm, rate, steps });
+  } else {
+    chain.tranceGateScheduler.stop();
+    chain.tranceDryGain.gain.setTargetAtTime(1, now, ramp);
+    chain.tranceWetGain.gain.setTargetAtTime(0, now, ramp);
+    tranceGatePhaseRef.delete(orbitIndex);
+  }
+
+  // ─── Ping Pong Delay ─────────────────────────────────────────────────────
+  if (pingpongEffect) {
+    const p        = pingpongEffect.params;
+    const amount   = Math.max(0, Math.min(1, p.amount   ?? 0.4));
+    const time     = Math.max(0.01, p.time     ?? 0.25);
+    const feedback = Math.max(0, Math.min(0.9, p.feedback ?? 0.45));
+    const tone     = Math.max(200, p.tone     ?? 8000);
+    const spread   = Math.max(0, Math.min(1,   p.spread   ?? 1));
+    chain.ppDelay1.delayTime.setTargetAtTime(time, now, ramp);
+    chain.ppDelay2.delayTime.setTargetAtTime(time, now, ramp);
+    chain.ppFeedGain.gain.setTargetAtTime(feedback, now, ramp);
+    chain.ppHiCut.frequency.setTargetAtTime(tone, now, ramp);
+    chain.ppPanL.pan.setTargetAtTime(-spread, now, ramp);
+    chain.ppPanR.pan.setTargetAtTime(spread, now, ramp);
+    chain.ppDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
+    chain.ppWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
+  } else {
+    chain.ppFeedGain.gain.setTargetAtTime(0, now, ramp);
+    chain.ppDryGain.gain.setTargetAtTime(1, now, ramp);
+    chain.ppWetGain.gain.setTargetAtTime(0, now, ramp);
   }
 }
 

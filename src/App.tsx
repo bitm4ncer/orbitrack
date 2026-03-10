@@ -4,13 +4,18 @@ import { InstrumentRack } from './components/InstrumentRack/InstrumentRack';
 import { GridSequencer } from './components/GridSequencer/GridSequencer';
 import { SynthPanel } from './components/SynthPanel/SynthPanel';
 import { SampleBank } from './components/SampleBank/SampleBank';
+import { LooperEditor } from './components/LooperPanel/LooperEditor';
+import { LoopBrowser } from './components/LooperPanel/LoopBrowser';
 import { EffectsSidebar } from './components/EffectsSidebar/EffectsSidebar';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useResizable } from './hooks/useResizable';
 import { useStore } from './state/store';
 import { fetchSampleTree, type SampleEntry } from './audio/sampleApi';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as Tone from 'tone';
+import { seedFactory } from './storage/seedFactory';
+import { initRecordingSync } from './storage/recordingSync';
+import { restoreAutosave, initSessionAutosave } from './storage/sessionAutosave';
 
 function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
   const result: SampleEntry[] = [];
@@ -28,12 +33,28 @@ function App() {
   const selectedInstrument = instruments.find((i) => i.id === selectedId);
   const isSynthSelected = selectedInstrument?.type === 'synth';
   const isSamplerSelected = selectedInstrument?.type === 'sampler';
+  const isLooperSelected = selectedInstrument?.type === 'looper';
   const hasSelection = !!selectedInstrument;
 
   const [layerSidebarOpen, setLayerSidebarOpen] = useState(true);
   const [fxSidebarOpen, setFxSidebarOpen] = useState(true);
   const DEFAULT_BOTTOM_H = 24 * 20 + 33;
   const { height: bottomHeight, onMouseDown: onResizeMouseDown } = useResizable(DEFAULT_BOTTOM_H);
+
+  // Delayed unmount: keep content rendered during the close animation
+  const [bottomContentMounted, setBottomContentMounted] = useState(hasSelection);
+  const unmountTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (hasSelection) {
+      clearTimeout(unmountTimer.current);
+      setBottomContentMounted(true);
+    } else {
+      // Keep content mounted during the 250ms close animation, then unmount
+      unmountTimer.current = setTimeout(() => setBottomContentMounted(false), 260);
+    }
+    return () => clearTimeout(unmountTimer.current);
+  }, [hasSelection]);
 
   useEffect(() => {
     const startAudio = async () => {
@@ -44,28 +65,45 @@ function App() {
     return () => window.removeEventListener('mousedown', startAudio);
   }, []);
 
+  const initDone = useRef(false);
   useEffect(() => {
-    const CATEGORIES = [
-      { keywords: ['kick'],          index: 0 },
-      { keywords: ['snare', 'clap'], index: 1 },
-      { keywords: ['hat', 'hh'],     index: 2 },
-      { keywords: ['conga'],         index: 3 },
-    ];
-    fetchSampleTree().then((tree) => {
-      const files = flattenFiles(tree);
-      const store = useStore.getState();
-      const instruments = store.instruments;
-      for (const { keywords, index } of CATEGORIES) {
-        const inst = instruments[index];
-        if (!inst) continue;
-        const matches = files.filter((f) =>
-          keywords.some((kw) => f.name.toLowerCase().includes(kw))
-        );
-        if (matches.length === 0) continue;
-        const pick = matches[Math.floor(Math.random() * matches.length)];
-        store.assignSample(inst.id, pick.path, pick.name.replace(/\.[^.]+$/, ''));
+    if (initDone.current) return;
+    initDone.current = true;
+
+    (async () => {
+      // Restore session from IDB (instruments, effects, BPM, grid, etc.)
+      const restored = await restoreAutosave();
+
+      // Seed factory presets & hydrate recordings
+      seedFactory();
+      useStore.getState().hydrateRecordings();
+      initRecordingSync();
+      initSessionAutosave();
+
+      // Only assign random samples on fresh launch (no saved session)
+      if (!restored) {
+        const CATEGORIES = [
+          { keywords: ['kick'],          index: 0 },
+          { keywords: ['snare', 'clap'], index: 1 },
+          { keywords: ['hat', 'hh'],     index: 2 },
+          { keywords: ['conga'],         index: 3 },
+        ];
+        const tree = await fetchSampleTree();
+        const files = flattenFiles(tree);
+        const store = useStore.getState();
+        const instruments = store.instruments;
+        for (const { keywords, index } of CATEGORIES) {
+          const inst = instruments[index];
+          if (!inst) continue;
+          const matches = files.filter((f) =>
+            keywords.some((kw) => f.name.toLowerCase().includes(kw))
+          );
+          if (matches.length === 0) continue;
+          const pick = matches[Math.floor(Math.random() * matches.length)];
+          store.assignSample(inst.id, pick.path, pick.name.replace(/\.[^.]+$/, ''));
+        }
       }
-    });
+    })();
   }, []);
 
   return (
@@ -117,25 +155,34 @@ function App() {
         </div>
       </div>
 
-      {/* Grid sequencer + instrument panel */}
-      {hasSelection && (
-        <>
+      {/* Grid sequencer + instrument panel — animated slide */}
+      <div
+        className="grid shrink-0 overflow-hidden"
+        style={{
+          gridTemplateRows: hasSelection ? '1fr' : '0fr',
+          transition: 'grid-template-rows 250ms cubic-bezier(0.25, 0.1, 0.25, 1)',
+        }}
+      >
+        <div className="min-h-0 overflow-hidden">
           <div
             className="resize-handle h-1.5 cursor-ns-resize border-t border-border flex items-center justify-center group shrink-0 hover:bg-accent/10 transition-colors"
             onMouseDown={onResizeMouseDown}
           >
             <div className="w-10 h-0.5 rounded-full bg-border/60 group-hover:bg-accent/60 transition-colors" />
           </div>
-          <div
-            className="synth-bottom-bar flex overflow-hidden shrink-0"
-            style={{ height: bottomHeight }}
-          >
-            <GridSequencer />
-            {isSynthSelected && <SynthPanel />}
-            {isSamplerSelected && <SampleBank />}
-          </div>
-        </>
-      )}
+          {bottomContentMounted && (
+            <div
+              className="synth-bottom-bar flex overflow-hidden"
+              style={{ height: bottomHeight }}
+            >
+              {isLooperSelected ? <LooperEditor /> : <GridSequencer />}
+              {isSynthSelected && <SynthPanel />}
+              {isSamplerSelected && <SampleBank />}
+              {isLooperSelected && <LoopBrowser />}
+            </div>
+          )}
+        </div>
+      </div>
 
       <TransportBar />
     </div>

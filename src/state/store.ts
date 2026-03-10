@@ -3,11 +3,27 @@ import { PASTEL_COLORS } from '../canvas/colors';
 import type { Instrument } from '../types/instrument';
 import type { Effect, EffectType } from '../types/effects';
 import type { SuperdoughSynthParams, SuperdoughSamplerParams } from '../types/superdough';
+import type { SynthParams } from '../audio/synth/types';
 import { DEFAULT_SYNTH_PARAMS, DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
 import { DEFAULT_EFFECT_PARAMS } from '../audio/effectParams';
 import { loadSample } from '../audio/sampler';
 import { registerSampleForPlayback } from '../audio/engine';
-import { startRecording as recStart, stopRecordingAsync } from '../audio/recorder';
+import type { LooperParams, LooperEditorState } from '../types/looper';
+import { DEFAULT_LOOPER_PARAMS, createLooperEditorState } from '../types/looper';
+import { sliceBuffer, deleteRange, insertBuffer, extractPeaks, bufferToBlobUrl } from '../audio/bufferOps';
+import { detectTransients, mapTransientsToGrid } from '../audio/transientDetector';
+import type { OrbeatSet } from '../types/storage';
+import { base64ToBlob } from '../storage/serializer';
+import { generateName } from '../utils/nameGenerator';
+import { startRecording as recStart, stopRecordingAsync, type RecordingFormat } from '../audio/recorder';
+import {
+  saveRecording as dbSaveRec, deleteRecordingFromDB as dbDelRec,
+  saveFolder as dbSaveFolder, deleteFolderFromDB as dbDelFolder,
+  loadAllRecordings, loadAllFolders,
+  type StoredRecording,
+} from '../storage/recordingStore';
+import { postSync } from '../storage/recordingSync';
+import { fetchSampleTree, type SampleEntry } from '../audio/sampleApi';
 
 function generateEvenHits(count: number): number[] {
   return Array.from({ length: count }, (_, i) => i / count);
@@ -28,6 +44,11 @@ function randomHits(min = 1, max = 8): number {
 
 // Orbit index counter — incremented each time a new instrument is added
 let orbitCounter = 0;
+
+/** Reset orbit counter to a specific value (used by autosave restore). */
+export function setOrbitCounter(value: number): void {
+  orbitCounter = value;
+}
 
 const defaultInstruments: Instrument[] = (() => {
   const kickHits = randomHits(2, 6);
@@ -136,6 +157,7 @@ export interface StoreState {
   randomizeHits: (id: string) => void;
   toggleLoopSizeLock: (id: string) => void;
   updateSynthParams: (id: string, params: Partial<SuperdoughSynthParams>) => void;
+  updateEngineParams: (id: string, params: SynthParams) => void;
   updateSamplerParams: (id: string, params: Partial<SuperdoughSamplerParams>) => void;
 
   // Grid sequencer (per synth instrument)
@@ -166,6 +188,27 @@ export interface StoreState {
   setSnapEnabled: (enabled: boolean) => void;
   spinMode?: boolean;
 
+  // Grid resolution: 1 = every step (1/16), 2 = 1/8, 4 = 1/4, 8 = 1/2
+  gridResolution: number;
+  setGridResolution: (res: number) => void;
+
+  // Scale filter for piano roll
+  scaleRoot: number;         // 0=C, 1=C#, ..., 11=B
+  scaleType: string;         // key into SCALES map (e.g. 'chromatic', 'major')
+  setScaleRoot: (root: number) => void;
+  setScaleType: (type: string) => void;
+
+  // Generation undo (per instrument snapshot before generation)
+  generationUndo: Record<string, {
+    hitPositions: number[];
+    hits: number;
+    gridNotes: number[][];
+    gridLengths: number[];
+    gridGlide: boolean[];
+  }>;
+  snapshotForUndo: (instrumentId: string) => void;
+  undoGeneration: (instrumentId: string) => void;
+
   // Sample bank
   sampleBankOpen: boolean;
   sampleBankInstrumentId: string | null;
@@ -193,10 +236,54 @@ export interface StoreState {
 
   // Recording
   isRecording: boolean;
-  recordings: { id: string; blob: Blob; name: string; duration: number; timestamp: number }[];
+  recordings: StoredRecording[];
+  recordingFolders: { id: string; name: string }[];
+  recordingFormat: RecordingFormat;
+  recordingQuality: number; // 0-1
+  hydrateRecordings: () => Promise<void>;
   startRecording: () => void;
   stopRecording: () => void;
   deleteRecording: (id: string) => void;
+  renameRecording: (id: string, name: string) => void;
+  reorderRecordings: (fromIdx: number, toIdx: number) => void;
+  moveRecordingToFolder: (recordingId: string, folderId: string | null) => void;
+  createRecordingFolder: (name: string) => void;
+  renameRecordingFolder: (id: string, name: string) => void;
+  deleteRecordingFolder: (id: string) => void;
+  setRecordingFormat: (format: RecordingFormat) => void;
+  setRecordingQuality: (quality: number) => void;
+
+  // Looper
+  looperEditors: Record<string, LooperEditorState>;
+  assignLoop: (instrumentId: string, loopPath: string, displayName: string) => void;
+  updateLooperParams: (instrumentId: string, params: Partial<LooperParams>) => void;
+  initLooperEditor: (instrumentId: string, buffer: AudioBuffer) => void;
+  setLooperSelection: (instrumentId: string, start: number | null, end: number | null) => void;
+  setLooperZoom: (instrumentId: string, viewStart: number, viewEnd: number) => void;
+  looperCut: (instrumentId: string) => void;
+  looperCopy: (instrumentId: string) => void;
+  looperPaste: (instrumentId: string) => void;
+  looperTrim: (instrumentId: string) => void;
+  looperDelete: (instrumentId: string) => void;
+  looperUndo: (instrumentId: string) => void;
+  redetectTransients: (instrumentId: string, sensitivity: number) => void;
+
+  // Set (project) management
+  currentSetId: string | null;
+  currentSetName: string;
+  setCurrentSetName: (name: string) => void;
+  getSerializableState: () => {
+    bpm: number;
+    masterVolume: number;
+    instruments: Instrument[];
+    gridNotes: Record<string, number[][]>;
+    gridGlide: Record<string, boolean[]>;
+    gridLengths: Record<string, number[]>;
+    instrumentEffects: Record<string, Effect[]>;
+    customSamples: { key: string; url: string; name: string }[];
+  };
+  loadSet: (set: OrbeatSet) => void;
+  newSet: () => void;
 }
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -227,6 +314,14 @@ export const useStore = create<StoreState>((set, get) => ({
 
   // Snap
   snapEnabled: true,
+  gridResolution: 1,
+
+  // Scale filter
+  scaleRoot: 0,         // C
+  scaleType: 'chromatic', // show all notes by default
+
+  // Generation undo
+  generationUndo: {},
 
   // Sample bank
   sampleBankOpen: false,
@@ -259,6 +354,13 @@ export const useStore = create<StoreState>((set, get) => ({
         inst.id === id
           ? { ...inst, synthParams: { ...(inst.synthParams ?? DEFAULT_SYNTH_PARAMS), ...params } }
           : inst
+      ),
+    })),
+
+  updateEngineParams: (id, params) =>
+    set((s) => ({
+      instruments: s.instruments.map((inst) =>
+        inst.id === id ? { ...inst, engineParams: params } : inst
       ),
     })),
 
@@ -405,12 +507,14 @@ export const useStore = create<StoreState>((set, get) => ({
       const { [id]: _gg, ...gridGlide } = s.gridGlide;
       const { [id]: _gl, ...gridLengths } = s.gridLengths;
       const { [id]: _fx, ...instrumentEffects } = s.instrumentEffects;
+      const { [id]: _le, ...looperEditors } = s.looperEditors;
       return {
         instruments,
         gridNotes,
         gridGlide,
         gridLengths,
         instrumentEffects,
+        looperEditors,
         selectedInstrumentId: s.selectedInstrumentId === id ? null : s.selectedInstrumentId,
       };
     }),
@@ -657,6 +761,45 @@ export const useStore = create<StoreState>((set, get) => ({
     }),
 
   setSnapEnabled: (snapEnabled) => set({ snapEnabled }),
+  setGridResolution: (gridResolution) => set({ gridResolution }),
+  setScaleRoot: (scaleRoot) => set({ scaleRoot }),
+  setScaleType: (scaleType) => set({ scaleType }),
+
+  snapshotForUndo: (instrumentId) => set((s) => {
+    const inst = s.instruments.find((i) => i.id === instrumentId);
+    if (!inst) return s;
+    return {
+      generationUndo: {
+        ...s.generationUndo,
+        [instrumentId]: {
+          hitPositions: [...inst.hitPositions],
+          hits: inst.hits,
+          gridNotes: (s.gridNotes[instrumentId] || []).map((n) => [...n]),
+          gridLengths: [...(s.gridLengths[instrumentId] || [])],
+          gridGlide: [...(s.gridGlide[instrumentId] || [])],
+        },
+      },
+    };
+  }),
+
+  undoGeneration: (instrumentId) => set((s) => {
+    const snapshot = s.generationUndo[instrumentId];
+    if (!snapshot) return s;
+
+    const instruments = s.instruments.map((inst) => {
+      if (inst.id !== instrumentId) return inst;
+      return { ...inst, hitPositions: snapshot.hitPositions, hits: snapshot.hits };
+    });
+
+    const gridNotes = { ...s.gridNotes, [instrumentId]: snapshot.gridNotes };
+    const gridLengths = { ...s.gridLengths, [instrumentId]: snapshot.gridLengths };
+    const gridGlide = { ...s.gridGlide, [instrumentId]: snapshot.gridGlide };
+
+    const undo = { ...s.generationUndo };
+    delete undo[instrumentId];
+
+    return { instruments, gridNotes, gridLengths, gridGlide, generationUndo: undo };
+  }),
 
   openSampleBank: (instrumentId) =>
     set({ sampleBankOpen: true, sampleBankInstrumentId: instrumentId }),
@@ -705,6 +848,8 @@ export const useStore = create<StoreState>((set, get) => ({
         parame: 'Param EQ',
         tremolo: 'Tremolo',
         ringmod: 'Ring Mod',
+        trancegate: 'Orb Gate',
+        pingpong: 'Ping Pong',
       };
       const effect: Effect = {
         id: createId(),
@@ -777,26 +922,571 @@ export const useStore = create<StoreState>((set, get) => ({
   // Recording
   isRecording: false,
   recordings: [],
+  recordingFolders: [],
+  recordingFormat: 'wav' as RecordingFormat,
+  recordingQuality: 0.75,
+
+  hydrateRecordings: async () => {
+    const [recs, folders] = await Promise.all([loadAllRecordings(), loadAllFolders()]);
+    recs.sort((a, b) => a.order - b.order);
+    set({ recordings: recs, recordingFolders: folders });
+  },
 
   startRecording: () => {
     if (recStart()) set({ isRecording: true });
   },
 
   stopRecording: async () => {
-    const result = await stopRecordingAsync();
+    const { recordingFormat, recordingQuality } = get();
+    const result = await stopRecordingAsync(recordingFormat, recordingQuality);
     if (result) {
-      const recNum = get().recordings.length + 1;
-      set((s) => ({
-        isRecording: false,
-        recordings: [
-          ...s.recordings,
-          { id: createId(), blob: result.blob, name: `Rec ${recNum}`, duration: result.duration, timestamp: result.timestamp },
-        ],
-      }));
+      const order = get().recordings.length;
+      const newRec: StoredRecording = {
+        id: createId(), blob: result.blob, name: `Rec ${order + 1}`,
+        duration: result.duration, timestamp: result.timestamp,
+        folderId: null, format: recordingFormat, order,
+      };
+      set((s) => ({ isRecording: false, recordings: [...s.recordings, newRec] }));
+      dbSaveRec(newRec).catch(console.error);
+      postSync({ type: 'recording-added', id: newRec.id });
     } else {
       set({ isRecording: false });
     }
   },
 
-  deleteRecording: (id) => set((s) => ({ recordings: s.recordings.filter((r) => r.id !== id) })),
+  deleteRecording: (id) => {
+    set((s) => ({ recordings: s.recordings.filter((r) => r.id !== id) }));
+    dbDelRec(id).catch(console.error);
+    postSync({ type: 'recording-deleted', id });
+  },
+
+  renameRecording: (id, name) => {
+    set((s) => ({ recordings: s.recordings.map((r) => (r.id === id ? { ...r, name } : r)) }));
+    const rec = get().recordings.find((r) => r.id === id);
+    if (rec) dbSaveRec(rec).catch(console.error);
+    postSync({ type: 'recording-updated', id });
+  },
+
+  reorderRecordings: (fromIdx, toIdx) => {
+    set((s) => {
+      const recs = [...s.recordings];
+      const [item] = recs.splice(fromIdx, 1);
+      recs.splice(toIdx, 0, item);
+      // Update order fields
+      return { recordings: recs.map((r, i) => ({ ...r, order: i })) };
+    });
+    // Persist all with updated order
+    for (const rec of get().recordings) dbSaveRec(rec).catch(console.error);
+    postSync({ type: 'recordings-reordered' });
+  },
+
+  moveRecordingToFolder: (recordingId, folderId) => {
+    set((s) => ({ recordings: s.recordings.map((r) => (r.id === recordingId ? { ...r, folderId } : r)) }));
+    const rec = get().recordings.find((r) => r.id === recordingId);
+    if (rec) dbSaveRec(rec).catch(console.error);
+    postSync({ type: 'recording-updated', id: recordingId });
+  },
+
+  createRecordingFolder: (name) => {
+    const folder = { id: createId(), name };
+    set((s) => ({ recordingFolders: [...s.recordingFolders, folder] }));
+    dbSaveFolder(folder).catch(console.error);
+    postSync({ type: 'folder-added', id: folder.id });
+  },
+
+  renameRecordingFolder: (id, name) => {
+    set((s) => ({ recordingFolders: s.recordingFolders.map((f) => (f.id === id ? { ...f, name } : f)) }));
+    const folder = get().recordingFolders.find((f) => f.id === id);
+    if (folder) dbSaveFolder(folder).catch(console.error);
+    postSync({ type: 'folder-updated', id });
+  },
+
+  deleteRecordingFolder: (id) => {
+    set((s) => ({
+      recordingFolders: s.recordingFolders.filter((f) => f.id !== id),
+      recordings: s.recordings.map((r) => (r.folderId === id ? { ...r, folderId: null } : r)),
+    }));
+    dbDelFolder(id).catch(console.error);
+    // Persist orphaned recordings with null folderId
+    for (const rec of get().recordings.filter((r) => r.folderId === null)) {
+      dbSaveRec(rec).catch(console.error);
+    }
+    postSync({ type: 'folder-deleted', id });
+  },
+
+  setRecordingFormat: (recordingFormat) => set({ recordingFormat }),
+  setRecordingQuality: (recordingQuality) => set({ recordingQuality }),
+
+  // Looper
+  looperEditors: {},
+
+  assignLoop: (instrumentId, loopPath, displayName) => {
+    const baseUrl = (import.meta.env.BASE_URL as string) ?? '/';
+    const url = loopPath.startsWith('blob:') || loopPath.startsWith('http')
+      ? loopPath
+      : baseUrl.replace(/\/$/, '') + '/' + loopPath;
+
+    const sdKey = registerSampleForPlayback(loopPath);
+    loadSample(loopPath, url);
+
+    set((s) => ({
+      instruments: s.instruments.map((inst) =>
+        inst.id === instrumentId
+          ? { ...inst, sampleName: sdKey, samplePath: loopPath, name: displayName }
+          : inst
+      ),
+    }));
+
+    // Decode audio and init editor
+    const ctx = new AudioContext();
+    fetch(url)
+      .then((r) => r.arrayBuffer())
+      .then((buf) => ctx.decodeAudioData(buf))
+      .then((decoded) => {
+        get().initLooperEditor(instrumentId, decoded);
+      })
+      .catch((e) => console.error('[assignLoop] decode failed:', e));
+  },
+
+  updateLooperParams: (id, params) =>
+    set((s) => ({
+      instruments: s.instruments.map((inst) =>
+        inst.id === id
+          ? { ...inst, looperParams: { ...(inst.looperParams ?? DEFAULT_LOOPER_PARAMS), ...params } }
+          : inst
+      ),
+    })),
+
+  initLooperEditor: (instrumentId, buffer) => {
+    const peaks = extractPeaks(buffer, 512);
+    const transients = detectTransients(buffer, 0.5, 16);
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    const gridSize = inst?.loopSize ?? 16;
+    const hitPositions = mapTransientsToGrid(transients, gridSize);
+
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...createLooperEditorState(),
+          audioBuffer: buffer,
+          peaks,
+          transients,
+        },
+      },
+      instruments: s.instruments.map((i) =>
+        i.id === instrumentId
+          ? { ...i, hits: hitPositions.length, hitPositions }
+          : i
+      ),
+      gridNotes: {
+        ...s.gridNotes,
+        [instrumentId]: hitPositions.map(() => [60]),
+      },
+    }));
+  },
+
+  setLooperSelection: (instrumentId, start, end) =>
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...(s.looperEditors[instrumentId] ?? createLooperEditorState()),
+          selectionStart: start,
+          selectionEnd: end,
+        },
+      },
+    })),
+
+  setLooperZoom: (instrumentId, viewStart, viewEnd) =>
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...(s.looperEditors[instrumentId] ?? createLooperEditorState()),
+          viewStart,
+          viewEnd,
+        },
+      },
+    })),
+
+  looperCut: (instrumentId) => {
+    const editor = get().looperEditors[instrumentId];
+    if (!editor?.audioBuffer || editor.selectionStart == null || editor.selectionEnd == null) return;
+    const buf = editor.audioBuffer;
+    const startSample = Math.floor(editor.selectionStart * buf.length);
+    const endSample = Math.floor(editor.selectionEnd * buf.length);
+    const clipboard = sliceBuffer(buf, startSample, endSample);
+    const newBuffer = deleteRange(buf, startSample, endSample);
+    const peaks = extractPeaks(newBuffer, 512);
+    const undoStack = [...editor.undoStack, buf].slice(-20);
+
+    // Re-register with superdough
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    if (inst?.sampleName) {
+      const blobUrl = bufferToBlobUrl(newBuffer);
+      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+    }
+
+    // Re-detect transients
+    const transients = detectTransients(newBuffer, 0.5, 16);
+    const gridSize = inst?.loopSize ?? 16;
+    const hitPositions = mapTransientsToGrid(transients, gridSize);
+
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...editor,
+          audioBuffer: newBuffer,
+          peaks,
+          clipboard,
+          undoStack,
+          transients,
+          selectionStart: null,
+          selectionEnd: null,
+        },
+      },
+      instruments: s.instruments.map((i) =>
+        i.id === instrumentId ? { ...i, hits: hitPositions.length, hitPositions } : i
+      ),
+      gridNotes: {
+        ...s.gridNotes,
+        [instrumentId]: hitPositions.map(() => [60]),
+      },
+    }));
+  },
+
+  looperCopy: (instrumentId) => {
+    const editor = get().looperEditors[instrumentId];
+    if (!editor?.audioBuffer || editor.selectionStart == null || editor.selectionEnd == null) return;
+    const buf = editor.audioBuffer;
+    const startSample = Math.floor(editor.selectionStart * buf.length);
+    const endSample = Math.floor(editor.selectionEnd * buf.length);
+    const clipboard = sliceBuffer(buf, startSample, endSample);
+
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: { ...editor, clipboard },
+      },
+    }));
+  },
+
+  looperPaste: (instrumentId) => {
+    const editor = get().looperEditors[instrumentId];
+    if (!editor?.audioBuffer || !editor.clipboard) return;
+    const buf = editor.audioBuffer;
+    const insertAt = editor.selectionStart != null
+      ? Math.floor(editor.selectionStart * buf.length)
+      : buf.length;
+    const undoStack = [...editor.undoStack, buf].slice(-20);
+    const newBuffer = insertBuffer(buf, editor.clipboard, insertAt);
+    const peaks = extractPeaks(newBuffer, 512);
+
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    if (inst?.sampleName) {
+      const blobUrl = bufferToBlobUrl(newBuffer);
+      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+    }
+
+    const transients = detectTransients(newBuffer, 0.5, 16);
+    const gridSize = inst?.loopSize ?? 16;
+    const hitPositions = mapTransientsToGrid(transients, gridSize);
+
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...editor,
+          audioBuffer: newBuffer,
+          peaks,
+          undoStack,
+          transients,
+          selectionStart: null,
+          selectionEnd: null,
+        },
+      },
+      instruments: s.instruments.map((i) =>
+        i.id === instrumentId ? { ...i, hits: hitPositions.length, hitPositions } : i
+      ),
+      gridNotes: {
+        ...s.gridNotes,
+        [instrumentId]: hitPositions.map(() => [60]),
+      },
+    }));
+  },
+
+  looperTrim: (instrumentId) => {
+    const editor = get().looperEditors[instrumentId];
+    if (!editor?.audioBuffer || editor.selectionStart == null || editor.selectionEnd == null) return;
+    const buf = editor.audioBuffer;
+    const startSample = Math.floor(editor.selectionStart * buf.length);
+    const endSample = Math.floor(editor.selectionEnd * buf.length);
+    const undoStack = [...editor.undoStack, buf].slice(-20);
+    const newBuffer = sliceBuffer(buf, startSample, endSample);
+    const peaks = extractPeaks(newBuffer, 512);
+
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    if (inst?.sampleName) {
+      const blobUrl = bufferToBlobUrl(newBuffer);
+      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+    }
+
+    const transients = detectTransients(newBuffer, 0.5, 16);
+    const gridSize = inst?.loopSize ?? 16;
+    const hitPositions = mapTransientsToGrid(transients, gridSize);
+
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...editor,
+          audioBuffer: newBuffer,
+          peaks,
+          undoStack,
+          transients,
+          selectionStart: null,
+          selectionEnd: null,
+          viewStart: 0,
+          viewEnd: 1,
+        },
+      },
+      instruments: s.instruments.map((i) =>
+        i.id === instrumentId ? { ...i, hits: hitPositions.length, hitPositions } : i
+      ),
+      gridNotes: {
+        ...s.gridNotes,
+        [instrumentId]: hitPositions.map(() => [60]),
+      },
+    }));
+  },
+
+  looperDelete: (instrumentId) => {
+    const editor = get().looperEditors[instrumentId];
+    if (!editor?.audioBuffer || editor.selectionStart == null || editor.selectionEnd == null) return;
+    const buf = editor.audioBuffer;
+    const startSample = Math.floor(editor.selectionStart * buf.length);
+    const endSample = Math.floor(editor.selectionEnd * buf.length);
+    const undoStack = [...editor.undoStack, buf].slice(-20);
+    const newBuffer = deleteRange(buf, startSample, endSample);
+    const peaks = extractPeaks(newBuffer, 512);
+
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    if (inst?.sampleName) {
+      const blobUrl = bufferToBlobUrl(newBuffer);
+      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+    }
+
+    const transients = detectTransients(newBuffer, 0.5, 16);
+    const gridSize = inst?.loopSize ?? 16;
+    const hitPositions = mapTransientsToGrid(transients, gridSize);
+
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...editor,
+          audioBuffer: newBuffer,
+          peaks,
+          undoStack,
+          transients,
+          selectionStart: null,
+          selectionEnd: null,
+        },
+      },
+      instruments: s.instruments.map((i) =>
+        i.id === instrumentId ? { ...i, hits: hitPositions.length, hitPositions } : i
+      ),
+      gridNotes: {
+        ...s.gridNotes,
+        [instrumentId]: hitPositions.map(() => [60]),
+      },
+    }));
+  },
+
+  looperUndo: (instrumentId) => {
+    const editor = get().looperEditors[instrumentId];
+    if (!editor?.undoStack.length) return;
+    const undoStack = [...editor.undoStack];
+    const buffer = undoStack.pop()!;
+    const peaks = extractPeaks(buffer, 512);
+
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    if (inst?.sampleName) {
+      const blobUrl = bufferToBlobUrl(buffer);
+      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+    }
+
+    const transients = detectTransients(buffer, 0.5, 16);
+    const gridSize = inst?.loopSize ?? 16;
+    const hitPositions = mapTransientsToGrid(transients, gridSize);
+
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...editor,
+          audioBuffer: buffer,
+          peaks,
+          undoStack,
+          transients,
+          selectionStart: null,
+          selectionEnd: null,
+        },
+      },
+      instruments: s.instruments.map((i) =>
+        i.id === instrumentId ? { ...i, hits: hitPositions.length, hitPositions } : i
+      ),
+      gridNotes: {
+        ...s.gridNotes,
+        [instrumentId]: hitPositions.map(() => [60]),
+      },
+    }));
+  },
+
+  redetectTransients: (instrumentId, sensitivity) => {
+    const editor = get().looperEditors[instrumentId];
+    if (!editor?.audioBuffer) return;
+    const transients = detectTransients(editor.audioBuffer, sensitivity, 16);
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    const gridSize = inst?.loopSize ?? 16;
+    const hitPositions = mapTransientsToGrid(transients, gridSize);
+
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: { ...editor, transients },
+      },
+      instruments: s.instruments.map((i) =>
+        i.id === instrumentId ? { ...i, hits: hitPositions.length, hitPositions } : i
+      ),
+      gridNotes: {
+        ...s.gridNotes,
+        [instrumentId]: hitPositions.map(() => [60]),
+      },
+    }));
+  },
+
+  // Set (project) management
+  currentSetId: null,
+  currentSetName: generateName(),
+
+  setCurrentSetName: (name) => set({ currentSetName: name }),
+
+  getSerializableState: () => {
+    const s = get();
+    return {
+      bpm: s.bpm,
+      masterVolume: s.masterVolume,
+      instruments: s.instruments,
+      gridNotes: s.gridNotes,
+      gridGlide: s.gridGlide,
+      gridLengths: s.gridLengths,
+      instrumentEffects: s.instrumentEffects,
+      customSamples: s.customSamples,
+    };
+  },
+
+  loadSet: (orbeatSet: OrbeatSet) => {
+    // Re-register custom samples from embedded data
+    const customSamples: { key: string; url: string; name: string }[] = [];
+    if (orbeatSet.customSamples) {
+      for (const es of orbeatSet.customSamples) {
+        const blob = base64ToBlob(es.base64, es.mimeType);
+        const url = URL.createObjectURL(blob);
+        registerSampleForPlayback(es.key, url);
+        loadSample(es.key, url);
+        customSamples.push({ key: es.key, url, name: es.name });
+      }
+    }
+
+    // Re-register non-custom samples referenced by instruments
+    for (const inst of orbeatSet.instruments) {
+      if (inst.type === 'sampler' && inst.samplePath) {
+        const isCustom = customSamples.some((c) => c.key === inst.samplePath);
+        if (!isCustom) {
+          registerSampleForPlayback(inst.samplePath);
+          loadSample(inst.samplePath, inst.samplePath);
+        }
+      }
+    }
+
+    // Reset orbit counter to match loaded instruments
+    orbitCounter = orbeatSet.instruments.reduce((max, i) => Math.max(max, i.orbitIndex + 1), 0);
+
+    set({
+      bpm: orbeatSet.bpm,
+      masterVolume: orbeatSet.masterVolume,
+      instruments: orbeatSet.instruments,
+      gridNotes: orbeatSet.gridNotes,
+      gridGlide: orbeatSet.gridGlide,
+      gridLengths: orbeatSet.gridLengths,
+      instrumentEffects: orbeatSet.instrumentEffects,
+      customSamples,
+      currentSetId: orbeatSet.meta.id,
+      currentSetName: orbeatSet.meta.name,
+      selectedInstrumentId: orbeatSet.instruments[0]?.id ?? null,
+    });
+  },
+
+  newSet: () => {
+    orbitCounter = 0;
+    const instruments = defaultInstruments.map((inst) => ({
+      ...inst,
+      id: createId(),
+      orbitIndex: orbitCounter++,
+    }));
+    const gridNotes: Record<string, number[][]> = {};
+    for (const inst of instruments) {
+      gridNotes[inst.id] = Array.from({ length: inst.hits }, () => [60]);
+    }
+    const bpm = Math.floor(Math.random() * (145 - 85 + 1)) + 85;
+    set({
+      bpm,
+      masterVolume: 0.8,
+      instruments,
+      gridNotes,
+      gridGlide: {},
+      gridLengths: {},
+      instrumentEffects: {},
+      customSamples: [],
+      currentSetId: null,
+      currentSetName: generateName(),
+      selectedInstrumentId: null,
+      isPlaying: false,
+      currentStep: -1,
+      transportProgress: 0,
+    });
+
+    // Assign random samples to default sampler instruments
+    const CATEGORIES: { keywords: string[]; index: number }[] = [
+      { keywords: ['kick'],          index: 0 },
+      { keywords: ['snare', 'clap'], index: 1 },
+      { keywords: ['hat', 'hh'],     index: 2 },
+      { keywords: ['conga'],         index: 3 },
+    ];
+    const flattenFiles = (entries: SampleEntry[]): SampleEntry[] => {
+      const result: SampleEntry[] = [];
+      for (const e of entries) {
+        if (e.type === 'file') result.push(e);
+        else if (e.children) result.push(...flattenFiles(e.children));
+      }
+      return result;
+    };
+    fetchSampleTree().then((tree) => {
+      const files = flattenFiles(tree);
+      const store = get();
+      for (const { keywords, index } of CATEGORIES) {
+        const inst = store.instruments[index];
+        if (!inst) continue;
+        const matches = files.filter((f) =>
+          keywords.some((kw) => f.name.toLowerCase().includes(kw))
+        );
+        if (matches.length === 0) continue;
+        const pick = matches[Math.floor(Math.random() * matches.length)];
+        get().assignSample(inst.id, pick.path, pick.name.replace(/\.[^.]+$/, ''));
+      }
+    });
+  },
 }));

@@ -10,23 +10,25 @@
   --color-accent: #6366f1;
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
 
-html, body, #root {
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-}
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
 
-body {
-  background-color: var(--color-bg);
-  color: var(--color-text-primary);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  -webkit-font-smoothing: antialiased;
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -77,6 +79,13 @@ body {
   .fx-add-item      { font-size: 14px; }
 }
 
+/* ── Transport Bar ────────────────────────────────────────────────────────── */
+.transport-bar {
+  --tb-pad: clamp(12px, 3vw, 40px);
+  padding: var(--tb-pad);
+  gap: var(--tb-pad);
+}
+
 /* Effect quick-access popup animation */
 @keyframes fxPopIn {
   from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
@@ -87,6 +96,10 @@ body {
 @keyframes recPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+@keyframes nameGenBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
 }
 
 /* Custom instrument sliders with per-instrument color */
