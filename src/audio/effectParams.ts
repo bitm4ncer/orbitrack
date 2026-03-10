@@ -12,7 +12,8 @@ export interface EffectParamDef {
 
 export const EFFECT_PARAM_DEFS: Partial<Record<EffectType, EffectParamDef[]>> & Record<
   'eq3'|'compressor'|'reverb'|'delay'|'chorus'|'phaser'|'distortion'|'filter'|
-  'bitcrusher'|'parame'|'tremolo'|'ringmod'|'trancegate'|'pingpong',
+  'bitcrusher'|'parame'|'tremolo'|'ringmod'|'trancegate'|'pingpong'|
+  'limiter'|'drumbuss'|'stereoimage',
   EffectParamDef[]
 > = {
   reverb: [
@@ -139,6 +140,21 @@ export const EFFECT_PARAM_DEFS: Partial<Record<EffectType, EffectParamDef[]>> & 
     { key: 'tone',     label: 'Hi-Cut',   min: 500, max: 20000, step: 100,   defaultValue: 8000, unit: 'Hz' },
     { key: 'spread',   label: 'Spread',   min: 0,   max: 1,     step: 0.01,  defaultValue: 1 },
   ],
+  limiter: [
+    { key: 'ceiling', label: 'Ceiling', min: -12, max: 0,   step: 0.1,  defaultValue: -1.0, unit: 'dB' },
+    { key: 'release', label: 'Release', min: 0.02, max: 1,  step: 0.01, defaultValue: 0.08, unit: 's' },
+  ],
+  drumbuss: [
+    { key: 'drive',    label: 'Drive',    min: 0,   max: 1,  step: 0.01, defaultValue: 0.3 },
+    { key: 'low',      label: 'Low',      min: 0,   max: 12, step: 0.5,  defaultValue: 3,  unit: 'dB' },
+    { key: 'compress', label: 'Compress', min: 1,   max: 8,  step: 0.5,  defaultValue: 2 },
+    { key: 'mix',      label: 'Mix',      min: 0,   max: 1,  step: 0.01, defaultValue: 0.6 },
+    { key: 'output',   label: 'Output',   min: -12, max: 6,  step: 0.5,  defaultValue: 0,  unit: 'dB' },
+  ],
+  stereoimage: [
+    { key: 'width',   label: 'Width',    min: 0,  max: 2,   step: 0.01, defaultValue: 1 },
+    { key: 'monoLow', label: 'Mono Low', min: 20, max: 500, step: 5,    defaultValue: 120, unit: 'Hz' },
+  ],
 };
 
 /** 2-3 most important param keys per effect for quick-access UI */
@@ -155,8 +171,11 @@ export const QUICK_PARAM_KEYS: Partial<Record<EffectType, string[]>> = {
   bitcrusher: ['bits', 'downsample'],
   tremolo:    ['amount', 'rate'],
   ringmod:    ['frequency', 'amount'],
-  trancegate: ['amount', 'steps'],
-  pingpong:   ['amount', 'time', 'feedback'],
+  trancegate:   ['amount', 'steps'],
+  pingpong:     ['amount', 'time', 'feedback'],
+  limiter:      ['ceiling', 'release'],
+  drumbuss:     ['drive', 'mix', 'compress'],
+  stereoimage:  ['width', 'monoLow'],
 };
 
 export function DEFAULT_EFFECT_PARAMS(type: EffectType): Record<string, number> {

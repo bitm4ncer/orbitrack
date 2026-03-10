@@ -16,6 +16,7 @@ import * as Tone from 'tone';
 import { seedFactory } from './storage/seedFactory';
 import { initRecordingSync } from './storage/recordingSync';
 import { restoreAutosave, initSessionAutosave } from './storage/sessionAutosave';
+import { initUndoHistory } from './state/undoHistory';
 
 function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
   const result: SampleEntry[] = [];
@@ -79,6 +80,7 @@ function App() {
       useStore.getState().hydrateRecordings();
       initRecordingSync();
       initSessionAutosave();
+      initUndoHistory();
 
       // Only assign random samples on fresh launch (no saved session)
       if (!restored) {

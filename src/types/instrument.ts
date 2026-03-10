@@ -21,4 +21,6 @@ export interface Instrument {
   engineParams?: SynthParams;
   samplerParams?: SuperdoughSamplerParams;
   looperParams?: LooperParams;
+  detectedBpm?: number;       // BPM detected from audio, 0 = unknown
+  bpmMultiplier?: number;     // 0.5 | 1 | 2 (half-time / normal / double-time)
 }

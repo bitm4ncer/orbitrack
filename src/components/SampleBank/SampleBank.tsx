@@ -390,11 +390,16 @@ export function SampleBank() {
         </span>
         <label
           htmlFor={fileInputId}
-          className="text-[9px] px-2 py-0.5 rounded border border-border hover:border-white/20
+          className="flex items-center gap-1.5 text-[9px] px-2 py-0.5 rounded border border-border hover:border-white/20
                      text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
           title="Import audio files"
         >
-          + Import
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="shrink-0">
+            <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.2" />
+            <line x1="7" y1="4" x2="7" y2="10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+            <line x1="4" y1="7" x2="10" y2="7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          </svg>
+          Import
           <input
             id={fileInputId}
             type="file"
@@ -455,10 +460,29 @@ export function SampleBank() {
                   <path d="M2 1 L6 4 L2 7 Z" />
                 </svg>
               ) : (
-                <div className="w-2 shrink-0" />
+                /* Circled + assign button at the start of the row */
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleAssign(entry); }}
+                  className="shrink-0 rounded-full transition-colors text-text-secondary/40 hover:text-accent"
+                  title="Assign to instrument"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" className="shrink-0">
+                    <circle cx="7" cy="7" r="5.5" strokeWidth="1" />
+                    <line x1="7" y1="4.5" x2="7" y2="9.5" strokeWidth="1.2" strokeLinecap="round" />
+                    <line x1="4.5" y1="7" x2="9.5" y2="7" strokeWidth="1.2" strokeLinecap="round" />
+                  </svg>
+                </button>
               )}
 
-              {/* Name — active sample gets layer color */}
+              {/* Active sample dot */}
+              {isCurrentSample && (
+                <div
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: color }}
+                />
+              )}
+
+              {/* Name */}
               <span
                 className={`text-[11px] truncate flex-1 ${isFolder ? 'text-text-secondary' : 'text-text-primary'}`}
                 style={isCurrentSample ? { color } : undefined}
@@ -484,16 +508,6 @@ export function SampleBank() {
                         <path d="M1 0 L8 4 L1 8 Z" />
                       </svg>
                     )}
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleAssign(entry); }}
-                    className="shrink-0 p-0.5 rounded transition-colors text-text-secondary/40 hover:text-accent"
-                    title="Assign to instrument"
-                  >
-                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <line x1="4" y1="1" x2="4" y2="7" />
-                      <line x1="1" y1="4" x2="7" y2="4" />
-                    </svg>
                   </button>
                   {isImportedItem && (
                     <button

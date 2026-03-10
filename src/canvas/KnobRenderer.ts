@@ -91,11 +91,16 @@ export class KnobRenderer {
     const transport = Tone.getTransport();
     const secondsPer16th = 60 / state.bpm / 4;
     const totalSteps = state.isPlaying ? transport.seconds / secondsPer16th : 0;
-    const instProg = state.isPlaying ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
-    const dotRotation = instProg * TWO_PI;
 
     const isSelected = state.selectedInstrumentId === this.instrumentId;
     const isMuted = inst.muted;
+    const anySolo = state.instruments.some((i) => i.solo);
+    const effectivelyMuted = isMuted && !inst.solo || (anySolo && !inst.solo);
+
+    // Muted orbits don't rotate unless soloed
+    const instProg = state.isPlaying && !effectivelyMuted
+      ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
+    const dotRotation = instProg * TWO_PI;
 
     // --- 1. Dark knob background ---
     const bgRadius = Math.min(cx, cy) - 2;
@@ -123,26 +128,70 @@ export class KnobRenderer {
 
     // --- 3. Grid ticks on ring (rotate with dots) — removed, replaced by fixed ticks above ---
 
-    // --- 4. Ring ---
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, TWO_PI);
-    ctx.strokeStyle = isMuted ? rgba(inst.color, 0.25) : inst.color;
-    ctx.lineWidth = isSelected ? 2.5 : 1.5;
-    ctx.stroke();
+    // Loop region state (needed for ring + hit dot rendering)
+    const editorState = inst.type === 'looper' ? state.looperEditors[inst.id] : undefined;
+    const loopIn = editorState?.loopIn ?? 0;
+    const loopOut = editorState?.loopOut ?? 1;
+    const hasLoopRegion = inst.type === 'looper' && (loopIn > 0 || loopOut < 1);
+
+    // --- 4. Ring (skip if loop region draws its own) ---
+    if (!hasLoopRegion) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, TWO_PI);
+      ctx.strokeStyle = isMuted ? rgba(inst.color, 0.25) : inst.color;
+      ctx.lineWidth = isSelected ? 2.5 : 1.5;
+      ctx.stroke();
+    }
+
+    if (hasLoopRegion) {
+      // Draw dimmed full ring, then bright arc for loop region
+      const arcStart = loopIn * TWO_PI - dotRotation + TRIGGER_ANGLE;
+      const arcEnd = loopOut * TWO_PI - dotRotation + TRIGGER_ANGLE;
+
+      // Dim arc for the inactive region (draw full ring dimmed, then overdraw active)
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, TWO_PI);
+      ctx.strokeStyle = rgba(inst.color, 0.12);
+      ctx.lineWidth = 4;
+      ctx.stroke();
+
+      // Bright arc for the active loop region
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, arcStart, arcEnd);
+      ctx.strokeStyle = isMuted ? rgba(inst.color, 0.4) : inst.color;
+      ctx.lineWidth = 4;
+      ctx.stroke();
+
+      // Small ticks at loop in/out boundaries
+      for (const pos of [loopIn, loopOut]) {
+        const tickAngle = pos * TWO_PI - dotRotation + TRIGGER_ANGLE;
+        const tc = Math.cos(tickAngle);
+        const ts = Math.sin(tickAngle);
+        ctx.beginPath();
+        ctx.moveTo(cx + tc * (radius - 8), cy + ts * (radius - 8));
+        ctx.lineTo(cx + tc * (radius + 8), cy + ts * (radius + 8));
+        ctx.strokeStyle = 'rgba(0,255,255,0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
 
     // --- 5. Hit dots (rotate with ring) ---
+
     for (let i = 0; i < inst.hitPositions.length; i++) {
       const hitPos = inst.hitPositions[i];
       const hitAngle = hitPos * TWO_PI - dotRotation + TRIGGER_ANGLE;
       const hx = cx + Math.cos(hitAngle) * radius;
       const hy = cy + Math.sin(hitAngle) * radius;
 
+      const outsideLoop = hasLoopRegion && (hitPos < loopIn - 0.001 || hitPos > loopOut + 0.001);
+
       const diff = Math.abs(instProg - hitPos);
       const wrappedDiff = Math.min(diff, 1 - diff);
-      const isTriggered = state.isPlaying && wrappedDiff < (0.5 / inst.loopSize);
+      const isTriggered = state.isPlaying && !outsideLoop && wrappedDiff < (0.5 / inst.loopSize);
 
       ctx.beginPath();
-      ctx.arc(hx, hy, HIT_RADIUS, 0, TWO_PI);
+      ctx.arc(hx, hy, outsideLoop ? HIT_RADIUS * 0.6 : HIT_RADIUS, 0, TWO_PI);
 
       if (isTriggered) {
         ctx.fillStyle = '#ffffff';
@@ -151,12 +200,14 @@ export class KnobRenderer {
         ctx.fill();
         ctx.shadowBlur = 0;
       } else {
-        ctx.fillStyle = rgba(inst.color, isMuted ? 0.25 : 0.9);
+        ctx.fillStyle = rgba(inst.color, outsideLoop ? 0.15 : isMuted ? 0.25 : 0.9);
         ctx.fill();
-        ctx.beginPath();
-        ctx.arc(hx, hy, HIT_RADIUS * 0.45, 0, TWO_PI);
-        ctx.fillStyle = rgba('#ffffff', isMuted ? 0.1 : 0.35);
-        ctx.fill();
+        if (!outsideLoop) {
+          ctx.beginPath();
+          ctx.arc(hx, hy, HIT_RADIUS * 0.45, 0, TWO_PI);
+          ctx.fillStyle = rgba('#ffffff', isMuted ? 0.1 : 0.35);
+          ctx.fill();
+        }
       }
     }
 
@@ -198,7 +249,10 @@ export class KnobRenderer {
     const transport = Tone.getTransport();
     const secondsPer16th = 60 / state.bpm / 4;
     const totalSteps = state.isPlaying ? transport.seconds / secondsPer16th : 0;
-    const instProg = state.isPlaying ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
+    const anySolo = state.instruments.some((i) => i.solo);
+    const effectivelyMuted = (inst.muted && !inst.solo) || (anySolo && !inst.solo);
+    const instProg = state.isPlaying && !effectivelyMuted
+      ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
     const dotRotation = instProg * TWO_PI;
 
     for (let i = 0; i < inst.hitPositions.length; i++) {
@@ -228,7 +282,10 @@ export class KnobRenderer {
     const transport = Tone.getTransport();
     const secondsPer16th = 60 / state.bpm / 4;
     const totalSteps = state.isPlaying ? transport.seconds / secondsPer16th : 0;
-    const instProg = state.isPlaying && inst ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
+    const anySolo = state.instruments.some((i) => i.solo);
+    const effectivelyMuted = inst ? (inst.muted && !inst.solo) || (anySolo && !inst.solo) : false;
+    const instProg = state.isPlaying && inst && !effectivelyMuted
+      ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
     const dotRotation = instProg * TWO_PI;
 
     const angle = Math.atan2(mouseY - cy, mouseX - cx);

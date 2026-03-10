@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import { EffectBlock } from './EffectBlock';
 import { AddEffectMenu } from './AddEffectMenu';
-import { VUMeter } from './VUMeter';
+import { LUFSMeter } from './LUFSMeter';
 import { WaveformView } from './WaveformView';
 import { EffectKnob } from './EffectKnob';
 import { type RecordingFormat } from '../../audio/recorder';
@@ -489,52 +489,153 @@ function RecordingsMenu() {
   );
 }
 
-export function EffectsSidebar() {
-  const selectedId = useStore((s) => s.selectedInstrumentId);
-  const instruments = useStore((s) => s.instruments);
-  const instrumentEffects = useStore((s) => s.instrumentEffects);
-  const masterVolume = useStore((s) => s.masterVolume);
-  const setMasterVolume = useStore((s) => s.setMasterVolume);
-  const reorderEffects = useStore((s) => s.reorderEffects);
-  const isRecording = useStore((s) => s.isRecording);
+const MASTER_FX_OPTIONS: { type: import('../../types/effects').EffectType; label: string; icon: string }[] = [
+  { type: 'eq3',        label: 'EQ 3-Band',   icon: '≡' },
+  { type: 'parame',     label: 'Param EQ',    icon: '≋' },
+  { type: 'compressor', label: 'Compressor',  icon: '⊓' },
+  { type: 'reverb',     label: 'Reverb',      icon: '~' },
+  { type: 'delay',      label: 'Delay',       icon: '◷' },
+  { type: 'chorus',     label: 'Chorus',      icon: '≈' },
+  { type: 'phaser',     label: 'Phaser',      icon: '⊕' },
+  { type: 'distortion', label: 'Distortion',  icon: '⋀' },
+  { type: 'filter',     label: 'Filter',      icon: '◡' },
+  { type: 'bitcrusher', label: 'Bit Crusher', icon: '⊞' },
+  { type: 'tremolo',    label: 'Tremolo',     icon: '∿' },
+  { type: 'ringmod',    label: 'Ring Mod',    icon: '⊗' },
+  { type: 'pingpong',   label: 'Ping Pong',   icon: '⇄' },
+  { type: 'limiter',     label: 'Limiter',      icon: '⊔' },
+  { type: 'drumbuss',    label: 'Drum Buss',    icon: '⊚' },
+  { type: 'stereoimage', label: 'Stereo Image', icon: '↔' },
+];
 
+function AddMasterEffectMenu() {
+  const addMasterEffect = useStore((s) => s.addMasterEffect);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative w-full">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-center gap-1.5 rounded border border-dashed transition-colors text-[13px] cursor-pointer"
+        style={{ padding: '5px 0', borderColor: 'rgba(148,163,184,0.2)', color: 'rgba(148,163,184,0.5)' }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(148,163,184,0.5)'; e.currentTarget.style.color = '#94a3b8'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(148,163,184,0.2)'; e.currentTarget.style.color = 'rgba(148,163,184,0.5)'; }}
+        title="Add master effect"
+      >
+        <span className="text-[12px] leading-none">+</span>
+        Add Effect
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 bottom-full mb-1 bg-bg-secondary border border-border rounded shadow-xl z-50">
+          <div className="grid grid-cols-2 gap-px p-1">
+            {MASTER_FX_OPTIONS.map(({ type, label, icon }) => (
+              <button
+                key={type}
+                className="flex items-center gap-1.5 px-2 py-1.5 rounded text-left text-[14px] text-text-secondary hover:text-text-primary hover:bg-white/5 transition-colors cursor-pointer"
+                onClick={() => { addMasterEffect(type); setOpen(false); }}
+              >
+                <span className="opacity-60 w-3 text-center shrink-0">{icon}</span>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function EffectsSidebar() {
+  const selectedId      = useStore((s) => s.selectedInstrumentId);
+  const instruments     = useStore((s) => s.instruments);
+  const instrumentEffects = useStore((s) => s.instrumentEffects);
+  const masterVolume    = useStore((s) => s.masterVolume);
+  const setMasterVolume = useStore((s) => s.setMasterVolume);
+  const reorderEffects  = useStore((s) => s.reorderEffects);
+  const masterEffects   = useStore((s) => s.masterEffects);
+  const isRecording     = useStore((s) => s.isRecording);
+
+  // 'master' is the default view; selecting an instrument auto-switches to 'instrument'
+  const [fxView, setFxView] = useState<'master' | 'instrument'>('master');
+  const prevSelectedId = useRef<string | null>(null);
+
+  // Auto-switch to instrument view when a (new) instrument is selected
+  useEffect(() => {
+    if (selectedId && selectedId !== prevSelectedId.current) setFxView('instrument');
+    prevSelectedId.current = selectedId;
+  }, [selectedId]);
+
+  const showMaster = fxView === 'master' || !selectedId;
   const selectedInstrument = instruments.find((i) => i.id === selectedId);
-  const effects = selectedId ? (instrumentEffects[selectedId] ?? []) : [];
+  const instEffects = selectedId ? (instrumentEffects[selectedId] ?? []) : [];
 
   const dragIndex = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const masterDragIdx = useRef<number | null>(null);
+  const [masterDragOver, setMasterDragOver] = useState<number | null>(null);
 
   return (
     <div className="flex flex-col h-full w-[300px] bg-bg-secondary border-l border-border shrink-0 select-none">
-      {/* Header */}
+
+      {/* Header — shows which view is active */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 min-w-0">
-        {selectedInstrument && (
-          <span
-            className="w-2 h-2 rounded-full shrink-0"
-            style={{ backgroundColor: selectedInstrument.color }}
-          />
+        {!showMaster && selectedInstrument && (
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selectedInstrument.color }} />
         )}
         <span className="fx-header-text text-text-secondary truncate">
-          {selectedInstrument ? `${selectedInstrument.name} FX` : 'FX Chain'}
+          {showMaster ? 'Master FX' : (selectedInstrument ? `${selectedInstrument.name} FX` : 'FX Chain')}
         </span>
       </div>
 
       {/* Effect blocks list — scroll container must NOT include the dropdown */}
       <div className="fx-scroll flex-1 overflow-y-auto overflow-x-hidden min-h-0">
-        {!selectedId ? (
+        {showMaster ? (
+          masterEffects.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-4">
+              <span className="text-[28px] opacity-20">◎</span>
+              <span className="fx-empty-text text-text-secondary/60">No master effects yet.</span>
+            </div>
+          ) : (
+            masterEffects.map((effect, i) => (
+              <EffectBlock
+                key={effect.id}
+                effect={effect}
+                instrumentId="__master__"
+                index={i}
+                isDragOver={masterDragOver === i}
+                onDragStart={() => { masterDragIdx.current = i; }}
+                onDragOver={(e) => { e.preventDefault(); setMasterDragOver(i); }}
+                onDrop={() => {
+                  if (masterDragIdx.current !== null && masterDragIdx.current !== i)
+                    reorderEffects('__master__', masterDragIdx.current, i);
+                  setMasterDragOver(null);
+                }}
+                onDragEnd={() => { masterDragIdx.current = null; setMasterDragOver(null); }}
+              />
+            ))
+          )
+        ) : !selectedId ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-4">
             <span className="text-[28px] opacity-20">≡</span>
-            <span className="fx-empty-text text-text-secondary/60">
-              Select a layer to see<br />its effect chain.
-            </span>
+            <span className="fx-empty-text text-text-secondary/60">Select a layer to see<br />its effect chain.</span>
           </div>
-        ) : effects.length === 0 ? (
+        ) : instEffects.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-4">
             <span className="text-[28px] opacity-20">≡</span>
             <span className="fx-empty-text text-text-secondary/60">No effects yet.</span>
           </div>
         ) : (
-          effects.map((effect, i) => (
+          instEffects.map((effect, i) => (
             <EffectBlock
               key={effect.id}
               effect={effect}
@@ -544,9 +645,8 @@ export function EffectsSidebar() {
               onDragStart={() => { dragIndex.current = i; }}
               onDragOver={(e) => { e.preventDefault(); setDragOverIndex(i); }}
               onDrop={() => {
-                if (dragIndex.current !== null && dragIndex.current !== i) {
+                if (dragIndex.current !== null && dragIndex.current !== i)
                   reorderEffects(selectedId, dragIndex.current, i);
-                }
                 setDragOverIndex(null);
               }}
               onDragEnd={() => { dragIndex.current = null; setDragOverIndex(null); }}
@@ -555,17 +655,32 @@ export function EffectsSidebar() {
         )}
       </div>
 
-      {/* Add Effect button — outside scroll container so dropdown is not clipped */}
-      {selectedId && (
-        <div className="px-3 py-2 border-t border-border/30">
-          <AddEffectMenu instrumentId={selectedId} />
-        </div>
-      )}
+      {/* Add Effect button — outside scroll so dropdown isn't clipped */}
+      <div className="px-3 py-2 border-t border-border/30">
+        {showMaster
+          ? <AddMasterEffectMenu />
+          : selectedId && <AddEffectMenu instrumentId={selectedId} />
+        }
+      </div>
 
       {/* Master section */}
       <div className="shrink-0 border-t border-border" style={{ padding: 20 }}>
-        <span className="fx-master-label text-text-primary block mb-2">Master</span>
-        <VUMeter />
+        <div className="flex items-center justify-between mb-2">
+          <span className="fx-master-label text-text-primary">Master</span>
+          <button
+            onClick={() => setFxView('master')}
+            className="cursor-pointer transition-colors text-[10px] rounded"
+            style={{
+              padding: '2px 8px',
+              border: `1px solid ${showMaster ? 'rgba(148,163,184,0.5)' : '#2a2a3a'}`,
+              color: showMaster ? '#94a3b8' : '#4a4a5a',
+              background: showMaster ? 'rgba(148,163,184,0.08)' : 'transparent',
+            }}
+          >
+            FX{masterEffects.length > 0 ? ` (${masterEffects.length})` : ''}
+          </button>
+        </div>
+        <LUFSMeter />
         <div className="flex items-center gap-1.5 mt-3">
           <span className="fx-vol-label text-text-secondary w-6">vol</span>
           <input

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useId, useMemo } from 'react'
 import { useStore } from '../../state/store';
 import { fetchLoopTree } from '../../audio/loopApi';
 import { previewSample, stopPreview } from '../../audio/sampler';
+import { getAllCachedBpms } from '../../audio/bpmCache';
 import type { SampleEntry } from '../../audio/sampleApi';
 import type { LooperParams } from '../../types/looper';
 import { DEFAULT_LOOPER_PARAMS } from '../../types/looper';
@@ -57,7 +58,7 @@ export function LoopBrowser() {
   const instruments = useStore((s) => s.instruments);
   const customSamples = useStore((s) => s.customSamples);
   const targetInst = instruments.find((i) => i.id === selectedId);
-  const lp: LooperParams = targetInst?.looperParams ?? DEFAULT_LOOPER_PARAMS;
+  const lp: LooperParams = { ...DEFAULT_LOOPER_PARAMS, ...targetInst?.looperParams };
 
   const updateLooperParams = useStore((s) => s.updateLooperParams);
   const assignLoop = useStore((s) => s.assignLoop);
@@ -70,6 +71,18 @@ export function LoopBrowser() {
   const [previewingUrl, setPreviewingUrl] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputId = useId();
+
+  // Build BPM lookup from both localStorage cache and currently loaded instruments
+  const bpmMap = useMemo(() => {
+    const map: Record<string, number> = { ...getAllCachedBpms() };
+    // Also include BPMs from loaded instruments (more up-to-date)
+    for (const inst of instruments) {
+      if (inst.samplePath && inst.detectedBpm && inst.detectedBpm > 0) {
+        map[inst.samplePath] = inst.detectedBpm;
+      }
+    }
+    return map;
+  }, [instruments]);
 
   useEffect(() => {
     fetchLoopTree().then(setTree);
@@ -180,27 +193,12 @@ export function LoopBrowser() {
       className="bg-bg-secondary border-l border-border flex flex-col shrink-0 h-full min-h-0 outline-none overflow-hidden"
       style={{ width: 300 }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-border/50 shrink-0">
-        <span className="text-[10px] text-text-secondary uppercase tracking-wider font-medium">
-          Loop Browser
-        </span>
-        <label htmlFor={fileInputId}
-          className="text-[9px] px-2 py-0.5 rounded border border-border hover:border-white/20 text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
-          title="Import loop files">
-          + Import
-          <input id={fileInputId} type="file" accept=".wav,.mp3,.ogg,.flac,.aiff" multiple
-            className="hidden" onChange={handleFileImport} />
-        </label>
-      </div>
-
-      {/* Target */}
-      <div className="text-[9px] text-text-secondary px-4 py-1.5 shrink-0">
+      {/* Target + Looper params */}
+      <div className="text-[9px] text-text-secondary px-4 pt-3 pb-1 shrink-0">
         <span className="text-text-secondary/60">target: </span>
         <span style={{ color }}>{targetInst.name}</span>
       </div>
 
-      {/* Looper params */}
       {selectedId && (
         <div className="px-4 py-3 border-b border-border/50 shrink-0">
           <div className="flex gap-2 justify-around mb-3">
@@ -220,9 +218,31 @@ export function LoopBrowser() {
               onChange={(v) => updateLooperParams(selectedId, { cutoff: v })} />
             <Knob label="Res" value={lp.resonance} min={0} max={50} decimals={1} color={color}
               onChange={(v) => updateLooperParams(selectedId, { resonance: v })} />
+            <Knob label="Pitch" value={lp.pitchSemitones} min={-24} max={24} step={1} decimals={0} unit="st" color={color}
+              onChange={(v) => updateLooperParams(selectedId, { pitchSemitones: v })} />
+          </div>
+          <div className="flex gap-2 justify-around mt-3">
+            <Knob label="Offset" value={lp.startOffset} min={0} max={1} decimals={2} color={color}
+              onChange={(v) => updateLooperParams(selectedId, { startOffset: v })} />
+            <Knob label="Degrade" value={lp.degrade} min={0} max={1} decimals={2} color={color}
+              onChange={(v) => updateLooperParams(selectedId, { degrade: v })} />
           </div>
         </div>
       )}
+
+      {/* Loop Browser header + Import */}
+      <div className="flex items-center justify-between px-4 pt-3 pb-1 shrink-0">
+        <span className="text-[10px] text-text-secondary uppercase tracking-wider font-medium">
+          Loop Browser
+        </span>
+        <label htmlFor={fileInputId}
+          className="text-[9px] px-2 py-0.5 rounded border border-border hover:border-white/20 text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
+          title="Import loop files">
+          + Import
+          <input id={fileInputId} type="file" accept=".wav,.mp3,.ogg,.flac,.aiff" multiple
+            className="hidden" onChange={handleFileImport} />
+        </label>
+      </div>
 
       {/* Search */}
       <div className="px-4 py-2 border-b border-border/50 shrink-0">
@@ -256,6 +276,11 @@ export function LoopBrowser() {
                 style={isCurrent ? { color } : undefined}>
                 {isFolder ? entry.name : entry.name.replace(/\.[^.]+$/, '')}
               </span>
+              {!isFolder && bpmMap[entry.path] > 0 && (
+                <span className="shrink-0 text-[8px] font-mono text-text-secondary/50 tabular-nums">
+                  {Math.round(bpmMap[entry.path])}
+                </span>
+              )}
               {!isFolder && (
                 <>
                   <button onClick={(e) => { e.stopPropagation(); handlePreview(entry.path); }}

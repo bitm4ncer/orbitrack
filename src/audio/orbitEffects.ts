@@ -230,9 +230,27 @@ interface OrbitEffectChain {
   ppWetGain: GainNode;
   ppDryGain: GainNode;
   ppMix: GainNode;
+  // Drum Buss — parallel saturation + compression with low boost
+  dbDry: GainNode; dbWet: GainNode; dbMix: GainNode;
+  dbPreGain: GainNode; dbSaturator: WaveShaperNode;
+  dbLowShelf: BiquadFilterNode; dbCompressor: DynamicsCompressorNode; dbOutput: GainNode;
+  // Stereo Image — M/S width via ChannelSplitter/Merger matrix
+  siSplitter: ChannelSplitterNode; siMerger: ChannelMergerNode;
+  siDL: GainNode; siDR: GainNode;        // direct L→L, R→R
+  siCL: GainNode; siCR: GainNode;        // cross  L→R, R→L (after HPF)
+  siBassHPL: BiquadFilterNode; siBassHPR: BiquadFilterNode;
+  siDry: GainNode; siWet: GainNode; siMix: GainNode;
+  // Limiter — brick-wall peak limiter at chain end
+  limiterComp: DynamicsCompressorNode; limiterMakeup: GainNode;
+  limiterDry: GainNode; limiterWet: GainNode; limiterMix: GainNode;
 
   synthInputGain: GainNode;
   intercepted: boolean;
+  // Curve-cache sentinels — avoid rebuilding WaveShaper curves when params unchanged.
+  _prevDistortType: number;
+  _prevDistortDrive: number;
+  _prevBcBits: number;
+  _prevDbDrive: number;
 }
 
 const chains = new Map<number, OrbitEffectChain>();
@@ -349,6 +367,31 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   eqLow.connect(eqMid);
   eqMid.connect(eqHigh);
 
+  // ─── Drum Buss — parallel saturation + compression + low boost ───────────
+  const dbDry = ac.createGain(); dbDry.gain.value = 1;
+  const dbWet = ac.createGain(); dbWet.gain.value = 0;
+  const dbMix = ac.createGain(); dbMix.gain.value = 1;
+
+  const dbPreGain = ac.createGain(); dbPreGain.gain.value = 1;
+  const dbSaturator = ac.createWaveShaper();
+  dbSaturator.oversample = '4x';
+  dbSaturator.curve = makeDistortionCurve(0, 0.3) as Float32Array<ArrayBuffer>;
+
+  const dbLowShelf = ac.createBiquadFilter();
+  dbLowShelf.type = 'lowshelf'; dbLowShelf.frequency.value = 80; dbLowShelf.gain.value = 3;
+
+  const dbCompressor = ac.createDynamicsCompressor();
+  dbCompressor.threshold.value = -18; dbCompressor.ratio.value = 2;
+  dbCompressor.attack.value = 0.005; dbCompressor.release.value = 0.05; dbCompressor.knee.value = 6;
+
+  const dbOutput = ac.createGain(); dbOutput.gain.value = 1;
+
+  eqHigh.connect(dbDry); dbDry.connect(dbMix);
+  eqHigh.connect(dbPreGain);
+  dbPreGain.connect(dbSaturator); dbSaturator.connect(dbLowShelf);
+  dbLowShelf.connect(dbCompressor); dbCompressor.connect(dbOutput);
+  dbOutput.connect(dbWet); dbWet.connect(dbMix);
+
   // ─── Chorus (2 detuned delay lines for richer doubling) ──────────────────
   const chorusDryGain = ac.createGain();
   chorusDryGain.gain.value = 1;
@@ -385,10 +428,10 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   chorusLFO2.connect(chorusLFOGain2);
   chorusLFOGain2.connect(chorusDelay2.delayTime);
 
-  eqHigh.connect(chorusDryGain);
+  dbMix.connect(chorusDryGain);
   chorusDryGain.connect(chorusMix);
-  eqHigh.connect(chorusDelay);
-  eqHigh.connect(chorusDelay2);
+  dbMix.connect(chorusDelay);
+  dbMix.connect(chorusDelay2);
   chorusDelay.connect(chorusWetGain);
   chorusDelay2.connect(chorusWetGain);
   chorusWetGain.connect(chorusMix);
@@ -704,6 +747,32 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   ringMix.connect(compressor);
   compressor.connect(compressorMakeup);
 
+  // ─── Stereo Image — M/S width via ChannelSplitter/Merger ─────────────────
+  const siSplitter = ac.createChannelSplitter(2);
+  const siMerger   = ac.createChannelMerger(2);
+
+  const siDL = ac.createGain(); siDL.channelCount = 1; siDL.channelCountMode = 'explicit'; siDL.gain.value = 1;
+  const siDR = ac.createGain(); siDR.channelCount = 1; siDR.channelCountMode = 'explicit'; siDR.gain.value = 1;
+  const siCL = ac.createGain(); siCL.channelCount = 1; siCL.channelCountMode = 'explicit'; siCL.gain.value = 0;
+  const siCR = ac.createGain(); siCR.channelCount = 1; siCR.channelCountMode = 'explicit'; siCR.gain.value = 0;
+
+  const siBassHPL = ac.createBiquadFilter(); siBassHPL.type = 'highpass'; siBassHPL.frequency.value = 120;
+  const siBassHPR = ac.createBiquadFilter(); siBassHPR.type = 'highpass'; siBassHPR.frequency.value = 120;
+
+  const siDry = ac.createGain(); siDry.gain.value = 1;
+  const siWet = ac.createGain(); siWet.gain.value = 0;
+  const siMix = ac.createGain(); siMix.gain.value = 1;
+
+  compressorMakeup.connect(siDry); siDry.connect(siMix);
+  compressorMakeup.connect(siSplitter);
+  siSplitter.connect(siDL, 0);                            // L direct
+  siSplitter.connect(siDR, 1);                            // R direct
+  siSplitter.connect(siBassHPL, 0); siBassHPL.connect(siCL); // L→cross (HP filtered)
+  siSplitter.connect(siBassHPR, 1); siBassHPR.connect(siCR); // R→cross (HP filtered)
+  siDL.connect(siMerger, 0, 0);  siCR.connect(siMerger, 0, 0);  // L_out = direct-L + cross-R
+  siDR.connect(siMerger, 0, 1);  siCL.connect(siMerger, 0, 1);  // R_out = direct-R + cross-L
+  siMerger.connect(siWet); siWet.connect(siMix);
+
   // ─── Trance Gate — rhythmic gate via GainNode automation ─────────────────
   const tranceGateGain = ac.createGain();
   tranceGateGain.gain.value = 1; // transparent until scheduler activates
@@ -719,9 +788,9 @@ function createChain(ac: AudioContext): OrbitEffectChain {
 
   const tranceGateScheduler = new TranceGateScheduler(ac, tranceGateGain);
 
-  compressorMakeup.connect(tranceDryGain);
+  siMix.connect(tranceDryGain);
   tranceDryGain.connect(tranceMix);
-  compressorMakeup.connect(tranceGateGain);
+  siMix.connect(tranceGateGain);
   tranceGateGain.connect(tranceWetGain);
   tranceWetGain.connect(tranceMix);
 
@@ -767,7 +836,21 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   ppDelay2.connect(ppPanR);
   ppPanR.connect(ppWetGain);
   ppDelay2.connect(ppFeedGain); // feedback: delay2 → feedGain → hiCut → delay2 (loop)
-  // compressorMakeup → outputNode is wired in ensureIntercepted() (now via ppMix)
+
+  // ─── Limiter — brick-wall peak limiter at chain end ───────────────────────
+  const limiterComp = ac.createDynamicsCompressor();
+  limiterComp.threshold.value = -0.3; limiterComp.ratio.value = 20;
+  limiterComp.knee.value = 3; limiterComp.attack.value = 0.001; limiterComp.release.value = 0.08;
+
+  const limiterMakeup = ac.createGain(); limiterMakeup.gain.value = 1;
+  const limiterDry    = ac.createGain(); limiterDry.gain.value    = 1;
+  const limiterWet    = ac.createGain(); limiterWet.gain.value    = 0;
+  const limiterMix    = ac.createGain(); limiterMix.gain.value    = 1;
+
+  ppMix.connect(limiterDry); limiterDry.connect(limiterMix);
+  ppMix.connect(limiterComp); limiterComp.connect(limiterMakeup);
+  limiterMakeup.connect(limiterWet); limiterWet.connect(limiterMix);
+  // limiterMix → outputNode is wired in ensureIntercepted()
 
   return {
     synthInputGain,
@@ -790,9 +873,16 @@ function createChain(ac: AudioContext): OrbitEffectChain {
     tremoloLFO, tremoloLFOGain, tremoloAmpGain,
     ringCarrier, ringModGain, ringDryGain, ringWetGain, ringMix,
     compressor, compressorMakeup,
+    siSplitter, siMerger, siDL, siDR, siCL, siCR, siBassHPL, siBassHPR, siDry, siWet, siMix,
     tranceGateScheduler, tranceGateGain, tranceDryGain, tranceWetGain, tranceMix,
     ppDelay1, ppDelay2, ppFeedGain, ppHiCut, ppPanL, ppPanR, ppWetGain, ppDryGain, ppMix,
+    dbDry, dbWet, dbMix, dbPreGain, dbSaturator, dbLowShelf, dbCompressor, dbOutput,
+    limiterComp, limiterMakeup, limiterDry, limiterWet, limiterMix,
     intercepted: false,
+    _prevDistortType: -1,
+    _prevDistortDrive: -1,
+    _prevBcBits: -1,
+    _prevDbDrive: -1,
   };
 }
 
@@ -817,8 +907,8 @@ function ensureIntercepted(orbitIndex: number): OrbitEffectChain {
     }
 
     summingNode.connect(chain.eqLow);
-    // Chain tail → outputNode (ppMix is now the final node)
-    chain.ppMix.connect(outputNode);
+    // Chain tail → outputNode (limiterMix is now the final node)
+    chain.limiterMix.connect(outputNode);
 
     chain.intercepted = true;
   }
@@ -833,25 +923,34 @@ const BIQUAD_FILTER_TYPES: BiquadFilterType[] = ['lowpass', 'highpass', 'bandpas
  * Must be called before superdough() so the intercept is in place.
  */
 export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm = 120): void {
-  const eq3Effect        = effects.find((e) => e.type === 'eq3'         && e.enabled);
-  const chorusEffect     = effects.find((e) => e.type === 'chorus'      && e.enabled);
-  const phaserEffect     = effects.find((e) => e.type === 'phaser'      && e.enabled);
-  const filterEffect     = effects.find((e) => e.type === 'filter'      && e.enabled);
-  const distortEffect    = effects.find((e) => e.type === 'distortion'  && e.enabled);
-  const reverbEffect     = effects.find((e) => e.type === 'reverb'      && e.enabled);
-  const delayEffect      = effects.find((e) => e.type === 'delay'       && e.enabled);
-  const bcEffect         = effects.find((e) => e.type === 'bitcrusher'  && e.enabled);
-  const parameEffect     = effects.find((e) => e.type === 'parame'      && e.enabled);
-  const tremoloEffect    = effects.find((e) => e.type === 'tremolo'     && e.enabled);
-  const ringmodEffect    = effects.find((e) => e.type === 'ringmod'     && e.enabled);
-  const compressorEffect = effects.find((e) => e.type === 'compressor'  && e.enabled);
-  const tranceEffect     = effects.find((e) => e.type === 'trancegate'  && e.enabled);
-  const pingpongEffect   = effects.find((e) => e.type === 'pingpong'    && e.enabled);
+  // Single O(n) pass — replaces 17 sequential find() calls.
+  type EffectMap = Partial<Record<Effect['type'], Effect>>;
+  const em: EffectMap = {};
+  for (const e of effects) {
+    if (e.enabled && !em[e.type]) em[e.type] = e;
+  }
+  const eq3Effect         = em['eq3'];
+  const chorusEffect      = em['chorus'];
+  const phaserEffect      = em['phaser'];
+  const filterEffect      = em['filter'];
+  const distortEffect     = em['distortion'];
+  const reverbEffect      = em['reverb'];
+  const delayEffect       = em['delay'];
+  const bcEffect          = em['bitcrusher'];
+  const parameEffect      = em['parame'];
+  const tremoloEffect     = em['tremolo'];
+  const ringmodEffect     = em['ringmod'];
+  const compressorEffect  = em['compressor'];
+  const tranceEffect      = em['trancegate'];
+  const pingpongEffect    = em['pingpong'];
+  const drumbussEffect    = em['drumbuss'];
+  const stereoimageEffect = em['stereoimage'];
+  const limiterEffect     = em['limiter'];
 
   const hasAny = eq3Effect || chorusEffect || phaserEffect || filterEffect
     || distortEffect || reverbEffect || delayEffect || bcEffect
     || parameEffect || tremoloEffect || ringmodEffect || compressorEffect
-    || tranceEffect || pingpongEffect;
+    || tranceEffect || pingpongEffect || drumbussEffect || stereoimageEffect || limiterEffect;
 
   if (!hasAny) {
     const chain = ensureIntercepted(orbitIndex);
@@ -889,6 +988,15 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm
     chain.ppDryGain.gain.value            = 1;
     chain.ppWetGain.gain.value            = 0;
     chain.ppFeedGain.gain.value           = 0;
+    chain.dbDry.gain.value                = 1;
+    chain.dbWet.gain.value                = 0;
+    chain.siDry.gain.value                = 1; chain.siWet.gain.value = 0;
+    chain.siDL.gain.value = 1; chain.siDR.gain.value = 1;
+    chain.siCL.gain.value = 0; chain.siCR.gain.value = 0;
+    chain.limiterDry.gain.value           = 1;
+    chain.limiterWet.gain.value           = 0;
+    chain.limiterComp.threshold.value     = 0;
+    chain.limiterComp.ratio.value         = 1;
     tranceGatePhaseRef.delete(orbitIndex);
     return;
   }
@@ -991,7 +1099,11 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm
     const tone   = p.tone   ?? 8000;
     const output = p.output ?? 0;
 
-    chain.distortWaveshaper.curve = makeDistortionCurve(type, drive) as Float32Array<ArrayBuffer>;
+    if (type !== chain._prevDistortType || drive !== chain._prevDistortDrive) {
+      chain._prevDistortType = type;
+      chain._prevDistortDrive = drive;
+      chain.distortWaveshaper.curve = makeDistortionCurve(type, drive) as Float32Array<ArrayBuffer>;
+    }
     chain.distortTone.frequency.setTargetAtTime(tone, now, ramp);
     chain.distortPostGain.gain.setTargetAtTime(Math.pow(10, output / 20), now, ramp);
     chain.distortDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
@@ -1055,8 +1167,11 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm
     const downsample = Math.max(0, Math.min(1,               p.downsample ?? 0));
     const amount     = p.amount ?? 1;
 
-    // Update WaveShaper curve for bit depth
-    chain.bcBits.curve = makeBitCrushCurve(bits) as Float32Array<ArrayBuffer>;
+    // Update WaveShaper curve for bit depth — only regen when bits changed
+    if (bits !== chain._prevBcBits) {
+      chain._prevBcBits = bits;
+      chain.bcBits.curve = makeBitCrushCurve(bits) as Float32Array<ArrayBuffer>;
+    }
 
     // Update AudioWorklet parameter for SR reduction (if worklet node)
     if (chain.bcSR instanceof AudioWorkletNode) {
@@ -1183,6 +1298,73 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm
     chain.ppFeedGain.gain.setTargetAtTime(0, now, ramp);
     chain.ppDryGain.gain.setTargetAtTime(1, now, ramp);
     chain.ppWetGain.gain.setTargetAtTime(0, now, ramp);
+  }
+
+  // ─── Drum Buss ───────────────────────────────────────────────────────────
+  if (drumbussEffect) {
+    const p        = drumbussEffect.params;
+    const drive    = Math.max(0, Math.min(1, p.drive    ?? 0.3));
+    const low      = p.low      ?? 3;
+    const compress = Math.max(1, p.compress ?? 2);
+    const mix      = Math.max(0, Math.min(1, p.mix      ?? 0.6));
+    const output   = p.output   ?? 0;
+    chain.dbPreGain.gain.setTargetAtTime(1 + drive * 9, now, ramp);
+    if (drive !== chain._prevDbDrive) {
+      chain._prevDbDrive = drive;
+      chain.dbSaturator.curve = makeDistortionCurve(0, drive) as Float32Array<ArrayBuffer>;
+    }
+    chain.dbLowShelf.gain.setTargetAtTime(low, now, ramp);
+    chain.dbCompressor.ratio.setTargetAtTime(compress, now, ramp);
+    chain.dbOutput.gain.setTargetAtTime(Math.pow(10, output / 20), now, ramp);
+    chain.dbDry.gain.setTargetAtTime(1 - mix, now, ramp);
+    chain.dbWet.gain.setTargetAtTime(mix, now, ramp);
+  } else {
+    chain.dbDry.gain.setTargetAtTime(1, now, ramp);
+    chain.dbWet.gain.setTargetAtTime(0, now, ramp);
+  }
+
+  // ─── Stereo Image ─────────────────────────────────────────────────────────
+  if (stereoimageEffect) {
+    const p       = stereoimageEffect.params;
+    const width   = Math.max(0, Math.min(2, p.width   ?? 1));
+    const monoLow = Math.max(20, p.monoLow ?? 120);
+    const gD = 0.5 + 0.5 * width;
+    const gC = 0.5 - 0.5 * width;
+    chain.siDL.gain.setTargetAtTime(gD, now, ramp);
+    chain.siDR.gain.setTargetAtTime(gD, now, ramp);
+    chain.siCL.gain.setTargetAtTime(gC, now, ramp);
+    chain.siCR.gain.setTargetAtTime(gC, now, ramp);
+    chain.siBassHPL.frequency.setTargetAtTime(monoLow, now, ramp);
+    chain.siBassHPR.frequency.setTargetAtTime(monoLow, now, ramp);
+    chain.siDry.gain.setTargetAtTime(0, now, ramp);
+    chain.siWet.gain.setTargetAtTime(1, now, ramp);
+  } else {
+    chain.siDL.gain.setTargetAtTime(1,  now, ramp);
+    chain.siDR.gain.setTargetAtTime(1,  now, ramp);
+    chain.siCL.gain.setTargetAtTime(0,  now, ramp);
+    chain.siCR.gain.setTargetAtTime(0,  now, ramp);
+    chain.siDry.gain.setTargetAtTime(1, now, ramp);
+    chain.siWet.gain.setTargetAtTime(0, now, ramp);
+  }
+
+  // ─── Limiter ─────────────────────────────────────────────────────────────
+  if (limiterEffect) {
+    const p       = limiterEffect.params;
+    const ceiling = Math.max(-12, Math.min(0, p.ceiling ?? -1.0));
+    const release = Math.max(0.02, p.release ?? 0.08);
+    const makeup  = Math.pow(10, -ceiling / 20); // auto-compensate: -3dB ceiling → +3dB makeup
+    chain.limiterComp.threshold.setTargetAtTime(ceiling, now, ramp);
+    chain.limiterComp.ratio.setTargetAtTime(20, now, ramp);
+    chain.limiterComp.release.setTargetAtTime(release, now, ramp);
+    chain.limiterMakeup.gain.setTargetAtTime(makeup, now, ramp);
+    chain.limiterDry.gain.setTargetAtTime(0, now, ramp);
+    chain.limiterWet.gain.setTargetAtTime(1, now, ramp);
+  } else {
+    chain.limiterComp.threshold.setTargetAtTime(0,  now, ramp);
+    chain.limiterComp.ratio.setTargetAtTime(1,       now, ramp);
+    chain.limiterMakeup.gain.setTargetAtTime(1, now, ramp);
+    chain.limiterDry.gain.setTargetAtTime(1, now, ramp);
+    chain.limiterWet.gain.setTargetAtTime(0, now, ramp);
   }
 }
 

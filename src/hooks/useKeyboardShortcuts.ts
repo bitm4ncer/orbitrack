@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { toggleTransport } from '../audio/transport';
 import { initAudio } from '../audio/engine';
 import { loadSamples } from '../audio/sampler';
+import { undo, redo } from '../state/undoHistory';
 
 const audioInitRef = { initialized: false };
 
@@ -20,6 +21,22 @@ export function useKeyboardShortcuts(): void {
         (e.target instanceof HTMLInputElement && e.target.type !== 'range') ||
         e.target instanceof HTMLTextAreaElement
       ) {
+        return;
+      }
+
+      const isMod = e.metaKey || e.ctrlKey;
+
+      // Undo: Ctrl+Z / Cmd+Z
+      if (isMod && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+
+      // Redo: Ctrl+Shift+Z / Cmd+Shift+Z / Ctrl+Y
+      if (isMod && ((e.key === 'z' && e.shiftKey) || e.key === 'y')) {
+        e.preventDefault();
+        redo();
         return;
       }
 

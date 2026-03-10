@@ -12,7 +12,10 @@ export type EffectType =
   | 'tremolo'
   | 'ringmod'
   | 'trancegate'
-  | 'pingpong';
+  | 'pingpong'
+  | 'limiter'
+  | 'drumbuss'
+  | 'stereoimage';
 
 export interface Effect {
   id: string;

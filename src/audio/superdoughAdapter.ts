@@ -108,23 +108,75 @@ export function triggerLooperSlice(
 ): void {
   if (!instrument.sampleName) return;
 
-  const lp = instrument.looperParams ?? DEFAULT_LOOPER_PARAMS;
+  const lp = { ...DEFAULT_LOOPER_PARAMS, ...instrument.looperParams };
 
-  const sliceBegin = sortedHits[hitIndex];
-  const sliceEnd = hitIndex + 1 < sortedHits.length ? sortedHits[hitIndex + 1] : 1;
+  const editorState = state.looperEditors[instrument.id];
+  const loopIn = editorState?.loopIn ?? 0;
+  const loopOut = editorState?.loopOut ?? 1;
+
+  // Clamp slice boundaries to loop region
+  const rawBegin = sortedHits[hitIndex];
+  const rawEnd = hitIndex + 1 < sortedHits.length ? sortedHits[hitIndex + 1] : loopOut;
+  const sliceBegin = Math.max(rawBegin, loopIn);
+  const sliceEnd = Math.min(rawEnd, loopOut);
+
+  if (sliceBegin >= sliceEnd) return; // degenerate slice
 
   // Compute time-stretch speed
-  const editorState = state.looperEditors[instrument.id];
-  const bufferDuration = editorState?.audioBuffer?.duration ?? 1;
-  const originalSliceSec = (sliceEnd - sliceBegin) * bufferDuration;
+  const bufferDuration = editorState?.audioBuffer?.duration;
 
+  // If editor isn't loaded yet (no decoded buffer), play slices at 1x speed
+  // to avoid extreme speed distortion from the default 1s fallback.
   const thisStep = Math.round(sortedHits[hitIndex] * instrument.loopSize);
   const nextStep = hitIndex + 1 < sortedHits.length
     ? Math.round(sortedHits[hitIndex + 1] * instrument.loopSize)
     : instrument.loopSize;
   const availableSec = (nextStep - thisStep) * secondsPer16th;
 
-  const sliceSpeed = lp.speed * (originalSliceSec / Math.max(availableSec, 0.01));
+  let sliceSpeed = lp.speed;
+  if (bufferDuration && bufferDuration > 0) {
+    const originalSliceSec = (sliceEnd - sliceBegin) * bufferDuration;
+    sliceSpeed = lp.speed * (originalSliceSec / Math.max(availableSec, 0.01));
+  }
+
+  // Apply pitch offset (semitones)
+  const pitchRatio = Math.pow(2, (lp.pitchSemitones ?? 0) / 12);
+  sliceSpeed *= pitchRatio;
+
+  // Clamp to avoid extreme speed values that cause distortion
+  sliceSpeed = Math.max(0.1, Math.min(sliceSpeed, 8));
+
+  // Reverse: negate speed so superdough plays backwards
+  if (lp.reverse) {
+    sliceSpeed = -sliceSpeed;
+  }
+
+  // Auto-crossfade: enforce minimum attack/release to prevent clicks
+  const safeAttack = Math.max(lp.attack, 0.002);
+  const safeRelease = Math.max(lp.release, 0.005);
+
+  // Degrade: creative destruction via crush (bit depth), coarse (SR reduction), and shape (waveshaper)
+  // 0 = clean, 1 = maximum glitch. Three layers that progressively stack:
+  //   0.0–0.3: shape distortion (warm overdrive → harsh clip)
+  //   0.1–0.7: crush (bit reduction 16 → 2)
+  //   0.3–1.0: coarse (sample-rate reduction, extreme aliasing)
+  const degradeParams: Record<string, number> = {};
+  const deg = lp.degrade ?? 0;
+  if (deg > 0.01) {
+    // Layer 1: Waveshaper distortion — immediate audible grit
+    degradeParams.shape = deg * 0.8;
+    // Layer 2: Bit depth crush — 16 → 2
+    if (deg > 0.1) {
+      const crushNorm = (deg - 0.1) / 0.9;
+      degradeParams.crush = Math.max(2, Math.round(16 - crushNorm * 14));
+    }
+    // Layer 3: Sample rate reduction — kicks in at 30%, exponential ramp
+    if (deg > 0.3) {
+      const coarseNorm = (deg - 0.3) / 0.7;
+      degradeParams.coarse = Math.max(2, Math.round(2 + coarseNorm * coarseNorm * 48));
+    }
+  }
+
   const instGain = dbToLinear(instrument.volume);
   const effectOverrides = getEffectOverrides(instrument, state);
 
@@ -132,14 +184,15 @@ export function triggerLooperSlice(
     s: instrument.sampleName,
     gain: lp.gain * instGain,
     speed: sliceSpeed,
-    begin: sliceBegin,
-    end: sliceEnd,
-    attack: lp.attack,
-    release: lp.release,
+    begin: lp.reverse ? sliceEnd : sliceBegin,
+    end: lp.reverse ? sliceBegin : sliceEnd,
+    attack: safeAttack,
+    release: safeRelease,
     cutoff: lp.cutoff,
     resonance: lp.resonance,
     pan: (lp.pan + 1) / 2,
     orbit: instrument.orbitIndex,
+    ...degradeParams,
     ...effectOverrides,
   }, safeTime(audioTime), availableSec);
 }

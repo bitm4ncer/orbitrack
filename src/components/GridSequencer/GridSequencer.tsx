@@ -122,6 +122,42 @@ export function GridSequencer() {
     setSelectedNotes(new Set());
   }, [selectedId]);
 
+  // ── Keyboard handler for delete ──────────────────────────────────────
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!instrument) return;
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNotes.size > 0) {
+      e.preventDefault();
+      const store = useStore.getState();
+      const inst = store.instruments.find((i) => i.id === instrument.id);
+      if (!inst) return;
+      const totalSteps = inst.loopSize;
+      const freshMap = new Map<number, number>();
+      for (let i = 0; i < inst.hitPositions.length; i++) {
+        const s = Math.round(inst.hitPositions[i] * totalSteps) % totalSteps;
+        freshMap.set(s, i);
+      }
+      const toRemove: { hitIdx: number; midi: number }[] = [];
+      for (const key of selectedNotes) {
+        const { step, midi } = parseNoteKey(key);
+        const hitIdx = freshMap.get(step);
+        if (hitIdx !== undefined) toRemove.push({ hitIdx, midi });
+      }
+      toRemove.sort((a, b) => b.hitIdx - a.hitIdx);
+      for (const { hitIdx, midi } of toRemove) {
+        const currentNotes = store.gridNotes[instrument.id]?.[hitIdx] || [];
+        if (currentNotes.length <= 1) {
+          store.removeHit(instrument.id, hitIdx);
+        } else {
+          store.toggleGridNote(instrument.id, hitIdx, midi);
+        }
+      }
+      setSelectedNotes(new Set());
+    }
+    if (e.key === 'Escape') {
+      setSelectedNotes(new Set());
+    }
+  }, [instrument, selectedNotes]);
+
   if (!instrument) {
     return (
       <div className="grid-empty h-48 flex items-center justify-center text-text-secondary text-sm bg-bg-secondary flex-1 min-w-0">
@@ -166,44 +202,6 @@ export function GridSequencer() {
     const current = glides[hitIndex] ?? false;
     useStore.getState().setGridGlide(instrument.id, hitIndex, !current);
   };
-
-  // ── Keyboard handler for delete ──────────────────────────────────────
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNotes.size > 0) {
-      e.preventDefault();
-      const store = useStore.getState();
-      const inst = store.instruments.find((i) => i.id === instrument.id);
-      if (!inst) return;
-      // Rebuild step→hit from fresh state
-      const freshMap = new Map<number, number>();
-      for (let i = 0; i < inst.hitPositions.length; i++) {
-        const s = Math.round(inst.hitPositions[i] * totalSteps) % totalSteps;
-        freshMap.set(s, i);
-      }
-      // Collect hitIndices to remove, process in reverse order
-      const toRemove: { hitIdx: number; midi: number }[] = [];
-      for (const key of selectedNotes) {
-        const { step, midi } = parseNoteKey(key);
-        const hitIdx = freshMap.get(step);
-        if (hitIdx !== undefined) toRemove.push({ hitIdx, midi });
-      }
-      // Sort by hitIndex descending to avoid index shifting
-      toRemove.sort((a, b) => b.hitIdx - a.hitIdx);
-      for (const { hitIdx, midi } of toRemove) {
-        const currentNotes = store.gridNotes[instrument.id]?.[hitIdx] || [];
-        if (currentNotes.length <= 1) {
-          store.removeHit(instrument.id, hitIdx);
-        } else {
-          store.toggleGridNote(instrument.id, hitIdx, midi);
-        }
-      }
-      setSelectedNotes(new Set());
-    }
-    // Escape clears selection
-    if (e.key === 'Escape') {
-      setSelectedNotes(new Set());
-    }
-  }, [selectedNotes, instrument.id, totalSteps]);
 
   // ── Resize drag handler ──────────────────────────────────────────────
   const handleResizeMouseDown = (

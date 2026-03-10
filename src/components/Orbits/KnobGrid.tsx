@@ -4,6 +4,7 @@ import { KnobCanvas } from './KnobCanvas';
 import { PASTEL_COLORS } from '../../canvas/colors';
 import { fetchSampleTree, type SampleEntry } from '../../audio/sampleApi';
 import { DEFAULT_SAMPLER_PARAMS, DEFAULT_SYNTH_PARAMS } from '../../types/superdough';
+import { DEFAULT_LOOPER_PARAMS } from '../../types/looper';
 import { generateName, type NamePattern } from '../../utils/nameGenerator';
 import { serializeSet } from '../../storage/serializer';
 import { storage } from '../../storage/LocalStorageProvider';
@@ -26,8 +27,11 @@ function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
   return result;
 }
 
+const ADD_TYPES = ['synth', 'sampler', 'looper'] as const;
+type AddType = (typeof ADD_TYPES)[number];
+
 function AddInstrumentCard() {
-  const [mode, setMode] = useState<'sampler' | 'synth'>('sampler');
+  const mode = useStore((s) => s.addInstrumentType);
   const [sampleFiles, setSampleFiles] = useState<SampleEntry[]>([]);
 
   useEffect(() => {
@@ -62,6 +66,24 @@ function AddInstrumentCard() {
         instruments: [...store.instruments, newInst],
         gridNotes: { ...store.gridNotes, [id]: Array.from({ length: loopSize }, () => [60]) },
       });
+      store.selectInstrument(id);
+    } else if (mode === 'looper') {
+      const newInst = {
+        id,
+        name: `Loop ${store.instruments.filter((i) => i.type === 'looper').length + 1}`,
+        type: 'looper' as const,
+        color,
+        hits: 0,
+        hitPositions: [] as number[],
+        loopSize,
+        loopSizeLocked: false,
+        muted: false,
+        solo: false,
+        volume: 0,
+        orbitIndex,
+        looperParams: { ...DEFAULT_LOOPER_PARAMS },
+      };
+      store.setInstruments([...store.instruments, newInst]);
       store.selectInstrument(id);
     } else {
       const fallback: SampleEntry = { type: 'file', name: 'kick.wav', path: 'samples/kick.wav' };
@@ -109,33 +131,21 @@ function AddInstrumentCard() {
         <span className="text-4xl text-white/20 leading-none">+</span>
       </div>
 
-      {/* Discrete toggle switch — bottom, stops propagation */}
+      {/* 3-way segmented type selector */}
       <div
-        className="flex flex-col items-center gap-1 pb-1"
+        className="flex rounded-full overflow-hidden border border-white/10"
         onClick={(e) => e.stopPropagation()}
       >
-        <span className="text-[8px] text-white/40 font-mono tracking-wide">
-          {mode === 'sampler' ? 'Smp' : 'Syn'}
-        </span>
-        <button
-          className="relative w-9 h-[18px] rounded-full transition-colors duration-200 focus:outline-none"
-          style={{
-            background: mode === 'synth'
-              ? 'rgba(255,255,255,0.18)'
-              : 'rgba(255,255,255,0.08)',
-            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.4)',
-          }}
-          onClick={() => setMode(mode === 'sampler' ? 'synth' : 'sampler')}
-        >
-          <span
-            className="absolute top-[2px] left-0 w-[14px] h-[14px] rounded-full transition-transform duration-200"
-            style={{
-              background: 'rgba(255,255,255,0.7)',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
-              transform: mode === 'synth' ? 'translateX(20px)' : 'translateX(2px)',
-            }}
-          />
-        </button>
+        {ADD_TYPES.map((t) => (
+          <button
+            key={t}
+            className={`px-2 py-0.5 text-[8px] font-medium uppercase tracking-wider transition-colors cursor-pointer
+              ${mode === t ? 'bg-white/20 text-white/80' : 'text-white/30 hover:bg-white/5 hover:text-white/50'}`}
+            onClick={() => useStore.getState().setAddInstrumentType(t)}
+          >
+            {t === 'synth' ? 'Syn' : t === 'sampler' ? 'Smp' : 'Loop'}
+          </button>
+        ))}
       </div>
     </div>
   );

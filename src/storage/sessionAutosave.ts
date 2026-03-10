@@ -130,7 +130,7 @@ export async function restoreAutosave(): Promise<boolean> {
 
     // Re-register non-custom samples referenced by instruments
     for (const inst of data.instruments) {
-      if (inst.type === 'sampler' && inst.samplePath) {
+      if ((inst.type === 'sampler' || inst.type === 'looper') && inst.samplePath) {
         const isCustom = customSamples.some((c) => c.key === inst.samplePath);
         if (!isCustom) {
           registerSampleForPlayback(inst.samplePath);
@@ -159,6 +159,30 @@ export async function restoreAutosave(): Promise<boolean> {
     });
 
     setOrbitCounter(maxOrbit);
+
+    // Re-init looper editors — async decode + BPM detection
+    const baseUrl = ((import.meta.env.BASE_URL as string) ?? '/').replace(/\/$/, '') + '/';
+    for (const inst of data.instruments) {
+      if (inst.type === 'looper' && inst.samplePath) {
+        const isCustom = customSamples.some((c) => c.key === inst.samplePath);
+        const url = isCustom
+          ? customSamples.find((c) => c.key === inst.samplePath)!.url
+          : inst.samplePath.startsWith('blob:') || inst.samplePath.startsWith('http')
+            ? inst.samplePath
+            : baseUrl + inst.samplePath;
+        try {
+          // Tone.js may not be started yet at autosave restore, use plain AudioContext
+          const ctx = new AudioContext();
+          fetch(url)
+            .then((r) => r.arrayBuffer())
+            .then((buf) => ctx.decodeAudioData(buf))
+            .then((decoded) => useStore.getState().initLooperEditor(inst.id, decoded))
+            .catch((e) => console.error('[autosave] looper decode failed:', e));
+        } catch (e) {
+          console.error('[autosave] looper re-init failed:', e);
+        }
+      }
+    }
 
     return true;
   } catch (err) {

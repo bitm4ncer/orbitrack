@@ -25,6 +25,9 @@ export const EFFECT_COLORS: Record<string, string> = {
   ringmod:     '#BAFFF0',
   trancegate:  '#FF9EBA',
   pingpong:    '#BAF0FF',
+  limiter:     '#FFB3B3',
+  drumbuss:    '#FFD4A3',
+  stereoimage: '#B3D4FF',
 };
 
 export const EFFECT_ICONS: Record<string, string> = {
@@ -32,6 +35,7 @@ export const EFFECT_ICONS: Record<string, string> = {
   chorus: '≈', phaser: '⊕', distortion: '⋀', filter: '◡',
   bitcrusher: '⊞', tremolo: '∿', ringmod: '⊗',
   trancegate: '◉', pingpong: '⇄',
+  limiter: '⊔', drumbuss: '⊚', stereoimage: '↔',
 };
 
 // ── per-effect body components ─────────────────────────────────────────────
@@ -484,6 +488,144 @@ function PingPongBody({ effect, color, onChange }: BodyProps) {
   );
 }
 
+// ── Limiter ─────────────────────────────────────────────────────────────────
+
+function LimiterBody({ effect, color, onChange }: BodyProps) {
+  const ceiling = effect.params.ceiling ?? -0.3;
+  const meterW  = 200;
+  const meterH  = 28;
+  // ceiling fraction on -24→0 scale
+  const ceilFrac = Math.max(0, Math.min(1, (ceiling + 24) / 24));
+  return (
+    <div className="flex flex-col gap-2">
+      <canvas
+        width={meterW} height={meterH}
+        style={{ width: '100%', height: meterH, display: 'block', borderRadius: 3 }}
+        ref={(canvas) => {
+          if (!canvas) return;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          const W = canvas.width;
+          ctx.fillStyle = '#0e0e18';
+          ctx.fillRect(0, 0, W, meterH);
+          // Scale
+          ctx.fillStyle = '#1a1a28';
+          ctx.fillRect(0, 4, W, meterH - 8);
+          // Gradient zone below ceiling
+          const g = ctx.createLinearGradient(0, 0, W, 0);
+          g.addColorStop(0, '#22c55e40'); g.addColorStop(1, '#ef444440');
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 4, Math.round(ceilFrac * W), meterH - 8);
+          // Ceiling line
+          const cx = Math.round(ceilFrac * W);
+          ctx.fillStyle = color;
+          ctx.fillRect(cx - 1, 0, 2, meterH);
+          // Label
+          ctx.fillStyle = color; ctx.font = '8px monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+          ctx.fillText(`Ceil: ${ceiling.toFixed(1)} dBFS`, cx + 3, 2);
+          // dB ticks
+          ctx.fillStyle = '#0c0c14';
+          for (const db of [-24, -18, -12, -6, 0]) {
+            const x = Math.round(((db + 24) / 24) * W);
+            ctx.fillRect(x, 4, 1, meterH - 8);
+          }
+        }}
+      />
+      <div className="flex gap-3 justify-center">
+        {knobFor(effect, 'ceiling', color, onChange)}
+        {knobFor(effect, 'release', color, onChange)}
+      </div>
+    </div>
+  );
+}
+
+// ── Drum Buss ────────────────────────────────────────────────────────────────
+
+function DrumBussBody({ effect, color, onChange }: BodyProps) {
+  const drive = effect.params.drive ?? 0.3;
+  const curveW = 80; const curveH = 32;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <canvas
+          width={curveW} height={curveH}
+          style={{ width: curveW, height: curveH, borderRadius: 3, flexShrink: 0 }}
+          ref={(canvas) => {
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            ctx.fillStyle = '#0e0e18'; ctx.fillRect(0, 0, curveW, curveH);
+            ctx.strokeStyle = `${color}60`; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(0, curveH); ctx.lineTo(curveW, 0); ctx.stroke();
+            // tanh curve
+            const k = 1 + drive * 50;
+            ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < curveW; i++) {
+              const x = (i / (curveW - 1)) * 2 - 1;
+              const y = Math.tanh(x * k) / Math.tanh(k);
+              const py = (1 - (y + 1) / 2) * curveH;
+              if (i === 0) ctx.moveTo(i, py); else ctx.lineTo(i, py);
+            }
+            ctx.stroke();
+          }}
+        />
+        <div className="flex flex-wrap gap-2 flex-1">
+          {knobFor(effect, 'drive',    color, onChange, 'sm')}
+          {knobFor(effect, 'low',      color, onChange, 'sm')}
+          {knobFor(effect, 'compress', color, onChange, 'sm')}
+          {knobFor(effect, 'mix',      color, onChange, 'sm')}
+          {knobFor(effect, 'output',   color, onChange, 'sm')}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Stereo Image ─────────────────────────────────────────────────────────────
+
+function StereoImageBody({ effect, color, onChange }: BodyProps) {
+  const width = effect.params.width ?? 1;
+  return (
+    <div className="flex flex-col gap-2">
+      <canvas
+        width={200} height={52}
+        style={{ width: '100%', height: 52, borderRadius: 3, display: 'block' }}
+        ref={(canvas) => {
+          if (!canvas) return;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          const W = canvas.width; const H = 52;
+          ctx.fillStyle = '#0e0e18'; ctx.fillRect(0, 0, W, H);
+          const cx = W / 2; const cy = H / 2;
+          // Axes
+          ctx.strokeStyle = '#2a2a3a'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+          // Width indicator arc
+          const maxAngle = Math.PI / 4 * Math.min(width, 2); // 0=mono, π/4=normal, π/2=max
+          ctx.strokeStyle = `${color}80`; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(cx, cy, 18, -Math.PI / 2 - maxAngle, -Math.PI / 2 + maxAngle); ctx.stroke();
+          // L / R zone shading
+          const spread = (W / 2 - 8) * (width / 2);
+          ctx.fillStyle = `${color}18`;
+          ctx.fillRect(cx - spread, 4, spread * 2, H - 8);
+          // Labels
+          ctx.fillStyle = `${color}80`; ctx.font = '8px monospace'; ctx.textBaseline = 'middle';
+          ctx.textAlign = 'left';  ctx.fillText('L', 3,     cy);
+          ctx.textAlign = 'right'; ctx.fillText('R', W - 3, cy);
+          ctx.textAlign = 'center';
+          ctx.fillText(width === 0 ? 'MONO' : `${Math.round(width * 100)}%`, cx, cy);
+        }}
+      />
+      <div className="flex gap-3 justify-center">
+        {knobFor(effect, 'width',   color, onChange)}
+        {knobFor(effect, 'monoLow', color, onChange)}
+      </div>
+    </div>
+  );
+}
+
 const BODY_MAP: Record<string, React.ComponentType<BodyProps>> = {
   eq3:        EQ3Body,
   compressor: CompressorBody,
@@ -498,7 +640,10 @@ const BODY_MAP: Record<string, React.ComponentType<BodyProps>> = {
   tremolo:    TremoloBody,
   ringmod:    RingModBody,
   trancegate: TranceGateBody,
-  pingpong:   PingPongBody,
+  pingpong:    PingPongBody,
+  limiter:     LimiterBody,
+  drumbuss:    DrumBussBody,
+  stereoimage: StereoImageBody,
 };
 
 // ── main component ─────────────────────────────────────────────────────────

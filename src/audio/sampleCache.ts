@@ -64,6 +64,22 @@ export async function preloadSample(path: string): Promise<void> {
 }
 
 /**
+ * Pre-decode a custom sample (blob URL) into superdough's buffer cache.
+ * Key must already be registered in superdough's soundMap before calling this.
+ */
+export async function preloadCustomSample(key: string, blobUrl: string): Promise<void> {
+  if (loaded.has(key)) return;
+  loaded.add(key);
+  try {
+    const ac = getSdAudioContext();
+    if (!ac) { loaded.delete(key); return; }
+    await loadBuffer(blobUrl, ac, key, 0);
+  } catch {
+    loaded.delete(key);
+  }
+}
+
+/**
  * Fire-and-forget: preload `count` siblings before and after `currentPath`
  * so that scroll-browsing feels instantaneous.
  */

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import * as Tone from 'tone';
 import { PASTEL_COLORS } from '../canvas/colors';
 import type { Instrument } from '../types/instrument';
 import type { Effect, EffectType } from '../types/effects';
@@ -8,10 +9,12 @@ import { DEFAULT_SYNTH_PARAMS, DEFAULT_SAMPLER_PARAMS } from '../types/superdoug
 import { DEFAULT_EFFECT_PARAMS } from '../audio/effectParams';
 import { loadSample } from '../audio/sampler';
 import { registerSampleForPlayback } from '../audio/engine';
+import { preloadSample, preloadCustomSample } from '../audio/sampleCache';
 import type { LooperParams, LooperEditorState } from '../types/looper';
 import { DEFAULT_LOOPER_PARAMS, createLooperEditorState } from '../types/looper';
-import { sliceBuffer, deleteRange, insertBuffer, extractPeaks, bufferToBlobUrl } from '../audio/bufferOps';
-import { detectTransients, mapTransientsToGrid } from '../audio/transientDetector';
+import { sliceBuffer, deleteRange, silenceRange, insertBuffer, extractPeaks, bufferToBlobUrl } from '../audio/bufferOps';
+import { detectTransients, mapTransientsToGrid, estimateLoopSize, detectBpm } from '../audio/transientDetector';
+import { getCachedBpm, setCachedBpm } from '../audio/bpmCache';
 import type { OrbeatSet } from '../types/storage';
 import { base64ToBlob } from '../storage/serializer';
 import { generateName } from '../utils/nameGenerator';
@@ -183,6 +186,10 @@ export interface StoreState {
   setPlaybackUI: (progress: number, currentStep: number, instProgress: Record<string, number>) => void;
   setLoopSize: (id: string, size: number) => void;
 
+  // Default instrument type for the Add card
+  addInstrumentType: 'sampler' | 'synth' | 'looper';
+  setAddInstrumentType: (type: 'sampler' | 'synth' | 'looper') => void;
+
   // Snap to 16th note grid
   snapEnabled: boolean;
   setSnapEnabled: (enabled: boolean) => void;
@@ -223,9 +230,11 @@ export interface StoreState {
 
   // Per-instrument effect chains
   instrumentEffects: Record<string, Effect[]>;
+  masterEffects: Effect[];
   masterVolume: number; // 0-1 linear
 
   addEffect: (instrumentId: string, type: EffectType) => void;
+  addMasterEffect: (type: EffectType) => void;
   removeEffect: (instrumentId: string, effectId: string) => void;
   setEffectParam: (instrumentId: string, effectId: string, key: string, value: number) => void;
   toggleEffectEnabled: (instrumentId: string, effectId: string) => void;
@@ -265,8 +274,14 @@ export interface StoreState {
   looperPaste: (instrumentId: string) => void;
   looperTrim: (instrumentId: string) => void;
   looperDelete: (instrumentId: string) => void;
+  looperSilence: (instrumentId: string) => void;
   looperUndo: (instrumentId: string) => void;
   redetectTransients: (instrumentId: string, sensitivity: number) => void;
+  setLooperLoop: (instrumentId: string, loopIn: number, loopOut: number) => void;
+  setLooperCursor: (instrumentId: string, position: number | null) => void;
+  setLooperPeakResolution: (instrumentId: string, resolution: number) => void;
+  setDetectedBpm: (instrumentId: string, bpm: number) => void;
+  setLooperBpmMultiplier: (instrumentId: string, multiplier: number) => void;
 
   // Set (project) management
   currentSetId: string | null;
@@ -312,6 +327,9 @@ export const useStore = create<StoreState>((set, get) => ({
   // Per-instrument progress
   instrumentProgress: {},
 
+  // Add card default type
+  addInstrumentType: 'sampler',
+
   // Snap
   snapEnabled: true,
   gridResolution: 1,
@@ -330,6 +348,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   // Per-instrument effects
   instrumentEffects: {},
+  masterEffects: [],
   masterVolume: 0.8,
 
   // Transport actions
@@ -709,7 +728,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setLoopSize: (id, size) =>
     set((s) => {
-      const newLoopSize = Math.max(1, Math.min(64, Math.round(size)));
+      const newLoopSize = Math.max(1, Math.min(256, Math.round(size)));
       const inst = s.instruments.find((i) => i.id === id);
       if (!inst) return s;
 
@@ -760,6 +779,7 @@ export const useStore = create<StoreState>((set, get) => ({
       return { instruments: newInstruments, ...gridUpdate };
     }),
 
+  setAddInstrumentType: (addInstrumentType) => set({ addInstrumentType }),
   setSnapEnabled: (snapEnabled) => set({ snapEnabled }),
   setGridResolution: (gridResolution) => set({ gridResolution }),
   setScaleRoot: (scaleRoot) => set({ scaleRoot }),
@@ -815,6 +835,11 @@ export const useStore = create<StoreState>((set, get) => ({
       ? registerSampleForPlayback(samplePath, custom.url)
       : registerSampleForPlayback(samplePath);
     loadSample(samplePath, custom?.url ?? samplePath);
+    if (custom) {
+      void preloadCustomSample(sdKey, custom.url);
+    } else {
+      void preloadSample(samplePath);
+    }
     set((s) => ({
       instruments: s.instruments.map((inst) =>
         inst.id === instrumentId
@@ -863,8 +888,29 @@ export const useStore = create<StoreState>((set, get) => ({
       return { instrumentEffects: { ...s.instrumentEffects, [instrumentId]: [...prev, effect] } };
     }),
 
+  addMasterEffect: (type) =>
+    set((s) => {
+      const EFFECT_LABELS: Partial<Record<EffectType, string>> = {
+        eq3: 'EQ 3-Band', reverb: 'Reverb', delay: 'Delay', compressor: 'Compressor',
+        chorus: 'Chorus', phaser: 'Phaser', distortion: 'Distortion', filter: 'Filter',
+        bitcrusher: 'Bit Crusher', parame: 'Param EQ', tremolo: 'Tremolo', ringmod: 'Ring Mod',
+        trancegate: 'Orb Gate', pingpong: 'Ping Pong',
+      };
+      const effect: Effect = {
+        id: createId(),
+        type,
+        label: EFFECT_LABELS[type] ?? type,
+        enabled: true,
+        params: DEFAULT_EFFECT_PARAMS(type),
+        collapsed: false,
+      };
+      return { masterEffects: [...s.masterEffects, effect] };
+    }),
+
   removeEffect: (instrumentId, effectId) =>
     set((s) => {
+      if (instrumentId === '__master__')
+        return { masterEffects: s.masterEffects.filter((e) => e.id !== effectId) };
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
         instrumentEffects: {
@@ -876,6 +922,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setEffectParam: (instrumentId, effectId, key, value) =>
     set((s) => {
+      if (instrumentId === '__master__')
+        return { masterEffects: s.masterEffects.map((e) => e.id === effectId ? { ...e, params: { ...e.params, [key]: value } } : e) };
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
         instrumentEffects: {
@@ -889,6 +937,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
   toggleEffectEnabled: (instrumentId, effectId) =>
     set((s) => {
+      if (instrumentId === '__master__')
+        return { masterEffects: s.masterEffects.map((e) => e.id === effectId ? { ...e, enabled: !e.enabled } : e) };
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
         instrumentEffects: {
@@ -900,6 +950,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
   toggleEffectCollapsed: (instrumentId, effectId) =>
     set((s) => {
+      if (instrumentId === '__master__')
+        return { masterEffects: s.masterEffects.map((e) => e.id === effectId ? { ...e, collapsed: !e.collapsed } : e) };
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
         instrumentEffects: {
@@ -911,6 +963,12 @@ export const useStore = create<StoreState>((set, get) => ({
 
   reorderEffects: (instrumentId, fromIdx, toIdx) =>
     set((s) => {
+      if (instrumentId === '__master__') {
+        const effects = [...s.masterEffects];
+        const [item] = effects.splice(fromIdx, 1);
+        effects.splice(toIdx, 0, item);
+        return { masterEffects: effects };
+      }
       const effects = [...(s.instrumentEffects[instrumentId] ?? [])];
       const [item] = effects.splice(fromIdx, 1);
       effects.splice(toIdx, 0, item);
@@ -1037,8 +1095,8 @@ export const useStore = create<StoreState>((set, get) => ({
       ),
     }));
 
-    // Decode audio and init editor
-    const ctx = new AudioContext();
+    // Decode audio and init editor — reuse Tone.js AudioContext
+    const ctx = Tone.getContext().rawContext as AudioContext;
     fetch(url)
       .then((r) => r.arrayBuffer())
       .then((buf) => ctx.decodeAudioData(buf))
@@ -1058,17 +1116,28 @@ export const useStore = create<StoreState>((set, get) => ({
     })),
 
   initLooperEditor: (instrumentId, buffer) => {
-    const peaks = extractPeaks(buffer, 512);
-    const transients = detectTransients(buffer, 0.5, 16);
+    const projectBpm = get().bpm;
     const inst = get().instruments.find((i) => i.id === instrumentId);
-    const gridSize = inst?.loopSize ?? 16;
-    const hitPositions = mapTransientsToGrid(transients, gridSize);
+    const samplePath = inst?.samplePath ?? '';
+    const existingRes = get().looperEditors[instrumentId]?.peakResolution ?? 2048;
+    const peaks = extractPeaks(buffer, existingRes);
+
+    // Check BPM cache first for instant results
+    const cachedBpm = getCachedBpm(samplePath);
+
+    // Use cached BPM for initial estimate if available, otherwise fall back to project BPM
+    const initialBpm = cachedBpm > 0 ? cachedBpm : 0;
+    const fallbackLoopSize = estimateLoopSize(buffer, projectBpm, initialBpm);
+    const fallbackMaxPeaks = Math.min(fallbackLoopSize, 64);
+    const transients = detectTransients(buffer, 0.5, fallbackMaxPeaks);
+    const hitPositions = mapTransientsToGrid(transients, fallbackLoopSize);
 
     set((s) => ({
       looperEditors: {
         ...s.looperEditors,
         [instrumentId]: {
           ...createLooperEditorState(),
+          peakResolution: existingRes,
           audioBuffer: buffer,
           peaks,
           transients,
@@ -1076,7 +1145,7 @@ export const useStore = create<StoreState>((set, get) => ({
       },
       instruments: s.instruments.map((i) =>
         i.id === instrumentId
-          ? { ...i, hits: hitPositions.length, hitPositions }
+          ? { ...i, hits: hitPositions.length, hitPositions, loopSize: fallbackLoopSize, detectedBpm: cachedBpm || i.detectedBpm }
           : i
       ),
       gridNotes: {
@@ -1084,6 +1153,65 @@ export const useStore = create<StoreState>((set, get) => ({
         [instrumentId]: hitPositions.map(() => [60]),
       },
     }));
+
+    // If we already have a cached BPM and it matched the fallback, skip async detection
+    if (cachedBpm > 0) {
+      console.log(`[looper] Using cached BPM: ${cachedBpm}, loopSize: ${fallbackLoopSize}`);
+    }
+
+    // Always run async BPM detection to verify/update cache
+    detectBpm(buffer).then((detectedBpm) => {
+      if (detectedBpm <= 0) {
+        console.log(`[looper] BPM detection returned 0, keeping loopSize=${fallbackLoopSize}`);
+        return;
+      }
+
+      // Cache the detected BPM for future loads
+      if (samplePath) setCachedBpm(samplePath, detectedBpm);
+
+      // If we already applied this BPM from cache, just ensure it's on the instrument
+      const currentInst = get().instruments.find((i) => i.id === instrumentId);
+      if (currentInst?.detectedBpm === detectedBpm) return;
+
+      const refinedLoopSize = estimateLoopSize(buffer, projectBpm, detectedBpm);
+
+      if (refinedLoopSize === fallbackLoopSize) {
+        // loopSize unchanged, but still store detectedBpm
+        set((s) => ({
+          instruments: s.instruments.map((i) =>
+            i.id === instrumentId ? { ...i, detectedBpm } : i
+          ),
+        }));
+        console.log(`[looper] BPM detected: ${detectedBpm.toFixed(1)}, loopSize unchanged: ${refinedLoopSize}`);
+        return;
+      }
+
+      const refinedMaxPeaks = Math.min(refinedLoopSize, 64);
+      const refinedTransients = detectTransients(buffer, 0.5, refinedMaxPeaks);
+      const refinedHits = mapTransientsToGrid(refinedTransients, refinedLoopSize);
+
+      set((s) => ({
+        looperEditors: {
+          ...s.looperEditors,
+          [instrumentId]: {
+            ...(s.looperEditors[instrumentId] ?? createLooperEditorState()),
+            transients: refinedTransients,
+          },
+        },
+        instruments: s.instruments.map((i) =>
+          i.id === instrumentId
+            ? { ...i, hits: refinedHits.length, hitPositions: refinedHits, loopSize: refinedLoopSize, detectedBpm }
+            : i
+        ),
+        gridNotes: {
+          ...s.gridNotes,
+          [instrumentId]: refinedHits.map(() => [60]),
+        },
+      }));
+      console.log(`[looper] BPM detected: ${detectedBpm.toFixed(1)}, loopSize: ${refinedLoopSize} (was ${fallbackLoopSize})`);
+    }).catch((e) => {
+      console.warn('[looper] BPM detection error:', e);
+    });
   },
 
   setLooperSelection: (instrumentId, start, end) =>
@@ -1110,6 +1238,46 @@ export const useStore = create<StoreState>((set, get) => ({
       },
     })),
 
+  setLooperLoop: (instrumentId, loopIn, loopOut) =>
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...(s.looperEditors[instrumentId] ?? createLooperEditorState()),
+          loopIn: Math.max(0, Math.min(1, loopIn)),
+          loopOut: Math.max(0, Math.min(1, loopOut)),
+        },
+      },
+    })),
+
+  setLooperCursor: (instrumentId, position) =>
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...(s.looperEditors[instrumentId] ?? createLooperEditorState()),
+          cursorPosition: position != null ? Math.max(0, Math.min(1, position)) : null,
+        },
+      },
+    })),
+
+  setLooperPeakResolution: (instrumentId, resolution) => {
+    const editor = get().looperEditors[instrumentId];
+    if (!editor?.audioBuffer) return;
+    const clamped = Math.max(256, Math.min(2048, resolution));
+    const peaks = extractPeaks(editor.audioBuffer, clamped);
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...(s.looperEditors[instrumentId] ?? createLooperEditorState()),
+          peakResolution: clamped,
+          peaks,
+        },
+      },
+    }));
+  },
+
   looperCut: (instrumentId) => {
     const editor = get().looperEditors[instrumentId];
     if (!editor?.audioBuffer || editor.selectionStart == null || editor.selectionEnd == null) return;
@@ -1118,7 +1286,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const endSample = Math.floor(editor.selectionEnd * buf.length);
     const clipboard = sliceBuffer(buf, startSample, endSample);
     const newBuffer = deleteRange(buf, startSample, endSample);
-    const peaks = extractPeaks(newBuffer, 512);
+    const peaks = extractPeaks(newBuffer, editor.peakResolution ?? 2048);
     const undoStack = [...editor.undoStack, buf].slice(-20);
 
     // Re-register with superdough
@@ -1141,6 +1309,8 @@ export const useStore = create<StoreState>((set, get) => ({
           audioBuffer: newBuffer,
           peaks,
           clipboard,
+          clipboardStart: Math.min(editor.selectionStart!, editor.selectionEnd!),
+          clipboardEnd: Math.max(editor.selectionStart!, editor.selectionEnd!),
           undoStack,
           transients,
           selectionStart: null,
@@ -1165,10 +1335,12 @@ export const useStore = create<StoreState>((set, get) => ({
     const endSample = Math.floor(editor.selectionEnd * buf.length);
     const clipboard = sliceBuffer(buf, startSample, endSample);
 
+    const clipStart = Math.min(editor.selectionStart, editor.selectionEnd);
+    const clipEnd = Math.max(editor.selectionStart, editor.selectionEnd);
     set((s) => ({
       looperEditors: {
         ...s.looperEditors,
-        [instrumentId]: { ...editor, clipboard },
+        [instrumentId]: { ...editor, clipboard, clipboardStart: clipStart, clipboardEnd: clipEnd },
       },
     }));
   },
@@ -1179,10 +1351,12 @@ export const useStore = create<StoreState>((set, get) => ({
     const buf = editor.audioBuffer;
     const insertAt = editor.selectionStart != null
       ? Math.floor(editor.selectionStart * buf.length)
-      : buf.length;
+      : editor.cursorPosition != null
+        ? Math.floor(editor.cursorPosition * buf.length)
+        : buf.length;
     const undoStack = [...editor.undoStack, buf].slice(-20);
     const newBuffer = insertBuffer(buf, editor.clipboard, insertAt);
-    const peaks = extractPeaks(newBuffer, 512);
+    const peaks = extractPeaks(newBuffer, editor.peakResolution ?? 2048);
 
     const inst = get().instruments.find((i) => i.id === instrumentId);
     if (inst?.sampleName) {
@@ -1203,6 +1377,8 @@ export const useStore = create<StoreState>((set, get) => ({
           peaks,
           undoStack,
           transients,
+          clipboardStart: null,
+          clipboardEnd: null,
           selectionStart: null,
           selectionEnd: null,
         },
@@ -1225,7 +1401,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const endSample = Math.floor(editor.selectionEnd * buf.length);
     const undoStack = [...editor.undoStack, buf].slice(-20);
     const newBuffer = sliceBuffer(buf, startSample, endSample);
-    const peaks = extractPeaks(newBuffer, 512);
+    const peaks = extractPeaks(newBuffer, editor.peakResolution ?? 2048);
 
     const inst = get().instruments.find((i) => i.id === instrumentId);
     if (inst?.sampleName) {
@@ -1270,7 +1446,50 @@ export const useStore = create<StoreState>((set, get) => ({
     const endSample = Math.floor(editor.selectionEnd * buf.length);
     const undoStack = [...editor.undoStack, buf].slice(-20);
     const newBuffer = deleteRange(buf, startSample, endSample);
-    const peaks = extractPeaks(newBuffer, 512);
+    const peaks = extractPeaks(newBuffer, editor.peakResolution ?? 2048);
+
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    if (inst?.sampleName) {
+      const blobUrl = bufferToBlobUrl(newBuffer);
+      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+    }
+
+    const transients = detectTransients(newBuffer, 0.5, 16);
+    const gridSize = inst?.loopSize ?? 16;
+    const hitPositions = mapTransientsToGrid(transients, gridSize);
+
+    set((s) => ({
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: {
+          ...editor,
+          audioBuffer: newBuffer,
+          peaks,
+          undoStack,
+          transients,
+          selectionStart: null,
+          selectionEnd: null,
+        },
+      },
+      instruments: s.instruments.map((i) =>
+        i.id === instrumentId ? { ...i, hits: hitPositions.length, hitPositions } : i
+      ),
+      gridNotes: {
+        ...s.gridNotes,
+        [instrumentId]: hitPositions.map(() => [60]),
+      },
+    }));
+  },
+
+  looperSilence: (instrumentId) => {
+    const editor = get().looperEditors[instrumentId];
+    if (!editor?.audioBuffer || editor.selectionStart == null || editor.selectionEnd == null) return;
+    const buf = editor.audioBuffer;
+    const startSample = Math.floor(editor.selectionStart * buf.length);
+    const endSample = Math.floor(editor.selectionEnd * buf.length);
+    const undoStack = [...editor.undoStack, buf].slice(-20);
+    const newBuffer = silenceRange(buf, startSample, endSample);
+    const peaks = extractPeaks(newBuffer, editor.peakResolution ?? 2048);
 
     const inst = get().instruments.find((i) => i.id === instrumentId);
     if (inst?.sampleName) {
@@ -1310,7 +1529,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!editor?.undoStack.length) return;
     const undoStack = [...editor.undoStack];
     const buffer = undoStack.pop()!;
-    const peaks = extractPeaks(buffer, 512);
+    const peaks = extractPeaks(buffer, editor.peakResolution ?? 2048);
 
     const inst = get().instruments.find((i) => i.id === instrumentId);
     if (inst?.sampleName) {
@@ -1368,6 +1587,48 @@ export const useStore = create<StoreState>((set, get) => ({
     }));
   },
 
+  setDetectedBpm: (instrumentId, bpm) => {
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    if (inst?.samplePath) setCachedBpm(inst.samplePath, bpm);
+    set((s) => ({
+      instruments: s.instruments.map((i) =>
+        i.id === instrumentId ? { ...i, detectedBpm: bpm } : i
+      ),
+    }));
+  },
+
+  setLooperBpmMultiplier: (instrumentId, multiplier) => {
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    const editor = get().looperEditors[instrumentId];
+    if (!inst || !editor?.audioBuffer) return;
+
+    const detectedBpm = inst.detectedBpm ?? 0;
+    if (detectedBpm <= 0) return; // can't compute without detected BPM
+
+    const projectBpm = get().bpm;
+    const effectiveBpm = detectedBpm * multiplier;
+    const newLoopSize = estimateLoopSize(editor.audioBuffer, projectBpm, effectiveBpm);
+    const maxPeaks = Math.min(newLoopSize, 64);
+    const transients = detectTransients(editor.audioBuffer, 0.5, maxPeaks);
+    const hitPositions = mapTransientsToGrid(transients, newLoopSize);
+
+    set((s) => ({
+      instruments: s.instruments.map((i) =>
+        i.id === instrumentId
+          ? { ...i, bpmMultiplier: multiplier, loopSize: newLoopSize, hits: hitPositions.length, hitPositions }
+          : i
+      ),
+      looperEditors: {
+        ...s.looperEditors,
+        [instrumentId]: { ...editor, transients },
+      },
+      gridNotes: {
+        ...s.gridNotes,
+        [instrumentId]: hitPositions.map(() => [60]),
+      },
+    }));
+  },
+
   // Set (project) management
   currentSetId: null,
   currentSetName: generateName(),
@@ -1389,25 +1650,24 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   loadSet: (orbeatSet: OrbeatSet) => {
-    // Re-register custom samples from embedded data
+    // Re-register custom samples from embedded data and pre-decode into superdough's buffer cache
     const customSamples: { key: string; url: string; name: string }[] = [];
     if (orbeatSet.customSamples) {
       for (const es of orbeatSet.customSamples) {
         const blob = base64ToBlob(es.base64, es.mimeType);
         const url = URL.createObjectURL(blob);
         registerSampleForPlayback(es.key, url);
-        loadSample(es.key, url);
+        void preloadCustomSample(es.key, url); // pre-decode into superdough buffer cache
         customSamples.push({ key: es.key, url, name: es.name });
       }
     }
 
-    // Re-register non-custom samples referenced by instruments
+    // Re-register + pre-decode non-custom samples referenced by instruments
     for (const inst of orbeatSet.instruments) {
-      if (inst.type === 'sampler' && inst.samplePath) {
+      if ((inst.type === 'sampler' || inst.type === 'looper') && inst.samplePath) {
         const isCustom = customSamples.some((c) => c.key === inst.samplePath);
         if (!isCustom) {
-          registerSampleForPlayback(inst.samplePath);
-          loadSample(inst.samplePath, inst.samplePath);
+          void preloadSample(inst.samplePath); // registers + pre-decodes into superdough buffer cache
         }
       }
     }
@@ -1428,6 +1688,32 @@ export const useStore = create<StoreState>((set, get) => ({
       currentSetName: orbeatSet.meta.name,
       selectedInstrumentId: orbeatSet.instruments[0]?.id ?? null,
     });
+
+    // Re-init looper editors — async decode + BPM detection
+    const baseUrl = ((import.meta.env.BASE_URL as string) ?? '/').replace(/\/$/, '') + '/';
+    for (const inst of orbeatSet.instruments) {
+      if (inst.type === 'looper' && inst.samplePath) {
+        const isCustom = customSamples.some((c) => c.key === inst.samplePath);
+        const url = isCustom
+          ? customSamples.find((c) => c.key === inst.samplePath)!.url
+          : inst.samplePath.startsWith('blob:') || inst.samplePath.startsWith('http')
+            ? inst.samplePath
+            : baseUrl + inst.samplePath;
+        try {
+          const ctx = Tone.getContext().rawContext as AudioContext;
+          fetch(url)
+            .then((r) => r.arrayBuffer())
+            .then((buf) => ctx.decodeAudioData(buf))
+            .then((decoded) => get().initLooperEditor(inst.id, decoded))
+            .catch((e) => console.error('[loadSet] looper decode failed:', e));
+        } catch (e) {
+          console.error('[loadSet] looper re-init failed:', e);
+        }
+      }
+    }
+
+    // Clear undo history — new project context
+    import('./undoHistory').then((m) => m.clearHistory());
   },
 
   newSet: () => {
@@ -1488,5 +1774,8 @@ export const useStore = create<StoreState>((set, get) => ({
         get().assignSample(inst.id, pick.path, pick.name.replace(/\.[^.]+$/, ''));
       }
     });
+
+    // Clear undo history — new project context
+    import('./undoHistory').then((m) => m.clearHistory());
   },
 }));

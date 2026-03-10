@@ -42,6 +42,21 @@ export function deleteRange(buf: AudioBuffer, startSample: number, endSample: nu
   return out;
 }
 
+/** Replace a range with silence (keeps buffer length intact). */
+export function silenceRange(buf: AudioBuffer, startSample: number, endSample: number): AudioBuffer {
+  const start = Math.max(0, Math.min(startSample, buf.length));
+  const end = Math.max(start, Math.min(endSample, buf.length));
+  const out = new AudioBuffer({ numberOfChannels: buf.numberOfChannels, length: buf.length, sampleRate: buf.sampleRate });
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const src = buf.getChannelData(ch);
+    const dst = out.getChannelData(ch);
+    dst.set(src);
+    // Zero out the selected range
+    dst.fill(0, start, end);
+  }
+  return out;
+}
+
 /** Insert source buffer into target at the given sample position. */
 export function insertBuffer(target: AudioBuffer, source: AudioBuffer, atSample: number): AudioBuffer {
   const at = Math.max(0, Math.min(atSample, target.length));

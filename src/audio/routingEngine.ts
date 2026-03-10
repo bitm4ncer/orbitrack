@@ -18,6 +18,7 @@
 
 import { getAudioContext, getSuperdoughAudioController } from 'superdough';
 import { useStore } from '../state/store';
+import { initMasterChain } from './masterEffectsChain';
 
 let masterAnalyser: AnalyserNode | null = null;
 let initialized = false;
@@ -68,6 +69,7 @@ export function initRoutingEngine(): void {
   useStore.subscribe((state) => applyVolume(state.masterVolume));
 
   tryTapDestinationGain();
+  initMasterChain();
 }
 
 export function getMasterAnalyser(): AnalyserNode | null {

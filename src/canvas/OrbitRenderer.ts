@@ -43,6 +43,8 @@ export class OrbitRenderer {
   private animationId: number | null = null;
   private layout: LayoutCache = { width: 0, height: 0, cx: 0, cy: 0, maxRadius: 0, instrumentCount: 0, ringSpacing: 0, zoom: 1 };
   zoom = 1;
+  private _lastInstrRef: unknown = null;
+  private _orderedCache: Instrument[] = [];
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -92,8 +94,12 @@ export class OrbitRenderer {
     const state = useStore.getState();
     const { instruments, isPlaying, spinMode, bpm } = state;
 
-    // Sort by loopSize ascending (smaller loops = inner rings)
-    const ordered = [...instruments].sort((a, b) => a.loopSize - b.loopSize);
+    // Sort by loopSize ascending — memoized; only re-sort when instruments array changes.
+    if (instruments !== this._lastInstrRef) {
+      this._lastInstrRef = instruments;
+      this._orderedCache = [...instruments].sort((a, b) => a.loopSize - b.loopSize);
+    }
+    const ordered = this._orderedCache;
 
     // Update layout cache if needed
     if (w !== this.layout.width || h !== this.layout.height || ordered.length !== this.layout.instrumentCount || this.zoom !== this.layout.zoom) {
