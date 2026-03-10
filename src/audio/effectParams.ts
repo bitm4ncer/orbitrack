@@ -14,18 +14,18 @@ export const EFFECT_PARAM_DEFS: Record<EffectType, EffectParamDef[]> = {
   reverb: [
     { key: 'amount', label: 'Mix', min: 0, max: 1, step: 0.01, defaultValue: 0.3 },
     { key: 'size', label: 'Size', min: 0, max: 1, step: 0.01, defaultValue: 0.5 },
-    { key: 'fade', label: 'Fade', min: 0, max: 5, step: 0.1, defaultValue: 1, unit: 's' },
+    { key: 'fade', label: 'Fade', min: 0.1, max: 5, step: 0.1, defaultValue: 1, unit: 's' },
   ],
   delay: [
     { key: 'amount', label: 'Mix', min: 0, max: 1, step: 0.01, defaultValue: 0.3 },
     { key: 'time', label: 'Time', min: 0.01, max: 1, step: 0.001, defaultValue: 0.25, unit: 's' },
-    { key: 'feedback', label: 'Feedback', min: 0, max: 0.95, step: 0.01, defaultValue: 0.4 },
+    { key: 'feedback', label: 'Feedback', min: 0, max: 0.98, step: 0.01, defaultValue: 0.4 },
     { key: 'tone', label: 'Tone', min: 200, max: 20000, step: 10, defaultValue: 8000, unit: 'Hz' },
   ],
   eq3: [
-    { key: 'low', label: 'Low', min: -15, max: 15, step: 0.5, defaultValue: 0, unit: 'dB' },
-    { key: 'mid', label: 'Mid', min: -15, max: 15, step: 0.5, defaultValue: 0, unit: 'dB' },
-    { key: 'high', label: 'High', min: -15, max: 15, step: 0.5, defaultValue: 0, unit: 'dB' },
+    { key: 'low', label: 'Low', min: -18, max: 18, step: 0.5, defaultValue: 0, unit: 'dB' },
+    { key: 'mid', label: 'Mid', min: -18, max: 18, step: 0.5, defaultValue: 0, unit: 'dB' },
+    { key: 'high', label: 'High', min: -18, max: 18, step: 0.5, defaultValue: 0, unit: 'dB' },
     { key: 'lowFreq', label: 'Low Freq', min: 60, max: 500, step: 10, defaultValue: 200, unit: 'Hz' },
     { key: 'midFreq', label: 'Mid Freq', min: 200, max: 5000, step: 10, defaultValue: 1000, unit: 'Hz' },
     { key: 'highFreq', label: 'High Freq', min: 2000, max: 16000, step: 100, defaultValue: 4000, unit: 'Hz' },
@@ -40,7 +40,7 @@ export const EFFECT_PARAM_DEFS: Record<EffectType, EffectParamDef[]> = {
   ],
   chorus: [
     { key: 'amount', label: 'Mix', min: 0, max: 1, step: 0.01, defaultValue: 0.5 },
-    { key: 'depth', label: 'Depth', min: 0, max: 0.02, step: 0.001, defaultValue: 0.005 },
+    { key: 'depth', label: 'Depth', min: 0, max: 0.02, step: 0.001, defaultValue: 0.005, unit: 's' },
     { key: 'rate', label: 'Rate', min: 0.1, max: 10, step: 0.1, defaultValue: 1.5, unit: 'Hz' },
     { key: 'delay', label: 'Delay', min: 0.01, max: 0.05, step: 0.001, defaultValue: 0.02, unit: 's' },
   ],

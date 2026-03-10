@@ -9,7 +9,7 @@ const EFFECT_OPTIONS: { type: EffectType; label: string; icon: string }[] = [
   { type: 'delay', label: 'Delay', icon: '◷' },
   { type: 'chorus', label: 'Chorus', icon: '≈' },
   { type: 'phaser', label: 'Phaser', icon: '⊕' },
-  { type: 'distortion', label: 'Distortion', icon: '⚡' },
+  { type: 'distortion', label: 'Distortion', icon: '⋀' },
   { type: 'filter', label: 'Filter', icon: '◡' },
 ];
 
@@ -33,7 +33,7 @@ export function AddEffectMenu({ instrumentId }: { instrumentId: string }) {
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center justify-center gap-1.5 py-2 rounded
                    border border-dashed border-border hover:border-white/30
-                   text-[10px] text-text-secondary/60 hover:text-text-secondary
+                   text-[13px] text-text-secondary/60 hover:text-text-secondary
                    transition-colors"
         title="Add effect"
       >
@@ -47,7 +47,7 @@ export function AddEffectMenu({ instrumentId }: { instrumentId: string }) {
             {EFFECT_OPTIONS.map(({ type, label, icon }) => (
               <button
                 key={type}
-                className="flex items-center gap-1.5 px-2 py-1.5 rounded text-left text-[11px]
+                className="flex items-center gap-1.5 px-2 py-1.5 rounded text-left text-[14px]
                            text-text-secondary hover:text-text-primary hover:bg-white/5 transition-colors"
                 onClick={() => {
                   addEffect(instrumentId, type);

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../../state/store';
 import { KnobRenderer } from '../../canvas/KnobRenderer';
+import { getOrbitAnalyser } from '../../audio/orbitEffects';
 
 interface Props {
   instrumentId: string;
@@ -13,6 +14,8 @@ export function KnobCanvas({ instrumentId }: Props) {
   const isDragging = useRef(false);
   const hasDragged = useRef(false);
   const dragHitIndex = useRef<number | null>(null);
+  const levelBarRef = useRef<HTMLDivElement>(null);
+  const levelStateRef = useRef({ level: 0 });
 
   const isSelected = useStore((s) => s.selectedInstrumentId === instrumentId);
   const inst = useStore((s) => s.instruments.find((i) => i.id === instrumentId));
@@ -122,6 +125,30 @@ export function KnobCanvas({ instrumentId }: Props) {
     }
   }, [instrumentId]);
 
+  const orbitIndex = inst?.orbitIndex ?? -1;
+  useEffect(() => {
+    if (orbitIndex < 0) return;
+    const data = new Float32Array(1024);
+    let rafId: number;
+    const draw = () => {
+      const analyser = getOrbitAnalyser(orbitIndex);
+      if (analyser && levelBarRef.current) {
+        analyser.getFloatTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+        const rms = Math.sqrt(sum / data.length);
+        const db = 20 * Math.log10(Math.max(rms, 1e-9));
+        const raw = Math.max(0, Math.min(1, (db + 48) / 48));
+        const s = levelStateRef.current;
+        s.level = raw > s.level ? raw : Math.max(0, s.level - 0.02);
+        levelBarRef.current.style.clipPath = `inset(${(1 - s.level) * 100}% 0 0 0)`;
+      }
+      rafId = requestAnimationFrame(draw);
+    };
+    rafId = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(rafId);
+  }, [orbitIndex]);
+
   if (!inst) return null;
 
   return (
@@ -132,6 +159,21 @@ export function KnobCanvas({ instrumentId }: Props) {
                   ${isSelected ? 'ring-1 ring-white/20 bg-white/5' : 'hover:bg-white/[0.02]'}`}
       style={{ border: `1px solid ${inst.color}22` }}
     >
+      {/* Per-orbit level indicator — 2px bar centered on right border */}
+      <div
+        className="absolute top-0 overflow-hidden pointer-events-none"
+        style={{ right: -1, width: 2, height: '100%', borderRadius: '0 8px 8px 0' }}
+      >
+        <div
+          ref={levelBarRef}
+          className="absolute inset-0"
+          style={{
+            background: 'linear-gradient(to top, #16a34a, #22c55e 55%, #f59e0b 75%, #f97316 88%, #ef4444)',
+            clipPath: 'inset(100% 0 0 0)',
+          }}
+        />
+      </div>
+
       {/* Solo (top-left) */}
       <button
         className="absolute top-1 left-1 w-[18px] h-[18px] rounded-full border border-white/20 cursor-pointer z-10 flex items-center justify-center transition-all hover:!opacity-90 hover:![background:#ffd700]"

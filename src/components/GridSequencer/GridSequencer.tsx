@@ -51,6 +51,7 @@ export function GridSequencer() {
   const octaveOffset = useStore((s) => s.octaveOffset);
   const instrumentProgress = useStore((s) => s.instrumentProgress);
   const isPlaying = useStore((s) => s.isPlaying);
+  const snapEnabled = useStore((s) => s.snapEnabled);
 
   const dragRef = useRef<DragState | null>(null);
   const gridBodyRef = useRef<HTMLDivElement>(null);
@@ -181,15 +182,17 @@ export function GridSequencer() {
           }
         }
 
-        // Horizontal drag: move to different step
-        const dx = ev.clientX - drag.startX;
-        const stepDelta = Math.round(dx / drag.colWidth);
-        const newStep = Math.max(0, Math.min(samplerSteps - 1, stepIndex + stepDelta));
-        if (newStep !== currentStep) {
-          useStore.getState().moveSamplerNoteToStep(
-            instrument.id, currentStep, newStep, drag.midiNote
-          );
-          currentStep = newStep;
+        // Horizontal drag: move to different step (disabled when snap is off — use orbit for free positioning)
+        if (snapEnabled) {
+          const dx = ev.clientX - drag.startX;
+          const stepDelta = Math.round(dx / drag.colWidth);
+          const newStep = Math.max(0, Math.min(samplerSteps - 1, stepIndex + stepDelta));
+          if (newStep !== currentStep) {
+            useStore.getState().moveSamplerNoteToStep(
+              instrument.id, currentStep, newStep, drag.midiNote
+            );
+            currentStep = newStep;
+          }
         }
       };
 
@@ -411,12 +414,15 @@ export function GridSequencer() {
           drag.startNote = newNote;
         }
       }
-      const dx = ev.clientX - drag.startX;
-      const stepDelta = Math.round(dx / drag.colWidth);
-      const newStep = Math.max(0, Math.min(synthSteps - 1, stepIndex + stepDelta));
-      if (newStep !== currentStep) {
-        useStore.getState().moveSamplerNoteToStep(instrument.id, currentStep, newStep, drag.midiNote);
-        currentStep = newStep;
+      // Horizontal drag: move to different step (disabled when snap is off — use orbit for free positioning)
+      if (snapEnabled) {
+        const dx = ev.clientX - drag.startX;
+        const stepDelta = Math.round(dx / drag.colWidth);
+        const newStep = Math.max(0, Math.min(synthSteps - 1, stepIndex + stepDelta));
+        if (newStep !== currentStep) {
+          useStore.getState().moveSamplerNoteToStep(instrument.id, currentStep, newStep, drag.midiNote);
+          currentStep = newStep;
+        }
       }
     };
 

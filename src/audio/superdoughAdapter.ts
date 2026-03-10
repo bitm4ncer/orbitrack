@@ -51,7 +51,9 @@ function getEffectOverrides(
         overrides.phaserrate = effect.params.rate ?? 0.5;
         overrides.phaserdepth = effect.params.depth ?? 0.7;
         overrides.phasercenter = effect.params.baseFreq ?? 1000;
-        overrides.phasersweep = effect.params.depth ?? 0.7;
+        // phasersweep = frequency sweep range; scale baseFreq by depth so wider
+        // modulation depth also widens the swept frequency band
+        overrides.phasersweep = (effect.params.baseFreq ?? 1000) * (effect.params.depth ?? 0.7);
         break;
       // eq3, chorus: superdough has no native equivalent
     }

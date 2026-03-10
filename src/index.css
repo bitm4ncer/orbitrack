@@ -42,6 +42,41 @@ body {
   border-radius: 3px;
 }
 
+/* ── Effects Panel ─────────────────────────────────────────────────────────── */
+@layer components {
+  /* Scroll container */
+  .fx-scroll        { padding: 20px !important; }
+
+  /* Sidebar chrome */
+  .fx-header-text   { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+  .fx-empty-text    { font-size: 13px; }
+  .fx-master-label  { font-size: 14px; }
+  .fx-vol-label     { font-size: 12px; }
+
+  /* Block header */
+  .fx-block-icon    { font-size: 13px; opacity: 0.35; flex-shrink: 0; }
+  .fx-block-label   { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+  .fx-block-btn     { font-size: 17px; line-height: 1; flex-shrink: 0; transition: color 0.15s; }
+
+  /* Block body — param labels and values */
+  .fx-param-label   { font-size: 10px; color: #8888a0; font-family: monospace; }
+  .fx-param-value   { font-size: 10px; font-family: monospace; }
+  .fx-stages-btn    { font-size: 10px; font-family: monospace; padding: 2px 0; flex: 1;
+                      border-radius: 3px; cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s; }
+
+  /* Knob labels */
+  .fx-knob-label    { font-size: 10px; color: #8888a0; font-family: monospace;
+                      line-height: 1; text-align: center; truncate: clip; }
+  .fx-knob-label-lg { font-size: 12px; }
+  .fx-knob-value    { font-size: 10px; color: #6060a0; font-family: monospace;
+                      line-height: 1; text-align: center; }
+  .fx-knob-value-lg { font-size: 12px; }
+
+  /* Add-effect menu */
+  .fx-add-btn-text  { font-size: 13px; }
+  .fx-add-item      { font-size: 14px; }
+}
+
 /* Custom instrument sliders with per-instrument color */
 .inst-slider {
   -webkit-appearance: none;

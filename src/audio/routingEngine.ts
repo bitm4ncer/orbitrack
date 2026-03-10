@@ -57,8 +57,11 @@ export function initRoutingEngine(): void {
 
   // Metering-only analyser — leaf node, never connected to destination
   const analyser = ctx.createAnalyser();
-  analyser.fftSize = 2048;
-  analyser.smoothingTimeConstant = 0.3;
+  // Larger fftSize → more samples per RMS frame → smoother, more accurate reading.
+  // smoothingTimeConstant only affects FFT magnitude data, NOT getFloatTimeDomainData,
+  // so set it to 0 (we apply our own ballistics in the VU meter draw loop).
+  analyser.fftSize = 4096;
+  analyser.smoothingTimeConstant = 0;
   masterAnalyser = analyser;
 
   applyVolume(useStore.getState().masterVolume);

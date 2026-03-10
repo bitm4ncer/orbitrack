@@ -162,45 +162,46 @@ export function KnobGrid() {
   const selectInstrument = useStore((s) => s.selectInstrument);
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full h-full overflow-auto"
-      style={{ padding: 50 }}
-      onClick={() => selectInstrument(null)}
-    >
-      {/* Card-size slider */}
-      <div className="absolute top-3 left-3 flex items-center z-20">
-        <input
-          type="range"
-          min={1}
-          max={12}
-          value={sliderVal}
-          onChange={(e) => setSliderVal(Number(e.target.value))}
-          className="w-20 h-1 accent-white/40 cursor-pointer opacity-40 hover:opacity-80 transition-opacity"
-        />
+    <div className="relative w-full h-full">
+      <div
+        ref={containerRef}
+        className="relative w-full h-full overflow-auto"
+        style={{ padding: 50 }}
+        onClick={() => selectInstrument(null)}
+      >
+        {/* Card-size slider */}
+        <div className="absolute top-3 left-3 flex items-center z-20">
+          <input
+            type="range"
+            min={1}
+            max={12}
+            value={sliderVal}
+            onChange={(e) => setSliderVal(Number(e.target.value))}
+            className="w-20 h-1 accent-white/40 cursor-pointer opacity-40 hover:opacity-80 transition-opacity"
+          />
+        </div>
+
+        <div
+          className="grid gap-4"
+          style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardMinWidth}px, 1fr))` }}
+        >
+          {instruments.map((inst) => (
+            <KnobCanvas key={inst.id} instrumentId={inst.id} />
+          ))}
+          <AddInstrumentCard />
+        </div>
       </div>
 
-      {/* Snap button (bottom-right) */}
+      {/* Snap toggle — anchored to outer wrapper, stays visible while scrolling */}
       <button
-        onClick={() => useStore.getState().setSnapEnabled(!snapEnabled)}
-        style={{ padding: '3px 10px' }}
-        className={`absolute bottom-3 right-3 z-20 text-[10px] rounded border transition-colors
-                   ${snapEnabled
-                     ? 'border-white text-white bg-white/10'
-                     : 'border-border text-text-secondary hover:border-white/20 hover:text-white'}`}
+        onClick={(e) => { e.stopPropagation(); useStore.getState().setSnapEnabled(!snapEnabled); }}
+        title="Snap to grid"
+        style={{ padding: '3px 8px' }}
+        className={`absolute bottom-3 right-3 z-20 text-[10px] transition-opacity
+                   ${snapEnabled ? 'opacity-60 hover:opacity-90' : 'opacity-20 hover:opacity-50'}`}
       >
         Snap
       </button>
-
-      <div
-        className="grid gap-4"
-        style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardMinWidth}px, 1fr))` }}
-      >
-        {instruments.map((inst) => (
-          <KnobCanvas key={inst.id} instrumentId={inst.id} />
-        ))}
-        <AddInstrumentCard />
-      </div>
     </div>
   );
 }

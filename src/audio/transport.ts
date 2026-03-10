@@ -89,15 +89,23 @@ function tick(time: number): void {
   const transport = Tone.getTransport();
   const state = useStore.getState();
 
-  // Compute current position in 16th-note steps from transport elapsed seconds
   const secondsPer16th = 60 / state.bpm / 4;
-  const totalSteps32 = transport.seconds / secondsPer16th;
-  const globalStep = Math.floor(totalSteps32);
 
-  // maxLoopSize drives the global progress reference (indicator line)
+  // AUDIO: Use the scheduled audio time to determine which step to trigger.
+  // transport.seconds returns the current context time, which is behind the
+  // scheduled `time` by the lookahead amount — using it here would cause hits
+  // to be computed for the wrong step.
+  const scheduledSec = transport.getSecondsAtTime(time);
+  const globalStep = Math.floor(scheduledSec / secondsPer16th);
+
+  // UI: Use current transport position (what the user hears right now), not the
+  // scheduled position (which is lookahead ms ahead). This keeps the playhead
+  // and step indicators in sync with what you actually hear.
+  const uiSec = transport.seconds;
+  const uiTotalSteps = uiSec / secondsPer16th;
   const maxLoopSize = state.instruments.reduce((m, i) => Math.max(m, i.loopSize), 1);
-  const progress = (totalSteps32 % maxLoopSize) / maxLoopSize;
-  const currentStep = globalStep % maxLoopSize;
+  const progress = (uiTotalSteps % maxLoopSize) / maxLoopSize;
+  const currentStep = Math.floor(uiTotalSteps) % maxLoopSize;
 
   // Per-instrument progress
   const instProgress: Record<string, number> = {};
@@ -108,8 +116,8 @@ function tick(time: number): void {
   for (const instrument of state.instruments) {
     const loopSize = instrument.loopSize;
 
-    // Per-instrument progress (0-1) within its own loop
-    instProgress[instrument.id] = (totalSteps32 % loopSize) / loopSize;
+    // Per-instrument progress (0-1) within its own loop — UI, uses current time
+    instProgress[instrument.id] = (uiTotalSteps % loopSize) / loopSize;
 
     if (anySolo && !instrument.solo) continue;
     if (instrument.muted && !instrument.solo) continue;

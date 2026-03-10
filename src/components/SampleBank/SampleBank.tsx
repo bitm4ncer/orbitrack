@@ -310,7 +310,7 @@ export function SampleBank() {
       ref={containerRef}
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      className="sample-bank bg-bg-secondary border-l border-border flex flex-col shrink-0 min-h-0 outline-none overflow-hidden"
+      className="sample-bank bg-bg-secondary border-l border-border flex flex-col shrink-0 h-full min-h-0 outline-none overflow-hidden"
       style={{ width: 300 }}
     >
       {/* Header */}

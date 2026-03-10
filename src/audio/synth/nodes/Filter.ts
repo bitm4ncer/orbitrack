@@ -1,5 +1,5 @@
 const FILTER_TYPES: BiquadFilterType[] = ['lowpass', 'highpass', 'bandpass', 'notch', 'lowshelf', 'highshelf'];
-const MAX_FREQ = 11000;
+const MAX_FREQ = 20000;
 const MAX_Q = 10;
 
 export class Filter {

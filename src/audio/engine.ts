@@ -29,8 +29,9 @@ export async function initAudio(): Promise<void> {
   const nativeCtx = (Tone.context.rawContext as unknown as { _nativeContext: AudioContext })._nativeContext;
   if (nativeCtx) setAudioContext(nativeCtx);
 
-  // Increase lookahead from default ~100ms to 200ms so brief main-thread
-  // blocks (heavy React renders, scrolling) don't cause audio dropouts.
+  // 200ms lookahead: buffers against brief main-thread blocks without
+  // throwing off the step-counter logic in transport.ts (which uses
+  // transport.seconds, i.e. current audio time, not the scheduled `time`).
   Tone.getContext().lookAhead = 0.2;
 
   // Load superdough's AudioWorklet processors (needed for distort, crush, etc.)

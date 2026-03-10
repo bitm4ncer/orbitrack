@@ -77,7 +77,7 @@ function App() {
         {/* FX Chain sidebar */}
         <div
           className="overflow-hidden transition-all duration-300 shrink-0 h-full"
-          style={{ width: fxSidebarOpen ? 280 : 0 }}
+          style={{ width: fxSidebarOpen ? 300 : 0 }}
         >
           <EffectsSidebar />
         </div>

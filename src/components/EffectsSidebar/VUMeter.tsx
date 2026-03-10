@@ -7,10 +7,12 @@ const CLIP_FLASH_FRAMES = 45;
 const CANVAS_H = 18;
 const CLIP_W = 4; // rightmost pixels reserved for clip indicator
 
-// dB ticks shown on the scale — positions are fractions of the meter width (0 = -60dB, 1 = 0dB)
-const DB_TICKS = [-60, -48, -36, -24, -18, -12, -6, 0].map((db) => ({
+// dB ticks shown on the scale — positions are fractions of the meter width (0 = -48dB, 1 = 0dB)
+// -48 dB floor is practical for electronic music; keeps the meter readable
+const DB_FLOOR = 48;
+const DB_TICKS = [-48, -36, -24, -18, -12, -6, 0].map((db) => ({
   db,
-  frac: (db + 60) / 60,
+  frac: (db + DB_FLOOR) / DB_FLOOR,
 }));
 
 export function VUMeter() {
@@ -30,6 +32,9 @@ export function VUMeter() {
     canvas.height = CANVAS_H;
     const meterW = W - CLIP_W; // usable meter width (excl. clip strip on right)
 
+    // Allocate once outside the draw loop — avoids 16 KB GC pressure every frame
+    let dataBuffer: Float32Array | null = null;
+
     const draw = () => {
       const analyser = getMasterAnalyser();
       const ctx = canvas.getContext('2d');
@@ -44,15 +49,20 @@ export function VUMeter() {
         return;
       }
 
+      // Re-allocate only if analyser fftSize changes (rare)
+      if (!dataBuffer || dataBuffer.length !== analyser.fftSize) {
+        dataBuffer = new Float32Array(analyser.fftSize);
+      }
+
       // --- Read level ---
-      const data = new Float32Array(analyser.fftSize);
+      const data = dataBuffer;
       analyser.getFloatTimeDomainData(data);
 
       let sum = 0;
       for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
       const rms = Math.sqrt(sum / data.length);
       const db = 20 * Math.log10(Math.max(rms, 1e-9));
-      const level = Math.max(0, Math.min(1, (db + 60) / 60));
+      const level = Math.max(0, Math.min(1, (db + DB_FLOOR) / DB_FLOOR));
 
       // Fast attack, slow release
       s.level = level > s.level ? level : Math.max(0, s.level - 0.02);

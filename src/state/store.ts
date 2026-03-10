@@ -193,7 +193,7 @@ export interface StoreState {
 
 export const useStore = create<StoreState>((set, get) => ({
   // Transport
-  bpm: 120,
+  bpm: 128,
   isPlaying: false,
   currentStep: -1,
   transportProgress: 0,
