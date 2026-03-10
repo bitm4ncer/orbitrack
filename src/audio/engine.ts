@@ -51,6 +51,15 @@ export async function initAudio(): Promise<void> {
     console.warn('[engine] superdough worklets failed to load:', e);
   }
 
+  // Load our bitcrusher sample-rate-reduction AudioWorklet
+  if (nativeCtx) {
+    try {
+      await nativeCtx.audioWorklet.addModule(import.meta.env.BASE_URL + 'bitcrusher-processor.js');
+    } catch (e) {
+      console.warn('[engine] bitcrusher worklet failed to load:', e);
+    }
+  }
+
   // Pre-decode all default samples into superdough's buffer cache so the
   // first note plays immediately without a loading delay.
   const base = window.location.origin + import.meta.env.BASE_URL;

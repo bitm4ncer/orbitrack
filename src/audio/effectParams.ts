@@ -10,7 +10,11 @@ export interface EffectParamDef {
   unit?: string;
 }
 
-export const EFFECT_PARAM_DEFS: Record<EffectType, EffectParamDef[]> = {
+export const EFFECT_PARAM_DEFS: Partial<Record<EffectType, EffectParamDef[]>> & Record<
+  'eq3'|'compressor'|'reverb'|'delay'|'chorus'|'phaser'|'distortion'|'filter'|
+  'bitcrusher'|'parame'|'tremolo'|'ringmod',
+  EffectParamDef[]
+> = {
   reverb: [
     { key: 'amount',   label: 'Mix',     min: 0,   max: 1,   step: 0.01,  defaultValue: 0.3 },
     { key: 'predelay', label: 'Pre-Dly', min: 0,   max: 0.1, step: 0.001, defaultValue: 0,   unit: 's' },
@@ -70,10 +74,73 @@ export const EFFECT_PARAM_DEFS: Record<EffectType, EffectParamDef[]> = {
     { key: 'lfoRate',    label: 'LFO Rate',  min: 0.1, max: 20,    step: 0.1,  defaultValue: 1,    unit: 'Hz' },
     { key: 'lfoDepth',   label: 'LFO Depth', min: 0,   max: 1,     step: 0.01, defaultValue: 0 },
   ],
+  bitcrusher: [
+    { key: 'bits',       label: 'Bits',       min: 1,   max: 16, step: 1,    defaultValue: 16 },
+    { key: 'downsample', label: 'Downsample', min: 0,   max: 1,  step: 0.01, defaultValue: 0 },
+    { key: 'amount',     label: 'Mix',        min: 0,   max: 1,  step: 0.01, defaultValue: 1 },
+  ],
+  parame: [
+    // Band 1 — High-pass (left edge)
+    { key: 'b1type', label: 'B1 Type', min: 0, max: 5, step: 1, defaultValue: 1 },
+    { key: 'b1freq', label: 'B1 Freq', min: 20, max: 20000, step: 10, defaultValue: 30,    unit: 'Hz' },
+    { key: 'b1gain', label: 'B1 Gain', min: -18, max: 18, step: 0.5, defaultValue: 0,     unit: 'dB' },
+    { key: 'b1q',    label: 'B1 Q',    min: 0.1, max: 10, step: 0.1, defaultValue: 0.707 },
+    // Band 2 — Low shelf
+    { key: 'b2type', label: 'B2 Type', min: 0, max: 5, step: 1, defaultValue: 3 },
+    { key: 'b2freq', label: 'B2 Freq', min: 20, max: 20000, step: 10, defaultValue: 120,   unit: 'Hz' },
+    { key: 'b2gain', label: 'B2 Gain', min: -18, max: 18, step: 0.5, defaultValue: 0,     unit: 'dB' },
+    { key: 'b2q',    label: 'B2 Q',    min: 0.1, max: 10, step: 0.1, defaultValue: 0.707 },
+    // Band 3 — Bell (low-mid)
+    { key: 'b3type', label: 'B3 Type', min: 0, max: 5, step: 1, defaultValue: 2 },
+    { key: 'b3freq', label: 'B3 Freq', min: 20, max: 20000, step: 10, defaultValue: 500,   unit: 'Hz' },
+    { key: 'b3gain', label: 'B3 Gain', min: -18, max: 18, step: 0.5, defaultValue: 0,     unit: 'dB' },
+    { key: 'b3q',    label: 'B3 Q',    min: 0.1, max: 10, step: 0.1, defaultValue: 1.0 },
+    // Band 4 — Bell (high-mid)
+    { key: 'b4type', label: 'B4 Type', min: 0, max: 5, step: 1, defaultValue: 2 },
+    { key: 'b4freq', label: 'B4 Freq', min: 20, max: 20000, step: 10, defaultValue: 3000,  unit: 'Hz' },
+    { key: 'b4gain', label: 'B4 Gain', min: -18, max: 18, step: 0.5, defaultValue: 0,     unit: 'dB' },
+    { key: 'b4q',    label: 'B4 Q',    min: 0.1, max: 10, step: 0.1, defaultValue: 1.0 },
+    // Band 5 — High shelf
+    { key: 'b5type', label: 'B5 Type', min: 0, max: 5, step: 1, defaultValue: 4 },
+    { key: 'b5freq', label: 'B5 Freq', min: 20, max: 20000, step: 10, defaultValue: 10000, unit: 'Hz' },
+    { key: 'b5gain', label: 'B5 Gain', min: -18, max: 18, step: 0.5, defaultValue: 0,     unit: 'dB' },
+    { key: 'b5q',    label: 'B5 Q',    min: 0.1, max: 10, step: 0.1, defaultValue: 0.707 },
+    // Band 6 — Low-pass (right edge)
+    { key: 'b6type', label: 'B6 Type', min: 0, max: 5, step: 1, defaultValue: 0 },
+    { key: 'b6freq', label: 'B6 Freq', min: 20, max: 20000, step: 10, defaultValue: 20000, unit: 'Hz' },
+    { key: 'b6gain', label: 'B6 Gain', min: -18, max: 18, step: 0.5, defaultValue: 0,     unit: 'dB' },
+    { key: 'b6q',    label: 'B6 Q',    min: 0.1, max: 10, step: 0.1, defaultValue: 0.707 },
+  ],
+  tremolo: [
+    { key: 'amount',   label: 'Depth', min: 0,   max: 1,  step: 0.01, defaultValue: 0.5 },
+    { key: 'rate',     label: 'Rate',  min: 0.1, max: 20, step: 0.1,  defaultValue: 4,   unit: 'Hz' },
+    { key: 'waveform', label: 'Wave',  min: 0,   max: 2,  step: 1,    defaultValue: 0 },
+  ],
+  ringmod: [
+    { key: 'frequency', label: 'Freq', min: 1,   max: 5000, step: 1,    defaultValue: 440, unit: 'Hz' },
+    { key: 'amount',    label: 'Mix',  min: 0,   max: 1,    step: 0.01, defaultValue: 1 },
+    { key: 'waveform',  label: 'Wave', min: 0,   max: 2,    step: 1,    defaultValue: 0 },
+  ],
+};
+
+/** 2-3 most important param keys per effect for quick-access UI */
+export const QUICK_PARAM_KEYS: Partial<Record<EffectType, string[]>> = {
+  eq3:        ['low', 'mid', 'high'],
+  parame:     ['b3gain', 'b4gain', 'b5gain'],
+  compressor: ['threshold', 'ratio'],
+  reverb:     ['amount', 'size', 'damp'],
+  delay:      ['amount', 'time', 'feedback'],
+  chorus:     ['amount', 'rate', 'depth'],
+  phaser:     ['amount', 'rate', 'depth'],
+  distortion: ['drive', 'tone', 'amount'],
+  filter:     ['frequency', 'q', 'amount'],
+  bitcrusher: ['bits', 'downsample'],
+  tremolo:    ['amount', 'rate'],
+  ringmod:    ['frequency', 'amount'],
 };
 
 export function DEFAULT_EFFECT_PARAMS(type: EffectType): Record<string, number> {
-  return Object.fromEntries(
-    EFFECT_PARAM_DEFS[type].map((p) => [p.key, p.defaultValue])
-  );
+  const defs = EFFECT_PARAM_DEFS[type as keyof typeof EFFECT_PARAM_DEFS];
+  if (!defs) return {};
+  return Object.fromEntries(defs.map((p) => [p.key, p.defaultValue]));
 }

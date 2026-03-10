@@ -1,22 +1,20 @@
 /**
  * Per-orbit Web Audio effect chains.
  *
- * Signal path after intercept:
- *   [summingNode]
+ * Signal path:
+ *   [summingNode / synthInputGain]
  *     → [EQ3: eqLow → eqMid → eqHigh]
- *     → [Chorus: chorusDryGain ──────────────────────────────┐]
- *     →          chorusDelay → chorusWetGain ─────────────────┤→ [chorusMix]
- *     → [Phaser: phaserDryGain ──────────────────────────────┐]
- *     →          allpass×N ←feedback─ → phaserWetGain ────── ┤→ [phaserMix]
- *     → [Filter: filterDryGain ──────────────────────────────┐]
- *     →          filterNode(+LFO) → filterWetGain ───────────┤→ [filterMix]
- *     → [Distort: distortDryGain ──────────────────────────────────────────┐]
- *     →           preGain → waveshaper → postGain → tone → distortWetGain ─┤→ [distortMix]
- *     → [Reverb: reverbDryGain ─────────────────────────────────────────────────┐]
- *     →          preDelay → combs × 4 → allpass × 2 → reverbWetGain ───────────┤→ [reverbMix]
- *     → [Delay:  delayDryGain ──────────────────────────────────────────────────────────┐]
- *     →          delayNode ←(feedback via highCut)─ → delayWetGain ───────────────────┤→ [delayMix]
- *   [delayMix] → [orbit.output] → ... → destination
+ *     → [Chorus dry/wet mix]
+ *     → [Phaser dry/wet mix]
+ *     → [Filter dry/wet mix]
+ *     → [Distortion dry/wet mix]
+ *     → [Reverb dry/wet mix]
+ *     → [Delay dry/wet mix]
+ *     → [BitCrusher: bcSR(worklet) → bcBits(waveshaper) dry/wet mix]
+ *     → [Param EQ: eqBands[0..5] dry/wet mix]
+ *     → [Tremolo: tremoloAmpGain with LFO on gain]
+ *     → [Ring Mod: ringModGain(carrier on gain) dry/wet mix]
+ *     → [orbit.output] → ... → destination
  */
 
 import { getAudioContext, getSuperdoughAudioController } from 'superdough';
@@ -34,8 +32,30 @@ interface CombFilter {
   damp: BiquadFilterNode;
 }
 
+// BiquadFilterType lookup for the 6-band param EQ
+// Indices: 0=LP  1=HP  2=Bell  3=LS  4=HS  5=Notch
+export const EQ_BAND_TYPES: BiquadFilterType[] = [
+  'lowpass', 'highpass', 'peaking', 'lowshelf', 'highshelf', 'notch',
+];
+
+// Default per-band config for 6-band param EQ
+const PARAM_EQ_DEFAULTS: { type: BiquadFilterType; freq: number; q: number }[] = [
+  { type: 'highpass',  freq: 30,    q: 0.707 }, // band 1 — HP
+  { type: 'lowshelf',  freq: 120,   q: 0.707 }, // band 2 — LS
+  { type: 'peaking',   freq: 500,   q: 1.0   }, // band 3 — Bell low-mid
+  { type: 'peaking',   freq: 3000,  q: 1.0   }, // band 4 — Bell high-mid
+  { type: 'highshelf', freq: 10000, q: 0.707 }, // band 5 — HS
+  { type: 'lowpass',   freq: 20000, q: 0.707 }, // band 6 — LP
+];
+
+// Tremolo LFO waveform types (index matches UI selector)
+const TREMOLO_WAVEFORMS: OscillatorType[] = ['sine', 'triangle', 'square'];
+
+// Ring mod carrier waveform types
+const RING_WAVEFORMS: OscillatorType[] = ['sine', 'triangle', 'sawtooth'];
+
 interface OrbitEffectChain {
-  // EQ3
+  // EQ3 (3-band always-on)
   eqLow: BiquadFilterNode;
   eqMid: BiquadFilterNode;
   eqHigh: BiquadFilterNode;
@@ -64,7 +84,7 @@ interface OrbitEffectChain {
   filterDryGain: GainNode;
   filterWetGain: GainNode;
   filterMix: GainNode;
-  // Distortion (orbit chain — WaveShaperNode)
+  // Distortion (WaveShaperNode, 4 types)
   distortPreGain: GainNode;
   distortWaveshaper: WaveShaperNode;
   distortPostGain: GainNode;
@@ -72,21 +92,46 @@ interface OrbitEffectChain {
   distortDryGain: GainNode;
   distortWetGain: GainNode;
   distortMix: GainNode;
-  // Reverb (orbit chain — Schroeder comb filter reverb)
+  // Reverb (Schroeder: 4 combs + 2 allpass)
   reverbPreDelay: DelayNode;
   reverbCombs: CombFilter[];
   reverbAllpass: BiquadFilterNode[];
   reverbDryGain: GainNode;
   reverbWetGain: GainNode;
   reverbMix: GainNode;
-  // Delay (orbit chain — feedback delay with hi-cut filter)
+  // Delay (feedback delay with hi-cut in feedback path)
   delayNode: DelayNode;
   delayFeedback: GainNode;
   delayHighCut: BiquadFilterNode;
   delayDryGain: GainNode;
   delayWetGain: GainNode;
   delayMix: GainNode;
+  // BitCrusher — AudioWorkletNode (SR) + WaveShaperNode (bit depth)
+  bcSR: AudioWorkletNode | GainNode;   // GainNode fallback if worklet not loaded
+  bcBits: WaveShaperNode;
+  bcDryGain: GainNode;
+  bcWetGain: GainNode;
+  bcMix: GainNode;
+  // Parametric EQ — 6 bands in series with dry/wet bypass
+  eqBands: BiquadFilterNode[];         // 6 elements
+  eqBandsDryGain: GainNode;
+  eqBandsWetGain: GainNode;
+  eqBandsMix: GainNode;
+  // Tremolo — LFO modulates amplitude gain (always in chain, depth=0 = transparent)
+  tremoloLFO: OscillatorNode;
+  tremoloLFOGain: GainNode;
+  tremoloAmpGain: GainNode;
+  // Ring Mod — carrier OSC modulates gain (true ring mod, not AM)
+  ringCarrier: OscillatorNode;
+  ringModGain: GainNode;
+  ringDryGain: GainNode;
+  ringWetGain: GainNode;
+  ringMix: GainNode;
+  // Compressor — DynamicsCompressorNode at chain tail
+  compressor: DynamicsCompressorNode;
+  compressorMakeup: GainNode;
 
+  synthInputGain: GainNode;
   intercepted: boolean;
 }
 
@@ -101,14 +146,30 @@ export function getOrbitAnalyser(orbitIndex: number): AnalyserNode | null {
     const outputNode = orbit.output as unknown as AudioNode;
     const ac = outputNode.context as AudioContext;
     const analyser = ac.createAnalyser();
-    analyser.fftSize = 1024;
-    analyser.smoothingTimeConstant = 0;
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.8;
     outputNode.connect(analyser); // side-tap leaf node — never connected to destination
     orbitAnalysers.set(orbitIndex, analyser);
     return analyser;
   } catch {
     return null;
   }
+}
+
+/**
+ * Build a WaveShaperNode curve that quantizes to 2^bits discrete steps.
+ * At bits=16, the curve is effectively linear (full resolution).
+ */
+function makeBitCrushCurve(bits: number): Float32Array {
+  const n = Math.max(1, Math.min(16, Math.round(bits)));
+  const steps = Math.pow(2, n - 1);
+  const N = 4096;
+  const curve = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const x = (i * 2 / (N - 1)) - 1; // −1 to +1
+    curve[i] = Math.round(x * steps) / steps;
+  }
+  return curve;
 }
 
 /**
@@ -122,11 +183,11 @@ function makeDistortionCurve(type: number, drive: number): Float32Array {
   const d = Math.max(0, Math.min(1, drive));
 
   for (let i = 0; i < N; i++) {
-    const x = (i * 2 / (N - 1)) - 1; // −1 to +1
+    const x = (i * 2 / (N - 1)) - 1;
     let y: number;
 
     switch (type) {
-      case 0: { // Soft clip — warm, symmetric tanh overdrive
+      case 0: { // Soft clip — warm symmetric tanh overdrive
         const k = 1 + d * 50;
         y = Math.tanh(x * k) / Math.tanh(k);
         break;
@@ -139,7 +200,6 @@ function makeDistortionCurve(type: number, drive: number): Float32Array {
       case 2: { // Tube — asymmetric even-harmonic saturation (class A amp)
         const k = 1 + d * 25;
         const kx = x * k;
-        // Positive side clips harder (more common in tube push-pull designs)
         y = kx >= 0
           ? 1 - Math.exp(-kx)
           : -(1 - Math.exp(kx * 0.8));
@@ -157,7 +217,6 @@ function makeDistortionCurve(type: number, drive: number): Float32Array {
         y = x;
     }
 
-    // At drive=0: linear passthrough
     curve[i] = d < 0.001 ? x : y;
   }
 
@@ -182,6 +241,11 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   eqHigh.frequency.value = 4000;
   eqHigh.gain.value = 0;
 
+  // Synth input gain (SynthEngine audio enters here → eqLow)
+  const synthInputGain = ac.createGain();
+  synthInputGain.gain.value = 1;
+  synthInputGain.connect(eqLow);
+
   eqLow.connect(eqMid);
   eqMid.connect(eqHigh);
 
@@ -195,7 +259,6 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   const chorusMix = ac.createGain();
   chorusMix.gain.value = 1;
 
-  // Voice 1
   const chorusDelay = ac.createDelay(0.05);
   chorusDelay.delayTime.value = 0.02;
 
@@ -206,22 +269,19 @@ function createChain(ac: AudioContext): OrbitEffectChain {
 
   const chorusLFOGain = ac.createGain();
   chorusLFOGain.gain.value = 0.005;
-
   chorusLFO.connect(chorusLFOGain);
   chorusLFOGain.connect(chorusDelay.delayTime);
 
-  // Voice 2 — slightly detuned LFO and offset delay for doubling richness
   const chorusDelay2 = ac.createDelay(0.05);
-  chorusDelay2.delayTime.value = 0.028; // offset from voice 1
+  chorusDelay2.delayTime.value = 0.028;
 
   const chorusLFO2 = ac.createOscillator();
   chorusLFO2.type = 'sine';
-  chorusLFO2.frequency.value = 1.73; // golden-ratio-ish offset
+  chorusLFO2.frequency.value = 1.73;
   chorusLFO2.start();
 
   const chorusLFOGain2 = ac.createGain();
   chorusLFOGain2.gain.value = 0.005;
-
   chorusLFO2.connect(chorusLFOGain2);
   chorusLFOGain2.connect(chorusDelay2.delayTime);
 
@@ -239,7 +299,7 @@ function createChain(ac: AudioContext): OrbitEffectChain {
     const ap = ac.createBiquadFilter();
     ap.type = 'allpass';
     ap.frequency.value = 1000;
-    ap.Q.value = 0.01; // inactive — negligible phase shift
+    ap.Q.value = 0.01;
     phaserAllpass.push(ap);
   }
   for (let i = 0; i < MAX_PHASER_STAGES - 1; i++) {
@@ -253,14 +313,11 @@ function createChain(ac: AudioContext): OrbitEffectChain {
 
   const phaserLFOGain = ac.createGain();
   phaserLFOGain.gain.value = 840;
-
   phaserLFO.connect(phaserLFOGain);
-  // Modulate detune (cents) — multiplicative, so frequency never reaches zero
   for (const stage of phaserAllpass) {
     phaserLFOGain.connect(stage.detune);
   }
 
-  // Feedback: last stage → feedbackGain → first stage (Web Audio handles cycle with 1-block delay)
   const phaserFeedback = ac.createGain();
   phaserFeedback.gain.value = 0;
   phaserAllpass[MAX_PHASER_STAGES - 1].connect(phaserFeedback);
@@ -287,15 +344,13 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   filterNode.frequency.value = 2000;
   filterNode.Q.value = 1;
 
-  // LFO modulates cutoff frequency via detune (cents — multiplicative, safe)
   const filterLFO = ac.createOscillator();
   filterLFO.type = 'sine';
   filterLFO.frequency.value = 1;
   filterLFO.start();
 
   const filterLFOGain = ac.createGain();
-  filterLFOGain.gain.value = 0; // disabled by default
-
+  filterLFOGain.gain.value = 0;
   filterLFO.connect(filterLFOGain);
   filterLFOGain.connect(filterNode.detune);
 
@@ -320,7 +375,7 @@ function createChain(ac: AudioContext): OrbitEffectChain {
 
   const distortWaveshaper = ac.createWaveShaper();
   distortWaveshaper.oversample = '4x';
-  distortWaveshaper.curve = makeDistortionCurve(0, 0);
+  distortWaveshaper.curve = makeDistortionCurve(0, 0) as Float32Array<ArrayBuffer>;
 
   const distortPostGain = ac.createGain();
   distortPostGain.gain.value = 1;
@@ -362,7 +417,6 @@ function createChain(ac: AudioContext): OrbitEffectChain {
     const feedback = ac.createGain();
     feedback.gain.value = 0.7;
 
-    // Feedback loop inside comb filter: delay → damp → feedback → delay
     delay.connect(damp);
     damp.connect(feedback);
     feedback.connect(delay);
@@ -370,7 +424,6 @@ function createChain(ac: AudioContext): OrbitEffectChain {
     return { delay, feedback, damp };
   });
 
-  // Allpass diffusion filters
   const reverbAllpass: BiquadFilterNode[] = [
     ac.createBiquadFilter(),
     ac.createBiquadFilter(),
@@ -383,7 +436,6 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   reverbAllpass[1].Q.value = 1;
   reverbAllpass[0].connect(reverbAllpass[1]);
 
-  // All combs receive preDelay input; their outputs sum into allpass[0]
   for (const comb of reverbCombs) {
     reverbPreDelay.connect(comb.delay);
     comb.delay.connect(reverbAllpass[0]);
@@ -408,7 +460,6 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   const delayNode = ac.createDelay(2);
   delayNode.delayTime.value = 0.25;
 
-  // Hi-cut filter inside feedback path gives analog tape-delay character
   const delayHighCut = ac.createBiquadFilter();
   delayHighCut.type = 'lowpass';
   delayHighCut.frequency.value = 8000;
@@ -416,7 +467,6 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   const delayFeedback = ac.createGain();
   delayFeedback.gain.value = 0.4;
 
-  // Feedback loop: delayNode → delayHighCut → delayFeedback → delayNode
   delayNode.connect(delayHighCut);
   delayHighCut.connect(delayFeedback);
   delayFeedback.connect(delayNode);
@@ -436,7 +486,127 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   delayNode.connect(delayWetGain);
   delayWetGain.connect(delayMix);
 
+  // ─── BitCrusher — AudioWorkletNode (SR) + WaveShaperNode (bit depth) ─────
+  // SR reduction via AudioWorklet (sample-and-hold); bit depth via WaveShaper
+  let bcSR: AudioWorkletNode | GainNode;
+  try {
+    bcSR = new AudioWorkletNode(ac, 'bitcrusher-processor');
+  } catch {
+    // Worklet not loaded yet — use passthrough GainNode as fallback
+    bcSR = ac.createGain();
+    (bcSR as GainNode).gain.value = 1;
+  }
+
+  const bcBits = ac.createWaveShaper();
+  bcBits.oversample = 'none'; // staircase must not be smoothed
+  bcBits.curve = makeBitCrushCurve(16) as Float32Array<ArrayBuffer>; // default: full resolution (transparent)
+
+  const bcDryGain = ac.createGain();
+  bcDryGain.gain.value = 1;
+
+  const bcWetGain = ac.createGain();
+  bcWetGain.gain.value = 0;
+
+  const bcMix = ac.createGain();
+  bcMix.gain.value = 1;
+
+  delayMix.connect(bcDryGain);
+  bcDryGain.connect(bcMix);
+  delayMix.connect(bcSR);
+  bcSR.connect(bcBits);
+  bcBits.connect(bcWetGain);
+  bcWetGain.connect(bcMix);
+
+  // ─── Parametric EQ — 6 bands in series with dry/wet bypass ───────────────
+  const eqBands = PARAM_EQ_DEFAULTS.map(({ type, freq, q }) => {
+    const f = ac.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    f.gain.value = 0;
+    return f;
+  });
+
+  for (let i = 0; i < eqBands.length - 1; i++) {
+    eqBands[i].connect(eqBands[i + 1]);
+  }
+
+  const eqBandsDryGain = ac.createGain();
+  eqBandsDryGain.gain.value = 1;
+
+  const eqBandsWetGain = ac.createGain();
+  eqBandsWetGain.gain.value = 0;
+
+  const eqBandsMix = ac.createGain();
+  eqBandsMix.gain.value = 1;
+
+  bcMix.connect(eqBandsDryGain);
+  eqBandsDryGain.connect(eqBandsMix);
+  bcMix.connect(eqBands[0]);
+  eqBands[eqBands.length - 1].connect(eqBandsWetGain);
+  eqBandsWetGain.connect(eqBandsMix);
+
+  // ─── Tremolo — LFO modulates amplitude gain (always in path) ─────────────
+  // gain.value = DC offset; LFOGain output adds ±depth/2 on top.
+  // Result: gain oscillates between (1−depth) and 1.0
+  const tremoloAmpGain = ac.createGain();
+  tremoloAmpGain.gain.value = 1; // default: transparent
+
+  const tremoloLFO = ac.createOscillator();
+  tremoloLFO.type = 'sine';
+  tremoloLFO.frequency.value = 4;
+  tremoloLFO.start();
+
+  const tremoloLFOGain = ac.createGain();
+  tremoloLFOGain.gain.value = 0; // disabled by default (depth=0)
+  tremoloLFO.connect(tremoloLFOGain);
+  tremoloLFOGain.connect(tremoloAmpGain.gain);
+
+  eqBandsMix.connect(tremoloAmpGain);
+
+  // ─── Ring Mod — carrier OSC on gain input (true ring mod, not AM) ─────────
+  // ringModGain.gain.value = 0; carrier provides ±1 → signal × carrier
+  const ringCarrier = ac.createOscillator();
+  ringCarrier.type = 'sine';
+  ringCarrier.frequency.value = 440;
+  ringCarrier.start();
+
+  const ringModGain = ac.createGain();
+  ringModGain.gain.value = 0; // carrier drives the gain; base = 0
+  ringCarrier.connect(ringModGain.gain);
+
+  const ringDryGain = ac.createGain();
+  ringDryGain.gain.value = 1;
+
+  const ringWetGain = ac.createGain();
+  ringWetGain.gain.value = 0;
+
+  const ringMix = ac.createGain();
+  ringMix.gain.value = 1;
+
+  tremoloAmpGain.connect(ringDryGain);
+  ringDryGain.connect(ringMix);
+  tremoloAmpGain.connect(ringModGain);
+  ringModGain.connect(ringWetGain);
+  ringWetGain.connect(ringMix);
+
+  // ─── Compressor — always in chain at tail ────────────────────────────────
+  const compressor = ac.createDynamicsCompressor();
+  compressor.threshold.value  = -100; // transparent until enabled
+  compressor.ratio.value      = 1;
+  compressor.attack.value     = 0.003;
+  compressor.release.value    = 0.25;
+  compressor.knee.value       = 6;
+
+  const compressorMakeup = ac.createGain();
+  compressorMakeup.gain.value = 1;
+
+  ringMix.connect(compressor);
+  compressor.connect(compressorMakeup);
+  // compressorMakeup → outputNode is wired in ensureIntercepted()
+
   return {
+    synthInputGain,
     eqLow, eqMid, eqHigh,
     chorusDelay, chorusDelay2, chorusLFO, chorusLFO2,
     chorusLFOGain, chorusLFOGain2,
@@ -451,6 +621,11 @@ function createChain(ac: AudioContext): OrbitEffectChain {
     reverbDryGain, reverbWetGain, reverbMix,
     delayNode, delayFeedback, delayHighCut,
     delayDryGain, delayWetGain, delayMix,
+    bcSR, bcBits, bcDryGain, bcWetGain, bcMix,
+    eqBands, eqBandsDryGain, eqBandsWetGain, eqBandsMix,
+    tremoloLFO, tremoloLFOGain, tremoloAmpGain,
+    ringCarrier, ringModGain, ringDryGain, ringWetGain, ringMix,
+    compressor, compressorMakeup,
     intercepted: false,
   };
 }
@@ -476,7 +651,8 @@ function ensureIntercepted(orbitIndex: number): OrbitEffectChain {
     }
 
     summingNode.connect(chain.eqLow);
-    chain.delayMix.connect(outputNode);
+    // Chain tail → outputNode
+    chain.compressorMakeup.connect(outputNode);
 
     chain.intercepted = true;
   }
@@ -488,45 +664,62 @@ const BIQUAD_FILTER_TYPES: BiquadFilterType[] = ['lowpass', 'highpass', 'bandpas
 
 /**
  * Apply (or bypass) all orbit-chain effects for the given orbit.
- * Covers: EQ3, Chorus, Phaser, Filter, Distortion, Reverb, Delay.
  * Must be called before superdough() so the intercept is in place.
  */
 export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[]): void {
-  const eq3Effect     = effects.find((e) => e.type === 'eq3'        && e.enabled);
-  const chorusEffect  = effects.find((e) => e.type === 'chorus'     && e.enabled);
-  const phaserEffect  = effects.find((e) => e.type === 'phaser'     && e.enabled);
-  const filterEffect  = effects.find((e) => e.type === 'filter'     && e.enabled);
-  const distortEffect = effects.find((e) => e.type === 'distortion' && e.enabled);
-  const reverbEffect  = effects.find((e) => e.type === 'reverb'     && e.enabled);
-  const delayEffect   = effects.find((e) => e.type === 'delay'      && e.enabled);
+  const eq3Effect      = effects.find((e) => e.type === 'eq3'         && e.enabled);
+  const chorusEffect   = effects.find((e) => e.type === 'chorus'      && e.enabled);
+  const phaserEffect   = effects.find((e) => e.type === 'phaser'      && e.enabled);
+  const filterEffect   = effects.find((e) => e.type === 'filter'      && e.enabled);
+  const distortEffect  = effects.find((e) => e.type === 'distortion'  && e.enabled);
+  const reverbEffect   = effects.find((e) => e.type === 'reverb'      && e.enabled);
+  const delayEffect    = effects.find((e) => e.type === 'delay'       && e.enabled);
+  const bcEffect         = effects.find((e) => e.type === 'bitcrusher'  && e.enabled);
+  const parameEffect     = effects.find((e) => e.type === 'parame'      && e.enabled);
+  const tremoloEffect    = effects.find((e) => e.type === 'tremolo'     && e.enabled);
+  const ringmodEffect    = effects.find((e) => e.type === 'ringmod'     && e.enabled);
+  const compressorEffect = effects.find((e) => e.type === 'compressor'  && e.enabled);
 
-  if (!eq3Effect && !chorusEffect && !phaserEffect && !filterEffect
-    && !distortEffect && !reverbEffect && !delayEffect) {
-    const chain = chains.get(orbitIndex);
-    if (chain?.intercepted) {
-      chain.eqLow.gain.value          = 0;
-      chain.eqMid.gain.value          = 0;
-      chain.eqHigh.gain.value         = 0;
-      chain.chorusWetGain.gain.value  = 0;
-      chain.chorusDryGain.gain.value  = 1;
-      chain.phaserWetGain.gain.value  = 0;
-      chain.phaserDryGain.gain.value  = 1;
-      chain.filterLFOGain.gain.value  = 0;
-      chain.filterWetGain.gain.value  = 0;
-      chain.filterDryGain.gain.value  = 1;
-      chain.distortWetGain.gain.value = 0;
-      chain.distortDryGain.gain.value = 1;
-      chain.reverbWetGain.gain.value  = 0;
-      chain.reverbDryGain.gain.value  = 1;
-      chain.delayWetGain.gain.value   = 0;
-      chain.delayDryGain.gain.value   = 1;
-    }
+  const hasAny = eq3Effect || chorusEffect || phaserEffect || filterEffect
+    || distortEffect || reverbEffect || delayEffect || bcEffect
+    || parameEffect || tremoloEffect || ringmodEffect || compressorEffect;
+
+  if (!hasAny) {
+    const chain = ensureIntercepted(orbitIndex);
+    // Reset all to transparent / bypassed
+    chain.eqLow.gain.value          = 0;
+    chain.eqMid.gain.value          = 0;
+    chain.eqHigh.gain.value         = 0;
+    chain.chorusWetGain.gain.value  = 0;
+    chain.chorusDryGain.gain.value  = 1;
+    chain.phaserWetGain.gain.value  = 0;
+    chain.phaserDryGain.gain.value  = 1;
+    chain.filterLFOGain.gain.value  = 0;
+    chain.filterWetGain.gain.value  = 0;
+    chain.filterDryGain.gain.value  = 1;
+    chain.distortWetGain.gain.value = 0;
+    chain.distortDryGain.gain.value = 1;
+    chain.reverbWetGain.gain.value  = 0;
+    chain.reverbDryGain.gain.value  = 1;
+    chain.delayWetGain.gain.value   = 0;
+    chain.delayDryGain.gain.value   = 1;
+    chain.bcWetGain.gain.value      = 0;
+    chain.bcDryGain.gain.value      = 1;
+    chain.eqBandsWetGain.gain.value = 0;
+    chain.eqBandsDryGain.gain.value = 1;
+    chain.tremoloLFOGain.gain.value = 0;
+    chain.tremoloAmpGain.gain.value = 1;
+    chain.ringWetGain.gain.value          = 0;
+    chain.ringDryGain.gain.value          = 1;
+    chain.compressor.threshold.value      = -100;
+    chain.compressor.ratio.value          = 1;
+    chain.compressorMakeup.gain.value     = 1;
     return;
   }
 
   const chain = ensureIntercepted(orbitIndex);
   const now   = chain.eqLow.context.currentTime;
-  const ramp  = 0.02; // 20 ms smoothing — eliminates coefficient discontinuity clicks
+  const ramp  = 0.02; // 20 ms smoothing
 
   // ─── EQ3 ─────────────────────────────────────────────────────────────────
   if (eq3Effect) {
@@ -553,12 +746,11 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[]): vo
     chain.chorusLFO.frequency.value    = p.rate  ?? 1.5;
     chain.chorusLFOGain.gain.value     = p.depth ?? 0.005;
     chain.chorusDelay.delayTime.value  = p.delay ?? 0.02;
-    // Voice 2: offset delay for spread, slightly detuned LFO
     chain.chorusDelay2.delayTime.value = (p.delay ?? 0.02) + spread * 0.012;
     chain.chorusLFOGain2.gain.value    = (p.depth ?? 0.005) * (1 + spread * 0.5);
 
     chain.chorusDryGain.gain.value = Math.cos(amount * Math.PI / 2);
-    chain.chorusWetGain.gain.value = Math.sin(amount * Math.PI / 2) * 0.5; // ÷2 because 2 voices
+    chain.chorusWetGain.gain.value = Math.sin(amount * Math.PI / 2) * 0.5;
   } else {
     chain.chorusWetGain.gain.value = 0;
     chain.chorusDryGain.gain.value = 1;
@@ -576,12 +768,10 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[]): vo
 
     chain.phaserLFO.frequency.setTargetAtTime(rate, now, ramp);
     chain.phaserLFOGain.gain.setTargetAtTime(depth * 1200, now, ramp);
-    // Feedback: positive → notch reinforcement; keep below 0.9 to avoid instability
     chain.phaserFeedback.gain.setTargetAtTime(Math.min(0.9, feedback), now, ramp);
 
     for (let i = 0; i < MAX_PHASER_STAGES; i++) {
       chain.phaserAllpass[i].frequency.setTargetAtTime(baseFreq, now, ramp);
-      // Active stages: Q=5 for clear notches; inactive: Q=0.01 (transparent)
       chain.phaserAllpass[i].Q.setTargetAtTime(i < stages ? 5 : 0.01, now, ramp);
     }
 
@@ -607,7 +797,6 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[]): vo
     chain.filterNode.frequency.setTargetAtTime(freq, now, ramp);
     chain.filterNode.Q.setTargetAtTime(q, now, ramp);
     chain.filterLFO.frequency.setTargetAtTime(lfoRate, now, ramp);
-    // LFO depth in cents: depth=1 → ±1 octave sweep around cutoff
     chain.filterLFOGain.gain.setTargetAtTime(lfoDepth * 1200, now, ramp);
     chain.filterDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
     chain.filterWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
@@ -624,9 +813,9 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[]): vo
     const drive  = p.drive  ?? 0.5;
     const amount = p.amount ?? 1;
     const tone   = p.tone   ?? 8000;
-    const output = p.output ?? 0; // dB
+    const output = p.output ?? 0;
 
-    chain.distortWaveshaper.curve = makeDistortionCurve(type, drive);
+    chain.distortWaveshaper.curve = makeDistortionCurve(type, drive) as Float32Array<ArrayBuffer>;
     chain.distortTone.frequency.setTargetAtTime(tone, now, ramp);
     chain.distortPostGain.gain.setTargetAtTime(Math.pow(10, output / 20), now, ramp);
     chain.distortDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
@@ -646,9 +835,7 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[]): vo
 
     chain.reverbPreDelay.delayTime.setTargetAtTime(predelay, now, ramp);
 
-    // Size: feedback 0.5–0.9, delay scale 0.3–2.0×
     const fbGain   = 0.5 + size * 0.4;
-    // Damp: LPF 8000–100 Hz (exponential scale feels more natural)
     const dampFreq = 8000 * Math.pow(0.0125, damp);
 
     for (let i = 0; i < chain.reverbCombs.length; i++) {
@@ -684,4 +871,118 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[]): vo
     chain.delayWetGain.gain.setTargetAtTime(0, now, ramp);
     chain.delayDryGain.gain.setTargetAtTime(1, now, ramp);
   }
+
+  // ─── BitCrusher ──────────────────────────────────────────────────────────
+  if (bcEffect) {
+    const p          = bcEffect.params;
+    const bits       = Math.max(1, Math.min(16, Math.round(p.bits       ?? 16)));
+    const downsample = Math.max(0, Math.min(1,               p.downsample ?? 0));
+    const amount     = p.amount ?? 1;
+
+    // Update WaveShaper curve for bit depth
+    chain.bcBits.curve = makeBitCrushCurve(bits) as Float32Array<ArrayBuffer>;
+
+    // Update AudioWorklet parameter for SR reduction (if worklet node)
+    if (chain.bcSR instanceof AudioWorkletNode) {
+      const dsParam = chain.bcSR.parameters.get('downsample');
+      if (dsParam) dsParam.setTargetAtTime(downsample, now, ramp);
+    }
+
+    chain.bcDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
+    chain.bcWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
+  } else {
+    chain.bcWetGain.gain.setTargetAtTime(0, now, ramp);
+    chain.bcDryGain.gain.setTargetAtTime(1, now, ramp);
+  }
+
+  // ─── Parametric EQ (6-band) ───────────────────────────────────────────────
+  if (parameEffect) {
+    const p = parameEffect.params;
+    const bandKeys = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'];
+
+    for (let i = 0; i < 6; i++) {
+      const k    = bandKeys[i];
+      const defaultTypeIdx = EQ_BAND_TYPES.indexOf(PARAM_EQ_DEFAULTS[i].type);
+      const type = Math.max(0, Math.min(5, Math.round(p[`${k}type`] ?? defaultTypeIdx)));
+      const freq = p[`${k}freq`] ?? PARAM_EQ_DEFAULTS[i].freq;
+      const gain = p[`${k}gain`] ?? 0;
+      const q    = p[`${k}q`]    ?? PARAM_EQ_DEFAULTS[i].q;
+
+      chain.eqBands[i].type = EQ_BAND_TYPES[type] ?? 'peaking';
+      chain.eqBands[i].frequency.setTargetAtTime(freq, now, ramp);
+      chain.eqBands[i].gain.setTargetAtTime(gain, now, ramp);
+      chain.eqBands[i].Q.setTargetAtTime(q, now, ramp);
+    }
+
+    chain.eqBandsDryGain.gain.setTargetAtTime(0, now, ramp);
+    chain.eqBandsWetGain.gain.setTargetAtTime(1, now, ramp);
+  } else {
+    chain.eqBandsWetGain.gain.setTargetAtTime(0, now, ramp);
+    chain.eqBandsDryGain.gain.setTargetAtTime(1, now, ramp);
+  }
+
+  // ─── Tremolo ─────────────────────────────────────────────────────────────
+  if (tremoloEffect) {
+    const p        = tremoloEffect.params;
+    const depth    = Math.max(0, Math.min(1, p.amount   ?? 0.5));
+    const rate     = Math.max(0.1, p.rate    ?? 4);
+    const waveIdx  = Math.max(0, Math.min(2, Math.round(p.waveform ?? 0)));
+
+    chain.tremoloLFO.type = TREMOLO_WAVEFORMS[waveIdx];
+    chain.tremoloLFO.frequency.setTargetAtTime(rate, now, ramp);
+    // DC offset: gain oscillates between (1-depth) and 1
+    chain.tremoloAmpGain.gain.setTargetAtTime(1 - depth / 2, now, ramp);
+    chain.tremoloLFOGain.gain.setTargetAtTime(depth / 2, now, ramp);
+  } else {
+    chain.tremoloLFOGain.gain.setTargetAtTime(0, now, ramp);
+    chain.tremoloAmpGain.gain.setTargetAtTime(1, now, ramp);
+  }
+
+  // ─── Ring Mod ─────────────────────────────────────────────────────────────
+  if (ringmodEffect) {
+    const p        = ringmodEffect.params;
+    const freq     = Math.max(1, p.frequency ?? 440);
+    const amount   = Math.max(0, Math.min(1, p.amount   ?? 1));
+    const waveIdx  = Math.max(0, Math.min(2, Math.round(p.waveform ?? 0)));
+
+    chain.ringCarrier.type = RING_WAVEFORMS[waveIdx];
+    chain.ringCarrier.frequency.setTargetAtTime(freq, now, ramp);
+    chain.ringDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
+    chain.ringWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
+  } else {
+    chain.ringWetGain.gain.setTargetAtTime(0, now, ramp);
+    chain.ringDryGain.gain.setTargetAtTime(1, now, ramp);
+  }
+
+  // ─── Compressor ──────────────────────────────────────────────────────────
+  if (compressorEffect) {
+    const p      = compressorEffect.params;
+    const makeup = Math.pow(10, (p.makeupGain ?? 0) / 20);
+    chain.compressor.threshold.setTargetAtTime(p.threshold ?? -24,   now, ramp);
+    chain.compressor.ratio.setTargetAtTime(    p.ratio     ?? 4,     now, ramp);
+    chain.compressor.attack.setTargetAtTime(   p.attack    ?? 0.003, now, ramp);
+    chain.compressor.release.setTargetAtTime(  p.release   ?? 0.25,  now, ramp);
+    chain.compressor.knee.setTargetAtTime(     p.knee      ?? 6,     now, ramp);
+    chain.compressorMakeup.gain.setTargetAtTime(makeup,               now, ramp);
+  } else {
+    chain.compressor.threshold.setTargetAtTime(-100, now, ramp);
+    chain.compressor.ratio.setTargetAtTime(1,        now, ramp);
+    chain.compressorMakeup.gain.setTargetAtTime(1,   now, ramp);
+  }
+}
+
+/**
+ * Expose the 6 param-EQ BiquadFilterNodes so the UI can compute live
+ * frequency response curves via getFrequencyResponse().
+ */
+export function getParaEQBands(orbitIndex: number): BiquadFilterNode[] | null {
+  return chains.get(orbitIndex)?.eqBands ?? null;
+}
+
+export function getSynthOrbitInput(orbitIndex: number): GainNode | null {
+  return chains.get(orbitIndex)?.synthInputGain ?? null;
+}
+
+export function getCompressorNode(orbitIndex: number): DynamicsCompressorNode | null {
+  return chains.get(orbitIndex)?.compressor ?? null;
 }

@@ -1,8 +1,9 @@
 import { superdough } from 'superdough';
 import type { Instrument } from '../types/instrument';
 import type { StoreState } from '../state/store';
-import { DEFAULT_SYNTH_PARAMS, DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
+import { DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
 import { applyOrbitToneEffects } from './orbitEffects';
+import { getSynthEngine } from './synthManager';
 
 function dbToLinear(db: number): number {
   return Math.pow(10, db / 20);
@@ -48,41 +49,25 @@ export function triggerSuperdough(
   glide: boolean,
   state: StoreState,
 ): void {
-  const instGain = dbToLinear(instrument.volume);
   const effects = state.instrumentEffects[instrument.id] ?? [];
-  const effectOverrides = getEffectOverrides(instrument, state);
 
-  // Apply all orbit-chain effects (EQ3, Chorus, Phaser, Filter, Distortion, Reverb, Delay)
+  // Always set up / sync the orbit effects chain first
   applyOrbitToneEffects(instrument.orbitIndex, effects);
 
   if (instrument.type === 'synth') {
-    const sp = instrument.synthParams ?? DEFAULT_SYNTH_PARAMS;
+    // Route through the custom SynthEngine — NOT superdough.
+    // This fixes "sound supersaw not found" and enables poly, LFO, FM, unison.
+    const engine = getSynthEngine(instrument.id, instrument.orbitIndex);
+    const instGain = dbToLinear(instrument.volume);
+    void glide; // portamentoSpeed is already in SynthParams
+    engine.noteOn(midiNote, audioTime, noteDuration, instGain);
 
-    superdough({
-      s: sp.synthType,
-      note: midiNote,
-      gain: sp.gain * instGain,
-      attack: sp.attack,
-      decay: sp.decay,
-      sustain: sp.sustain,
-      release: sp.release,
-      cutoff: sp.cutoff,
-      resonance: sp.resonance,
-      pan: (sp.pan + 1) / 2,
-      delay: sp.delay,
-      delaytime: sp.delaytime,
-      delayfeedback: sp.delayfeedback,
-      room: sp.room,
-      roomsize: sp.size,
-      distort: sp.distortion,
-      orbit: instrument.orbitIndex,
-      ...(glide ? { portamento: 0.05 } : {}),
-      ...effectOverrides,
-    }, audioTime, noteDuration);
   } else if (instrument.type === 'sampler' && instrument.sampleName) {
+    const instGain = dbToLinear(instrument.volume);
     const sp = instrument.samplerParams ?? DEFAULT_SAMPLER_PARAMS;
     const rootNote = sp.rootNote ?? 60;
     const speed = sp.speed * Math.pow(2, (midiNote - rootNote) / 12);
+    const effectOverrides = getEffectOverrides(instrument, state);
 
     superdough({
       s: instrument.sampleName,

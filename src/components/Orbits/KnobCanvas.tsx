@@ -1,7 +1,155 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useStore } from '../../state/store';
 import { KnobRenderer } from '../../canvas/KnobRenderer';
 import { getOrbitAnalyser } from '../../audio/orbitEffects';
+import { fetchSampleTree, type SampleEntry } from '../../audio/sampleApi';
+import { previewSample } from '../../audio/sampler';
+import { findSiblings, preloadNeighbors } from '../../audio/sampleCache';
+import { SamplePickerPopup } from '../SampleBank/SamplePickerPopup';
+import { EFFECT_PARAM_DEFS, QUICK_PARAM_KEYS } from '../../audio/effectParams';
+import { EFFECT_COLORS, EFFECT_ICONS } from '../EffectsSidebar/EffectBlock';
+import { EffectKnob } from '../EffectsSidebar/EffectKnob';
+import type { Effect } from '../../types/effects';
+
+// ── EffectPill ───────────────────────────────────────────────────────────────
+
+function EffectPill({ effect, instrumentId }: { effect: Effect; instrumentId: string }) {
+  const toggleEffectEnabled = useStore((s) => s.toggleEffectEnabled);
+  const setEffectParam = useStore((s) => s.setEffectParam);
+  const [hovered, setHovered] = useState(false);
+  const [showPopup, setShowPopup] = useState(false);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const color = EFFECT_COLORS[effect.type] ?? '#94a3b8';
+  const icon = EFFECT_ICONS[effect.type] ?? '?';
+  const quickKeys = QUICK_PARAM_KEYS[effect.type] ?? [];
+  const defs = EFFECT_PARAM_DEFS[effect.type as keyof typeof EFFECT_PARAM_DEFS] ?? [];
+
+  const handleEnter = useCallback(() => {
+    if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; }
+    setHovered(true);
+    hoverTimer.current = setTimeout(() => setShowPopup(true), 300);
+  }, []);
+
+  const handleLeave = useCallback(() => {
+    if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; }
+    setHovered(false);
+    leaveTimer.current = setTimeout(() => setShowPopup(false), 200);
+  }, []);
+
+  const handlePopupEnter = useCallback(() => {
+    if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; }
+  }, []);
+
+  const handlePopupLeave = useCallback(() => {
+    leaveTimer.current = setTimeout(() => { setShowPopup(false); setHovered(false); }, 200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimer.current) clearTimeout(hoverTimer.current);
+      if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    };
+  }, []);
+
+  return (
+    <div className="relative" style={{ zIndex: showPopup ? 50 : 'auto' }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); toggleEffectEnabled(instrumentId, effect.id); }}
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        className="flex items-center justify-center rounded-full transition-all cursor-pointer"
+        style={{
+          width: 18, height: 18,
+          background: effect.enabled ? color : `${color}44`,
+          border: `1px solid ${effect.enabled ? color : `${color}66`}`,
+          boxShadow: effect.enabled && hovered ? `0 0 6px ${color}60` : 'none',
+          transform: hovered ? 'scale(1.15)' : 'scale(1)',
+          opacity: effect.enabled ? 1 : 0.5,
+        }}
+        title={`${effect.label} — click to ${effect.enabled ? 'disable' : 'enable'}`}
+      >
+        <span className="select-none leading-none font-bold" style={{
+          fontSize: 9, color: 'rgba(0,0,0,0.6)',
+        }}>{icon}</span>
+      </button>
+
+      {/* Quick-access popup */}
+      {showPopup && quickKeys.length > 0 && (
+        <div
+          ref={(el) => {
+            if (!el) return;
+            // Native wheel listener to block cellRef's hits/volume handler
+            el.onwheel = (ev) => { ev.stopPropagation(); };
+          }}
+          onMouseEnter={handlePopupEnter}
+          onMouseLeave={handlePopupLeave}
+          className="absolute left-1/2 rounded shadow-xl border border-border"
+          style={{
+            top: 'calc(100% + 6px)',
+            transform: 'translateX(-50%)',
+            background: '#1a1a28',
+            borderTop: `2px solid ${color}`,
+            padding: '8px 10px 6px',
+            minWidth: 100,
+            animation: 'fxPopIn 150ms ease-out',
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Arrow */}
+          <div style={{
+            position: 'absolute', top: -6, left: '50%', transform: 'translateX(-50%)',
+            width: 0, height: 0,
+            borderLeft: '5px solid transparent', borderRight: '5px solid transparent',
+            borderBottom: `5px solid ${color}`,
+          }} />
+          {/* Effect label */}
+          <div className="text-[8px] uppercase tracking-wider text-center mb-1.5 font-medium"
+            style={{ color: `${color}cc` }}>{effect.label}</div>
+          {/* Knobs */}
+          <div className="flex gap-1 justify-center">
+            {quickKeys.map((key) => {
+              const def = defs.find((d) => d.key === key);
+              if (!def) return null;
+              const val = effect.params[key] ?? def.defaultValue;
+              return (
+                <EffectKnob
+                  key={key}
+                  value={val} min={def.min} max={def.max} step={def.step}
+                  defaultValue={def.defaultValue}
+                  label={def.label} color={color} unit={def.unit}
+                  size="sm"
+                  onChange={(v) => setEffectParam(instrumentId, effect.id, key, v)}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── EffectStrip ──────────────────────────────────────────────────────────────
+
+function EffectStrip({ instrumentId }: { instrumentId: string }) {
+  const effects = useStore((s) => s.instrumentEffects[instrumentId]);
+  if (!effects || effects.length === 0) return null;
+
+  return (
+    <div
+      className="flex flex-wrap gap-1 justify-center w-full px-1"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {effects.map((fx) => (
+        <EffectPill key={fx.id} effect={fx} instrumentId={instrumentId} />
+      ))}
+    </div>
+  );
+}
+
+// ── KnobCanvas ───────────────────────────────────────────────────────────────
 
 interface Props {
   instrumentId: string;
@@ -16,6 +164,14 @@ export function KnobCanvas({ instrumentId }: Props) {
   const dragHitIndex = useRef<number | null>(null);
   const levelBarRef = useRef<HTMLDivElement>(null);
   const levelStateRef = useRef({ level: 0 });
+
+  // Sample picker popup
+  const [popupOpen, setPopupOpen] = useState(false);
+  const [popupAnchor, setPopupAnchor] = useState<DOMRect | null>(null);
+  const [tree, setTree] = useState<SampleEntry[]>([]);
+  const nameSpanRef = useRef<HTMLSpanElement>(null);
+  const isHoveringName = useRef(false);
+  const previewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSelected = useStore((s) => s.selectedInstrumentId === instrumentId);
   const inst = useStore((s) => s.instruments.find((i) => i.id === instrumentId));
@@ -38,6 +194,73 @@ export function KnobCanvas({ instrumentId }: Props) {
       observer.disconnect();
     };
   }, [instrumentId]);
+
+  // Fetch sample tree once (module-level cached, near-instant on repeat calls)
+  useEffect(() => {
+    fetchSampleTree().then(setTree).catch(() => {/* silently ignore */});
+  }, []);
+
+  // Wheel on name span: browse siblings without triggering the cellRef handler
+  useEffect(() => {
+    const span = nameSpanRef.current;
+    if (!span || tree.length === 0) return;
+
+    const onNameWheel = (e: WheelEvent) => {
+      if (!isHoveringName.current) return;
+      e.stopPropagation(); // block cellRef's hits/volume/loop handler
+      e.preventDefault();  // block page scroll
+
+      // Read live store to avoid stale-closure issues on rapid scrolling
+      const liveInst = useStore.getState().instruments.find((i) => i.id === instrumentId);
+      const currentPath = liveInst?.samplePath ?? '';
+      if (!currentPath) return; // no path to browse from yet
+
+      const siblings = findSiblings(currentPath, tree);
+      if (siblings.length === 0) return;
+
+      const idx = siblings.findIndex((s) => s.path === currentPath);
+      const delta = e.deltaY < 0 ? -1 : 1;
+      const nextIdx = Math.max(0, Math.min(siblings.length - 1, (idx < 0 ? 0 : idx) + delta));
+      const next = siblings[nextIdx];
+      if (!next || next.path === currentPath) return;
+
+      const displayName = next.name.replace(/\.[^.]+$/, '');
+      useStore.getState().assignSample(instrumentId, next.path, displayName);
+
+      // Debounced preview so rapid scroll doesn't spam audio
+      if (previewDebounceRef.current) clearTimeout(previewDebounceRef.current);
+      previewDebounceRef.current = setTimeout(() => previewSample(next.path), 150);
+
+      // Preload neighbors around the new position
+      preloadNeighbors(next.path, tree);
+    };
+
+    span.addEventListener('wheel', onNameWheel, { passive: false });
+    return () => span.removeEventListener('wheel', onNameWheel);
+  }, [instrumentId, tree]);
+
+  const handleNameClick = useCallback((e: React.MouseEvent<HTMLSpanElement>) => {
+    e.stopPropagation();
+    setPopupAnchor(e.currentTarget.getBoundingClientRect());
+    setPopupOpen(true);
+  }, []);
+
+  const handleNameMouseEnter = useCallback(() => {
+    isHoveringName.current = true;
+    const liveInst = useStore.getState().instruments.find((i) => i.id === instrumentId);
+    if (liveInst?.samplePath && tree.length > 0) {
+      preloadNeighbors(liveInst.samplePath, tree);
+    }
+  }, [instrumentId, tree]);
+
+  const handleNameMouseLeave = useCallback(() => {
+    isHoveringName.current = false;
+  }, []);
+
+  const handleNameWheelPassthrough = useCallback((e: React.WheelEvent) => {
+    // Prevent React's synthetic wheel from propagating while native listener handles it
+    e.stopPropagation();
+  }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const renderer = rendererRef.current;
@@ -224,9 +447,27 @@ export function KnobCanvas({ instrumentId }: Props) {
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
       />
-      <span className="text-[9px] text-text-secondary truncate max-w-full px-1">
+      <span
+        ref={nameSpanRef}
+        className="text-[9px] text-text-secondary truncate max-w-full px-1 cursor-pointer hover:text-text-primary transition-colors"
+        title="Click to pick sample · Scroll to browse"
+        onClick={handleNameClick}
+        onMouseEnter={handleNameMouseEnter}
+        onMouseLeave={handleNameMouseLeave}
+        onWheel={handleNameWheelPassthrough}
+      >
         {inst.name}
       </span>
+      {/* Effect quick-access strip */}
+      <EffectStrip instrumentId={instrumentId} />
+      {popupOpen && popupAnchor && tree.length > 0 && (
+        <SamplePickerPopup
+          instrumentId={instrumentId}
+          anchorRect={popupAnchor}
+          tree={tree}
+          onClose={() => setPopupOpen(false)}
+        />
+      )}
     </div>
   );
 }

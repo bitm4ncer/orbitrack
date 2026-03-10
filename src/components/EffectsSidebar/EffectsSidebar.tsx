@@ -1,8 +1,160 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../state/store';
 import { EffectBlock } from './EffectBlock';
 import { AddEffectMenu } from './AddEffectMenu';
 import { VUMeter } from './VUMeter';
+import { WaveformView } from './WaveformView';
+
+function formatDuration(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+function RecordButton() {
+  const isRecording = useStore((s) => s.isRecording);
+  const startRecording = useStore((s) => s.startRecording);
+  const stopRecording = useStore((s) => s.stopRecording);
+
+  return (
+    <button
+      onClick={() => (isRecording ? stopRecording() : startRecording())}
+      className="shrink-0 rounded-full flex items-center justify-center cursor-pointer"
+      style={{
+        width: 26,
+        height: 26,
+        background: isRecording ? 'rgba(220,60,60,0.15)' : 'rgba(255,255,255,0.08)',
+        border: isRecording ? '1px solid rgba(220,60,60,0.4)' : '1px solid rgba(255,255,255,0.06)',
+      }}
+      title={isRecording ? 'Stop recording' : 'Record'}
+    >
+      <span
+        className="rounded-full"
+        style={{
+          width: 10,
+          height: 10,
+          background: isRecording ? '#dc3c3c' : '#7a2020',
+          animation: isRecording ? 'recPulse 1.2s ease-in-out infinite' : 'none',
+        }}
+      />
+    </button>
+  );
+}
+
+function RecordingsMenu() {
+  const recordings = useStore((s) => s.recordings);
+  const deleteRecording = useStore((s) => s.deleteRecording);
+  const [open, setOpen] = useState(false);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    };
+  }, []);
+
+  const play = (rec: { id: string; blob: Blob }) => {
+    if (audioRef.current) { audioRef.current.pause(); }
+    const url = URL.createObjectURL(rec.blob);
+    const audio = new Audio(url);
+    audio.onended = () => { setPlayingId(null); URL.revokeObjectURL(url); };
+    audio.play();
+    audioRef.current = audio;
+    setPlayingId(rec.id);
+  };
+
+  const stop = () => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    setPlayingId(null);
+  };
+
+  const download = (rec: { blob: Blob; name: string }) => {
+    const url = URL.createObjectURL(rec.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${rec.name}.webm`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const hasRecordings = recordings.length > 0;
+
+  return (
+    <div ref={menuRef} className="relative shrink-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="cursor-pointer rounded-full"
+        style={{
+          width: 8,
+          height: 8,
+          background: hasRecordings ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.12)',
+        }}
+        title="Recordings"
+      />
+
+      {open && (
+        <div
+          className="absolute right-0 bottom-full mb-2 bg-bg-secondary border border-border rounded shadow-xl z-50"
+          style={{ minWidth: 200 }}
+        >
+          {recordings.length === 0 ? (
+            <div className="px-3 py-2 text-[11px] text-text-secondary/50">No recordings yet</div>
+          ) : (
+            <div className="py-1">
+              {recordings.map((rec) => (
+                <div
+                  key={rec.id}
+                  className="flex items-center gap-1.5 px-2 py-1 text-[11px] text-text-secondary hover:bg-white/5"
+                >
+                  {/* Play/Stop */}
+                  <button
+                    className="shrink-0 cursor-pointer hover:text-text-primary"
+                    onClick={() => (playingId === rec.id ? stop() : play(rec))}
+                    title={playingId === rec.id ? 'Stop' : 'Play'}
+                  >
+                    {playingId === rec.id ? '■' : '▶'}
+                  </button>
+                  {/* Name + duration */}
+                  <span className="flex-1 truncate">{rec.name}</span>
+                  <span className="text-text-secondary/40 font-mono">{formatDuration(rec.duration)}</span>
+                  {/* Download */}
+                  <button
+                    className="shrink-0 cursor-pointer hover:text-text-primary"
+                    onClick={() => download(rec)}
+                    title="Download"
+                  >
+                    ↓
+                  </button>
+                  {/* Delete */}
+                  <button
+                    className="shrink-0 cursor-pointer hover:text-red-400"
+                    onClick={() => deleteRecording(rec.id)}
+                    title="Delete"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function EffectsSidebar() {
   const selectedId = useStore((s) => s.selectedInstrumentId);
@@ -11,6 +163,7 @@ export function EffectsSidebar() {
   const masterVolume = useStore((s) => s.masterVolume);
   const setMasterVolume = useStore((s) => s.setMasterVolume);
   const reorderEffects = useStore((s) => s.reorderEffects);
+  const isRecording = useStore((s) => s.isRecording);
 
   const selectedInstrument = instruments.find((i) => i.id === selectedId);
   const effects = selectedId ? (instrumentEffects[selectedId] ?? []) : [];
@@ -96,6 +249,13 @@ export function EffectsSidebar() {
             {Math.round(masterVolume * 100)}%
           </span>
         </div>
+      </div>
+
+      {/* Waveform view with record button and recordings dot */}
+      <div className="shrink-0 flex items-center gap-2" style={{ padding: 20 }}>
+        <RecordButton />
+        <WaveformView isRecording={isRecording} />
+        <RecordingsMenu />
       </div>
     </div>
   );

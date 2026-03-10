@@ -330,7 +330,7 @@ export function GridSequencer() {
                         }}
                       >
                         <span
-                          className="text-[8px] text-white/70 pl-1 leading-none select-none"
+                          className="text-[8px] text-black/70 pl-1 leading-none select-none"
                           style={{ lineHeight: `${ROW_H - 2}px` }}
                         >
                           {noteNameWithOctave(midiNote)}
@@ -569,7 +569,7 @@ export function GridSequencer() {
                       }}
                     >
                       <span
-                        className="text-[8px] text-white/70 pl-1 leading-none select-none"
+                        className="text-[8px] text-black/70 pl-1 leading-none select-none"
                         style={{ lineHeight: `${ROW_H - 2}px` }}
                       >
                         {noteNameWithOctave(midiNote)}

@@ -4,9 +4,12 @@ import { EFFECT_PARAM_DEFS } from '../../audio/effectParams';
 import { EffectKnob } from './EffectKnob';
 import { EQCurveDisplay } from './EQCurveDisplay';
 import { FilterCurveDisplay } from './FilterCurveDisplay';
+import { ParamEQDisplay, ParamEQTypeRow } from './ParamEQDisplay';
+import type { BandParam } from './ParamEQDisplay';
 
 export const EFFECT_COLORS: Record<string, string> = {
   eq3:         '#BAF2FF',
+  parame:      '#A0E8FF',
   compressor:  '#FFB3BA',
   reverb:      '#E8BAFF',
   delay:       '#BAE1FF',
@@ -14,11 +17,15 @@ export const EFFECT_COLORS: Record<string, string> = {
   phaser:      '#FFD9BA',
   distortion:  '#FFFFBA',
   filter:      '#FFB3E6',
+  bitcrusher:  '#C8BAFF',
+  tremolo:     '#FFE0BA',
+  ringmod:     '#BAFFF0',
 };
 
-const EFFECT_ICONS: Record<string, string> = {
-  eq3: '≡', compressor: '⊓', reverb: '~', delay: '◷',
+export const EFFECT_ICONS: Record<string, string> = {
+  eq3: '≡', parame: '≋', compressor: '⊓', reverb: '~', delay: '◷',
   chorus: '≈', phaser: '⊕', distortion: '⋀', filter: '◡',
+  bitcrusher: '⊞', tremolo: '∿', ringmod: '⊗',
 };
 
 // ── per-effect body components ─────────────────────────────────────────────
@@ -26,6 +33,7 @@ const EFFECT_ICONS: Record<string, string> = {
 interface BodyProps {
   effect: Effect;
   color: string;
+  instrumentId: string;
   onChange: (key: string, val: number) => void;
 }
 
@@ -109,7 +117,6 @@ function CompressorBody({ effect, color, onChange }: BodyProps) {
   const threshT = (thresh - thDef.min) / (thDef.max - thDef.min);
   return (
     <div className="flex flex-col gap-3">
-      {/* Threshold — horizontal slider */}
       <div className="flex flex-col gap-1">
         <div className="flex justify-between">
           <span className="fx-param-label">Threshold</span>
@@ -143,7 +150,7 @@ function CompressorBody({ effect, color, onChange }: BodyProps) {
   );
 }
 
-// ── Reverb — Schroeder comb-filter reverb with pre-delay and damping ───────
+// ── Reverb ─────────────────────────────────────────────────────────────────
 
 function ReverbBody({ effect, color, onChange }: BodyProps) {
   return (
@@ -160,7 +167,7 @@ function ReverbBody({ effect, color, onChange }: BodyProps) {
   );
 }
 
-// ── Delay — feedback delay with hi-cut filter (tape character) ─────────────
+// ── Delay ──────────────────────────────────────────────────────────────────
 
 function DelayBody({ effect, color, onChange }: BodyProps) {
   return (
@@ -177,7 +184,7 @@ function DelayBody({ effect, color, onChange }: BodyProps) {
   );
 }
 
-// ── Chorus — dual-voice LFO chorus with spread ─────────────────────────────
+// ── Chorus ─────────────────────────────────────────────────────────────────
 
 function ChorusBody({ effect, color, onChange }: BodyProps) {
   return (
@@ -195,13 +202,13 @@ function ChorusBody({ effect, color, onChange }: BodyProps) {
   );
 }
 
-// ── Phaser — all-pass chain with feedback ──────────────────────────────────
+// ── Phaser ─────────────────────────────────────────────────────────────────
 
 const STAGE_VALUES = [2, 4, 6, 8, 10, 12];
 
 function PhaserBody({ effect, color, onChange }: BodyProps) {
-  const stages    = Math.round(effect.params.stages ?? 4);
-  const stageIdx  = STAGE_VALUES.indexOf(stages);
+  const stages   = Math.round(effect.params.stages ?? 4);
+  const stageIdx = STAGE_VALUES.indexOf(stages);
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-around">
@@ -228,7 +235,7 @@ function PhaserBody({ effect, color, onChange }: BodyProps) {
   );
 }
 
-// ── Distortion — WaveShaperNode with 4 types ───────────────────────────────
+// ── Distortion ─────────────────────────────────────────────────────────────
 
 const DISTORT_TYPE_LABELS = ['Soft', 'Hard', 'Tube', 'Fuzz'];
 
@@ -257,7 +264,7 @@ function DistortionBody({ effect, color, onChange }: BodyProps) {
   );
 }
 
-// ── Filter — BiquadFilter with curve display, type selector, and LFO ───────
+// ── Filter ─────────────────────────────────────────────────────────────────
 
 const FILTER_TYPE_LABELS = ['LP', 'HP', 'BP', 'Notch'];
 
@@ -286,7 +293,6 @@ function FilterBody({ effect, color, onChange }: BodyProps) {
         {knobFor(effect, 'q',         color, onChange, 'md')}
         {knobFor(effect, 'amount',    color, onChange, 'md')}
       </div>
-      {/* LFO section */}
       <div className="flex items-center gap-2 pt-0.5">
         <span className="fx-param-label" style={{ flexShrink: 0 }}>LFO</span>
         <div
@@ -302,6 +308,103 @@ function FilterBody({ effect, color, onChange }: BodyProps) {
   );
 }
 
+// ── Bit Crusher ─────────────────────────────────────────────────────────────
+
+function BitCrusherBody({ effect, color, onChange }: BodyProps) {
+  return (
+    <div className="flex justify-around">
+      {knobFor(effect, 'bits',       color, onChange, 'lg')}
+      {knobFor(effect, 'downsample', color, onChange, 'md')}
+      {knobFor(effect, 'amount',     color, onChange, 'md')}
+    </div>
+  );
+}
+
+// ── Param EQ — 6-band parametric with live canvas + drag interaction ────────
+
+function ParaEQBody({ effect, color, instrumentId, onChange }: BodyProps) {
+  const orbitIndex = useStore(
+    (s) => s.instruments.find((i) => i.id === instrumentId)?.orbitIndex ?? 0,
+  );
+  const p = effect.params;
+
+  const bands: BandParam[] = [
+    { type: p.b1type ?? 1, freq: p.b1freq ?? 30,    gain: p.b1gain ?? 0, q: p.b1q ?? 0.707 },
+    { type: p.b2type ?? 3, freq: p.b2freq ?? 120,   gain: p.b2gain ?? 0, q: p.b2q ?? 0.707 },
+    { type: p.b3type ?? 2, freq: p.b3freq ?? 500,   gain: p.b3gain ?? 0, q: p.b3q ?? 1.0 },
+    { type: p.b4type ?? 2, freq: p.b4freq ?? 3000,  gain: p.b4gain ?? 0, q: p.b4q ?? 1.0 },
+    { type: p.b5type ?? 4, freq: p.b5freq ?? 10000, gain: p.b5gain ?? 0, q: p.b5q ?? 0.707 },
+    { type: p.b6type ?? 0, freq: p.b6freq ?? 20000, gain: p.b6gain ?? 0, q: p.b6q ?? 0.707 },
+  ];
+
+  const keys = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'] as const;
+  const handleChange = (bi: number, key: 'type' | 'freq' | 'gain' | 'q', val: number) => {
+    onChange(`${keys[bi]}${key}`, val);
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <ParamEQDisplay
+        orbitIndex={orbitIndex}
+        color={color}
+        bands={bands}
+        onChange={handleChange}
+      />
+      <ParamEQTypeRow bands={bands} color={color} onChange={handleChange} />
+    </div>
+  );
+}
+
+// ── Tremolo — amplitude modulation via LFO ─────────────────────────────────
+
+const TREMOLO_WAVE_LABELS = ['Sine', 'Tri', 'Sq'];
+
+function TremoloBody({ effect, color, onChange }: BodyProps) {
+  const waveform = Math.round(effect.params.waveform ?? 0);
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1">
+        <span className="fx-param-label" style={{ marginRight: 2, flexShrink: 0 }}>Wave</span>
+        <TypeButtons
+          labels={TREMOLO_WAVE_LABELS}
+          value={waveform}
+          color={color}
+          onChange={(i) => onChange('waveform', i)}
+        />
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'rate',   color, onChange, 'lg')}
+        {knobFor(effect, 'amount', color, onChange, 'md')}
+      </div>
+    </div>
+  );
+}
+
+// ── Ring Mod — carrier OSC × signal (true ring modulation) ─────────────────
+
+const RING_WAVE_LABELS = ['Sine', 'Tri', 'Saw'];
+
+function RingModBody({ effect, color, onChange }: BodyProps) {
+  const waveform = Math.round(effect.params.waveform ?? 0);
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1">
+        <span className="fx-param-label" style={{ marginRight: 2, flexShrink: 0 }}>Wave</span>
+        <TypeButtons
+          labels={RING_WAVE_LABELS}
+          value={waveform}
+          color={color}
+          onChange={(i) => onChange('waveform', i)}
+        />
+      </div>
+      <div className="flex justify-around">
+        {knobFor(effect, 'frequency', color, onChange, 'lg')}
+        {knobFor(effect, 'amount',    color, onChange, 'md')}
+      </div>
+    </div>
+  );
+}
+
 const BODY_MAP: Record<string, React.ComponentType<BodyProps>> = {
   eq3:        EQ3Body,
   compressor: CompressorBody,
@@ -311,6 +414,10 @@ const BODY_MAP: Record<string, React.ComponentType<BodyProps>> = {
   phaser:     PhaserBody,
   distortion: DistortionBody,
   filter:     FilterBody,
+  bitcrusher: BitCrusherBody,
+  parame:     ParaEQBody,
+  tremolo:    TremoloBody,
+  ringmod:    RingModBody,
 };
 
 // ── main component ─────────────────────────────────────────────────────────
@@ -341,16 +448,12 @@ export function EffectBlock({
 
   const BodyComponent = BODY_MAP[effect.type] ?? null;
 
-  // suppress unused warning — index kept for potential future use
   void index;
 
   return (
     <div
-      draggable
-      onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      onDragEnd={onDragEnd}
       className={`rounded select-none overflow-hidden transition-all ${effect.enabled ? '' : 'opacity-40'}`}
       style={{
         border: `1px solid ${isDragOver ? color : `${color}50`}`,
@@ -363,6 +466,9 @@ export function EffectBlock({
       {/* Header */}
       <div className="flex items-center gap-2 mb-2">
         <span
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
           className="shrink-0 text-white/20 hover:text-white/50 cursor-grab active:cursor-grabbing transition-colors leading-none"
           style={{ fontSize: 13, letterSpacing: '-1px' }}
           title="Drag to reorder"
@@ -399,7 +505,12 @@ export function EffectBlock({
       </div>
 
       {!effect.collapsed && BodyComponent && (
-        <BodyComponent effect={effect} color={color} onChange={onChange} />
+        <BodyComponent
+          effect={effect}
+          color={color}
+          instrumentId={instrumentId}
+          onChange={onChange}
+        />
       )}
     </div>
   );

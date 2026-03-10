@@ -7,6 +7,7 @@ import { DEFAULT_SYNTH_PARAMS, DEFAULT_SAMPLER_PARAMS } from '../types/superdoug
 import { DEFAULT_EFFECT_PARAMS } from '../audio/effectParams';
 import { loadSample } from '../audio/sampler';
 import { registerSampleForPlayback } from '../audio/engine';
+import { startRecording as recStart, stopRecordingAsync } from '../audio/recorder';
 
 function generateEvenHits(count: number): number[] {
   return Array.from({ length: count }, (_, i) => i / count);
@@ -189,6 +190,13 @@ export interface StoreState {
   reorderEffects: (instrumentId: string, fromIdx: number, toIdx: number) => void;
 
   setMasterVolume: (vol: number) => void;
+
+  // Recording
+  isRecording: boolean;
+  recordings: { id: string; blob: Blob; name: string; duration: number; timestamp: number }[];
+  startRecording: () => void;
+  stopRecording: () => void;
+  deleteRecording: (id: string) => void;
 }
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -684,7 +692,7 @@ export const useStore = create<StoreState>((set, get) => ({
   // Per-instrument effects actions
   addEffect: (instrumentId, type) =>
     set((s) => {
-      const EFFECT_LABELS: Record<EffectType, string> = {
+      const EFFECT_LABELS: Partial<Record<EffectType, string>> = {
         eq3: 'EQ 3-Band',
         reverb: 'Reverb',
         delay: 'Delay',
@@ -693,11 +701,15 @@ export const useStore = create<StoreState>((set, get) => ({
         phaser: 'Phaser',
         distortion: 'Distortion',
         filter: 'Filter',
+        bitcrusher: 'Bit Crusher',
+        parame: 'Param EQ',
+        tremolo: 'Tremolo',
+        ringmod: 'Ring Mod',
       };
       const effect: Effect = {
         id: createId(),
         type,
-        label: EFFECT_LABELS[type],
+        label: EFFECT_LABELS[type] ?? type,
         enabled: true,
         params: DEFAULT_EFFECT_PARAMS(type),
         collapsed: false,
@@ -761,4 +773,30 @@ export const useStore = create<StoreState>((set, get) => ({
     }),
 
   setMasterVolume: (masterVolume) => set({ masterVolume }),
+
+  // Recording
+  isRecording: false,
+  recordings: [],
+
+  startRecording: () => {
+    if (recStart()) set({ isRecording: true });
+  },
+
+  stopRecording: async () => {
+    const result = await stopRecordingAsync();
+    if (result) {
+      const recNum = get().recordings.length + 1;
+      set((s) => ({
+        isRecording: false,
+        recordings: [
+          ...s.recordings,
+          { id: createId(), blob: result.blob, name: `Rec ${recNum}`, duration: result.duration, timestamp: result.timestamp },
+        ],
+      }));
+    } else {
+      set({ isRecording: false });
+    }
+  },
+
+  deleteRecording: (id) => set((s) => ({ recordings: s.recordings.filter((r) => r.id !== id) })),
 }));

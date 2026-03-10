@@ -86,6 +86,16 @@ export function setBpm(bpm: number): void {
 }
 
 function tick(time: number): void {
+  try {
+    _tick(time);
+  } catch (e) {
+    // Swallow scheduling errors (e.g. InvalidAccessError from Tone.js internals)
+    // so the transport loop is never silently killed.
+    console.warn('[transport] tick error:', e);
+  }
+}
+
+function _tick(time: number): void {
   const transport = Tone.getTransport();
   const state = useStore.getState();
 
