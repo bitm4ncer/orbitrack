@@ -156,6 +156,7 @@ export function TrackTimeline() {
   const reorderArrangementSteps = useStore((s) => s.reorderArrangementSteps);
   const setArrangementStepBars = useStore((s) => s.setArrangementStepBars);
   const duplicateArrangementStep = useStore((s) => s.duplicateArrangementStep);
+  const selectScene = useStore((s) => s.selectScene);
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<{ id: string; sceneId: string; bars: number } | null>(null);
@@ -370,7 +371,10 @@ export function TrackTimeline() {
                     isPlaying={trackPosition === idx}
                     occurrenceIndex={occurrenceIndex}
                     totalOccurrences={totalOccurrences}
-                    onSelect={() => setSelectedStepId(step.id)}
+                    onSelect={() => {
+                      setSelectedStepId(step.id);
+                      selectScene(step.sceneId);
+                    }}
                     onDelete={() => handleDelete(step.id)}
                     onResize={(newBars) => setArrangementStepBars(step.id, newBars)}
                     onDragStart={(e) => handleDragStart(idx, e)}

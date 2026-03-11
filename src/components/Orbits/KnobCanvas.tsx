@@ -198,6 +198,11 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
     }
     return null;
   });
+  const isInHighlightedScene = useStore((s) => {
+    if (!s.selectedSceneId) return false;
+    const scene = s.scenes.find((sc) => sc.id === s.selectedSceneId);
+    return scene?.instrumentIds.includes(instrumentId) ?? false;
+  });
   const inst = useStore((s) => s.instruments.find((i) => i.id === instrumentId));
 
   useEffect(() => {
@@ -426,11 +431,12 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
     <div
       ref={cellRef}
       onClick={(e) => e.stopPropagation()}
-      className={`knob-cell scene/card relative flex flex-col items-center gap-1 p-2 rounded-lg select-none
-                  ${isSelected ? 'ring-1 ring-white/20 bg-white/5' : isMultiSelected ? 'ring-1 ring-white/10 bg-white/[0.03]' : 'hover:bg-white/[0.02]'}`}
+      className={`knob-cell scene/card relative flex flex-col items-center gap-1 p-2 rounded-lg select-none transition-all
+                  ${isInHighlightedScene ? 'ring-2 ring-white/60' : isSelected ? 'ring-1 ring-white/20 bg-white/5' : isMultiSelected ? 'ring-1 ring-white/10 bg-white/[0.03]' : 'hover:bg-white/[0.02]'}`}
       style={{
-        border: `1px solid ${inst.color}22`,
+        border: `1px solid ${isInHighlightedScene ? 'white' : inst.color}${isInHighlightedScene ? '88' : '22'}`,
         '--inst-color': inst.color,
+        boxShadow: isInHighlightedScene ? `0 0 16px ${inst.color}44` : 'none',
       } as React.CSSProperties}
     >
       {/* Scene color indicator — 1px line at bottom, inset to respect rounded corners */}
