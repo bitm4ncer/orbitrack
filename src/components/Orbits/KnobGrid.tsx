@@ -29,11 +29,15 @@ function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
 }
 
 function AddInstrumentCard() {
+  const instruments = useStore((s) => s.instruments);
   const [sampleFiles, setSampleFiles] = useState<SampleEntry[]>([]);
 
   useEffect(() => {
     fetchSampleTree().then((tree) => setSampleFiles(flattenFiles(tree)));
   }, []);
+
+  // Get the color that the next instrument will have
+  const nextColor = PASTEL_COLORS[instruments.length % PASTEL_COLORS.length];
 
   const createInstrument = (type: 'synth' | 'sampler' | 'looper') => {
     const store = useStore.getState();
@@ -117,7 +121,7 @@ function AddInstrumentCard() {
   return (
     <div
       className="knob-cell flex flex-col items-center justify-center gap-4 p-4 rounded-lg select-none"
-      style={{ background: 'rgba(0,0,0,0.25)', border: 'none' }}
+      style={{ background: 'transparent', border: '1px solid rgba(255, 217, 186, 0.133)' }}
     >
       {/* 3 big buttons */}
       <div className="w-full flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
@@ -133,16 +137,16 @@ function AddInstrumentCard() {
             style={{
               color: '#777',
               border: '1px solid rgba(255,255,255,0.08)',
-              background: 'rgba(0,0,0,0.2)',
+              background: 'transparent',
               padding: '12px 16px',
               borderRadius: '6px',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
-              e.currentTarget.style.color = '#888';
+              e.currentTarget.style.borderColor = nextColor;
+              e.currentTarget.style.color = nextColor;
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'rgba(0,0,0,0.2)';
+              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
               e.currentTarget.style.color = '#777';
             }}
           >
