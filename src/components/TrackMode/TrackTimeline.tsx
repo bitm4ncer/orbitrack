@@ -8,6 +8,7 @@ function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSc
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
   const selectInstrument = useStore((s) => s.selectInstrument);
+  const isPlaying = useStore((s) => s.isPlaying);
   const inst = useStore((s) => s.instruments.find(i => i.id === instrumentId));
   const instName = inst?.name ?? '';
 
@@ -24,32 +25,32 @@ function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSc
       const h = canvas.height;
       const cx = w / 2;
       const cy = h / 2;
-      const radius = w / 2 - 2;
+      const radius = w / 2 - 3;
 
       // Clear
       ctx.clearRect(0, 0, w, h);
 
       // Outer ring
       ctx.strokeStyle = 'rgba(180, 180, 180, 0.8)';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Hit position dots (rotating)
+      // Hit position dots (only rotate if playing)
       if (inst.hitPositions && inst.hitPositions.length > 0) {
         inst.hitPositions.forEach((angle) => {
-          const rad = (angle * Math.PI * 2 + rotation) % (Math.PI * 2);
-          const x = cx + Math.cos(rad) * (radius - 3);
-          const y = cy + Math.sin(rad) * (radius - 3);
+          const rad = (angle * Math.PI * 2 + (isPlaying ? rotation : 0)) % (Math.PI * 2);
+          const x = cx + Math.cos(rad) * (radius - 4);
+          const y = cy + Math.sin(rad) * (radius - 4);
           ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
           ctx.beginPath();
-          ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+          ctx.arc(x, y, 2, 0, Math.PI * 2);
           ctx.fill();
         });
       }
 
-      rotation += 0.02;
+      if (isPlaying) rotation += 0.02;
       rafRef.current = requestAnimationFrame(draw);
     };
 
@@ -57,14 +58,14 @@ function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSc
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
-  }, [inst]);
+  }, [inst, isPlaying]);
 
   return (
     <div
       className="cursor-pointer rounded transition-colors flex-shrink-0"
       style={{
-        width: 36,
-        height: 36,
+        width: 72,
+        height: 72,
         border: isSceneSelected ? '1px solid rgba(200, 200, 200, 0.6)' : '1px solid transparent',
       }}
       title={instName}
@@ -73,7 +74,7 @@ function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSc
         selectInstrument(instrumentId);
       }}
     >
-      <canvas ref={canvasRef} width={36} height={36} style={{ display: 'block', width: 36, height: 36 }} />
+      <canvas ref={canvasRef} width={72} height={72} style={{ display: 'block', width: 72, height: 72 }} />
     </div>
   );
 }

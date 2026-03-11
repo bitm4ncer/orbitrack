@@ -199,6 +199,12 @@ function _tick(time: number): void {
 
   // Track Mode: bar counting and scene advancement
   if (state.trackMode && state.arrangement.length > 0) {
+    const currentSceneStep = state.arrangement[_currentArrangementIdx];
+    const totalStepsInScene = currentSceneStep.bars * _maxLoopSize;
+    const stepsElapsedInScene = _stepLoopCount * _maxLoopSize + currentStep;
+    _pos.trackStepProgress = Math.min(stepsElapsedInScene / totalStepsInScene, 1);
+    _pos.dirty = true;
+
     // One full loop of _maxLoopSize steps = one "bar"
     if (globalStep > 0 && globalStep % _maxLoopSize === 0) {
       _stepLoopCount++;
@@ -207,6 +213,7 @@ function _tick(time: number): void {
         _stepLoopCount = 0;
         _currentArrangementIdx = (_currentArrangementIdx + 1) % state.arrangement.length;
         _pos.trackPosition = _currentArrangementIdx;
+        _pos.trackStepProgress = 0;
         _pos.dirty = true;
       }
     }
