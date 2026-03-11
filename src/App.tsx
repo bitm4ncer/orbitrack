@@ -251,8 +251,8 @@ function App() {
       </div>
 
       <div
-        className="overflow-hidden shrink-0 transition-[height] duration-300"
-        style={{ height: trackMode ? 200 : 0 }}
+        className="overflow-hidden shrink-0 transition-[max-height] duration-300"
+        style={{ maxHeight: trackMode ? '500px' : '0px' }}
       >
         {trackMode && <TrackTimeline />}
       </div>

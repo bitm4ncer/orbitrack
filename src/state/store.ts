@@ -222,7 +222,7 @@ export interface StoreState {
   instrumentProgress: Record<string, number>;
   setInstrumentProgress: (progress: Record<string, number>) => void;
   // Batched UI update — single set() call instead of three separate dispatches
-  setPlaybackUI: (progress: number, currentStep: number, instProgress: Record<string, number>, trackPosition?: number) => void;
+  setPlaybackUI: (progress: number, currentStep: number, instProgress: Record<string, number>, trackPosition?: number, trackStepProgress?: number) => void;
   setLoopSize: (id: string, size: number) => void;
 
   // Default instrument type for the Add card
@@ -861,8 +861,8 @@ export const useStore = create<StoreState>((set, get) => ({
     }),
 
   setInstrumentProgress: (instrumentProgress) => set({ instrumentProgress }),
-  setPlaybackUI: (transportProgress, currentStep, instrumentProgress, trackPosition) =>
-    set({ transportProgress, currentStep, instrumentProgress, ...(trackPosition !== undefined && { trackPosition }) }),
+  setPlaybackUI: (transportProgress, currentStep, instrumentProgress, trackPosition, trackStepProgress) =>
+    set({ transportProgress, currentStep, instrumentProgress, ...(trackPosition !== undefined && { trackPosition }), ...(trackStepProgress !== undefined && { trackStepProgress }) }),
 
   setLoopSize: (id, size) =>
     set((s) => {

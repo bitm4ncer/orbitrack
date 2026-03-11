@@ -37,6 +37,7 @@ const _pos = {
   currentStep: 0,
   instProgress: {} as Record<string, number>,
   trackPosition: -1,
+  trackStepProgress: 0,
   dirty: false,
 };
 let _rafId: number | null = null;

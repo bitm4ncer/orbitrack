@@ -1,8 +1,40 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../../state/store';
 import type { InstrumentScene } from '../../types/scene';
+import { KnobRenderer } from '../../canvas/KnobRenderer';
 
-const BAR_PX = 60; // pixels per bar
+const BLOCK_H = 150; // pixels, 250% of original ~60px
+
+function MiniOrb({ instrumentId }: { instrumentId: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<KnobRenderer | null>(null);
+  const selectInstrument = useStore((s) => s.selectInstrument);
+  const instName = useStore((s) => s.instruments.find(i => i.id === instrumentId)?.name ?? '');
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const renderer = new KnobRenderer(canvas, instrumentId);
+    renderer.resize();
+    renderer.start();
+    rendererRef.current = renderer;
+    return () => { renderer.stop(); rendererRef.current = null; };
+  }, [instrumentId]);
+
+  return (
+    <div
+      className="cursor-pointer rounded hover:ring-1 hover:ring-white/50 transition-all flex-shrink-0"
+      style={{ width: 36, height: 36, filter: 'grayscale(1) brightness(1.4)' }}
+      title={instName}
+      onClick={(e) => {
+        e.stopPropagation();
+        selectInstrument(instrumentId);
+      }}
+    >
+      <canvas ref={canvasRef} width={36} height={36} style={{ display: 'block' }} />
+    </div>
+  );
+}
 
 interface SceneBlockProps {
   step: { id: string; sceneId: string; bars: number };
@@ -11,6 +43,7 @@ interface SceneBlockProps {
   isPlaying: boolean;
   occurrenceIndex: number;
   totalOccurrences: number;
+  barPx: number;
   onSelect: () => void;
   onDelete: () => void;
   onResize: (newBars: number) => void;
@@ -24,6 +57,7 @@ function SceneBlock({
   isPlaying,
   occurrenceIndex,
   totalOccurrences,
+  barPx,
   onSelect,
   onDelete,
   onResize,
@@ -46,7 +80,7 @@ function SceneBlock({
 
     const handleMouseMove = (e: MouseEvent) => {
       const delta = e.clientX - resizeStart;
-      const barDelta = Math.round(delta / BAR_PX);
+      const barDelta = Math.round(delta / barPx);
       const newBars = Math.max(1, Math.min(64, originalBars + barDelta));
       onResize(newBars);
     };
@@ -62,7 +96,7 @@ function SceneBlock({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing, resizeStart, originalBars, onResize]);
+  }, [isResizing, resizeStart, originalBars, onResize, barPx]);
 
   return (
     <div
@@ -81,40 +115,50 @@ function SceneBlock({
         }
       }}
       tabIndex={0}
-      className={`relative flex items-center gap-2 px-3 py-2 cursor-move select-none transition-all
-        rounded border min-w-max
+      className={`relative flex flex-col cursor-move select-none transition-all rounded border overflow-hidden
         ${isSelected ? 'ring-2 ring-white' : ''} ${isPlaying ? 'ring-2 ring-yellow-400' : ''}`}
       style={{
-        width: `${step.bars * BAR_PX}px`,
+        width: `${step.bars * barPx}px`,
+        minHeight: BLOCK_H,
         backgroundColor: scene.color + '99',
         borderColor: 'rgba(255, 255, 255, 0.2)',
       }}
     >
-      <div className="flex flex-col flex-1 min-w-0">
-        {/* Scene name */}
-        <span className="text-sm font-semibold truncate">{scene.name}</span>
+      {/* Header row */}
+      <div className="flex items-center gap-2 px-3 py-2 flex-shrink-0">
+        <div className="flex flex-col flex-1 min-w-0">
+          {/* Scene name */}
+          <span className="text-sm font-semibold truncate">{scene.name}</span>
+        </div>
+
+        {/* Bar count badge */}
+        <span className="text-xs font-mono bg-black/30 px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0">
+          {step.bars} bar{step.bars !== 1 ? 's' : ''}
+        </span>
+
+        {/* Delete button */}
+        {isSelected && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="p-0.5 hover:bg-black/30 rounded transition-colors flex-shrink-0"
+            title="Delete (Delete key)"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+              <path d="M1 3h12v1H1V3zm2-2h8v1H3V1zm0 4v7c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V5H3z" />
+            </svg>
+          </button>
+        )}
       </div>
 
-      {/* Bar count badge */}
-      <span className="text-xs font-mono bg-black/30 px-1.5 py-0.5 rounded whitespace-nowrap">
-        {step.bars} bar{step.bars !== 1 ? 's' : ''}
-      </span>
-
-      {/* Delete button */}
-      {isSelected && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          className="p-0.5 hover:bg-black/30 rounded transition-colors"
-          title="Delete (Delete key)"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-            <path d="M1 3h12v1H1V3zm2-2h8v1H3V1zm0 4v7c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V5H3z" />
-          </svg>
-        </button>
-      )}
+      {/* Mini orbs grid */}
+      <div className="flex flex-wrap gap-1 overflow-hidden flex-1 px-2 pb-2 pt-1 items-start content-start">
+        {scene.instrumentIds.map(instId => (
+          <MiniOrb key={instId} instrumentId={instId} />
+        ))}
+      </div>
 
       {/* Resize handle */}
       <div
@@ -131,7 +175,7 @@ function SceneBlock({
 
       {/* Multi-scene occurrence indicators */}
       {totalOccurrences > 1 && (
-        <div className="absolute bottom-0 left-0 right-0 flex gap-0.5 justify-center px-1 py-1">
+        <div className="absolute bottom-1 left-0 right-0 flex gap-0.5 justify-center px-1">
           {Array.from({ length: totalOccurrences }).map((_, idx) => (
             <div
               key={idx}
@@ -165,6 +209,16 @@ export function TrackTimeline() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [barPx, setBarPx] = useState(60); // 20–200 range
+  const barPxRef = useRef(60);
+
+  useEffect(() => {
+    barPxRef.current = barPx;
+  }, [barPx]);
+
+  const zoom = (delta: number) => {
+    setBarPx(prev => Math.round(Math.max(20, Math.min(200, prev + delta)) / 10) * 10);
+  };
 
   const handleAddScene = (sceneId: string) => {
     addArrangementStep(sceneId, 4);
@@ -191,9 +245,22 @@ export function TrackTimeline() {
     duplicateArrangementStep(clipboard.id);
   };
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (copy/paste/delete + zoom)
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Zoom shortcuts
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        zoom(+10);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+        e.preventDefault();
+        zoom(-10);
+        return;
+      }
+
+      // Copy/paste/delete (need selected step)
       if (!selectedStepId) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
@@ -226,6 +293,26 @@ export function TrackTimeline() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Wheel handler: Ctrl+Scroll = zoom, plain scroll = horizontal scroll
+  useEffect(() => {
+    const el = scrollAreaRef.current;
+    if (!el) return;
+
+    const handler = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -10 : +10;
+        setBarPx(prev => Math.round(Math.max(20, Math.min(200, prev + delta)) / 10) * 10);
+      } else {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
+
   const handleDragStart = (index: number, e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', String(index));
@@ -256,14 +343,14 @@ export function TrackTimeline() {
   // Calculate playhead position
   const playheadX =
     trackPosition >= 0 && arrangement.length > 0
-      ? arrangement.slice(0, trackPosition).reduce((sum, step) => sum + step.bars * BAR_PX, 0)
+      ? arrangement.slice(0, trackPosition).reduce((sum, step) => sum + step.bars * barPx, 0)
       : 0;
 
   // Show all scenes - they can be added multiple times to the arrangement
   const availableScenes = scenes;
 
   return (
-    <div className="flex flex-col h-[200px] bg-background border-t border-border">
+    <div className="flex flex-col bg-background border-t border-border">
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-background/50">
         {/* Add Scene Button */}
@@ -327,12 +414,32 @@ export function TrackTimeline() {
             </button>
           ))}
         </div>
+
+        {/* Zoom controls */}
+        <div className="flex items-center gap-1 ml-auto flex-shrink-0">
+          <button
+            onClick={() => zoom(-10)}
+            className="px-2 py-1 text-xs rounded hover:bg-white/10 transition-colors font-semibold"
+            title="Zoom out (Ctrl+-)"
+          >
+            −
+          </button>
+          <span className="text-xs font-mono w-8 text-center text-muted-foreground">{barPx}</span>
+          <button
+            onClick={() => zoom(+10)}
+            className="px-2 py-1 text-xs rounded hover:bg-white/10 transition-colors font-semibold"
+            title="Zoom in (Ctrl++)"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {/* Timeline scroll area */}
       <div
         ref={scrollAreaRef}
-        className="flex-1 overflow-x-auto overflow-y-hidden bg-background/50 relative"
+        className="overflow-x-auto overflow-y-hidden bg-background/50 relative flex-shrink-0"
+        style={{ height: BLOCK_H + 20 }}
       >
         {/* Playhead */}
         {trackPosition >= 0 && arrangement.length > 0 && (
@@ -371,6 +478,7 @@ export function TrackTimeline() {
                     isPlaying={trackPosition === idx}
                     occurrenceIndex={occurrenceIndex}
                     totalOccurrences={totalOccurrences}
+                    barPx={barPx}
                     onSelect={() => {
                       setSelectedStepId(step.id);
                       selectScene(step.sceneId);
