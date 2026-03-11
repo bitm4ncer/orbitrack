@@ -342,8 +342,6 @@ export class SynthEngine {
     const gainScale = velocity !== undefined ? Math.max(0, velocity / 127) : 1;
     voice.trigger(midiNote, now, 10, p, gainScale); // 10s sustain — noteOff stops it
     this._lastLiveVoice = voice;
-    const voiceIndex = this.voices.indexOf(voice);
-    console.log(`[Synth] Triggered note ${midiNote} on voice ${voiceIndex}`);
     this.scheduleFilterEnv(now, 10);
   }
 
@@ -363,12 +361,10 @@ export class SynthEngine {
     const now = this.ac.currentTime + 0.01;
     for (const voice of this.voices) {
       if (voice.currentMidiNote === midiNote && !voice.isIdle(now)) {
-        console.log(`[Synth] Released note ${midiNote}`);
         voice.silence(now);
         return;
       }
     }
-    console.log(`[Synth] WARNING: No active voice found for note ${midiNote}`);
   }
 
   noteStop(): void {

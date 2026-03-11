@@ -3,6 +3,7 @@
 import { useStore } from '../state/store';
 import { onMidiCC, onMidiNote, isMidiEnabled } from './midiController';
 import { getSynthEngine } from './synthManager';
+import { triggerSample } from './sampler';
 import type { MidiCCMapping, MidiNoteMapping } from '../types/midi';
 
 let unsubscribeCC: (() => void) | null = null;
@@ -67,7 +68,19 @@ function routeMidiNote(noteNumber: number, velocity: number): void {
         heldMidiNotes.set(noteNumber, noteNumber);
         engine.noteOnNow(noteNumber, velocity);
       } else {
-        // Note off - just remove from tracking, synth ADSR handles release
+        // Note off - release the synth voice
+        heldMidiNotes.delete(noteNumber);
+        if (heldMidiNotes.size === 0) {
+          engine.noteOff();
+        }
+      }
+    } else if (inst.type === 'sampler' && inst.sampleName) {
+      if (velocity > 0) {
+        // Note on - trigger sample with velocity-scaled volume
+        heldMidiNotes.set(noteNumber, noteNumber);
+        triggerSample(inst.sampleName, undefined, inst.volume * velocity, 1.0);
+      } else {
+        // Note off - just remove from tracking (sample plays to completion)
         heldMidiNotes.delete(noteNumber);
       }
     }

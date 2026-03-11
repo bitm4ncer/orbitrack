@@ -127,10 +127,13 @@ export function usePianoKeyboard(): void {
 
         if (inst.type === 'synth') {
           const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-          engine.noteOnNow(midiNote, velocityRef.current);
+          const gainScale = velocityRef.current / 127;
+          engine.noteOnNow(midiNote, gainScale);
           heldKeysRef.current.set(keyCode, midiNote);
         } else if (inst.type === 'sampler' && inst.sampleName) {
-          triggerSample(inst.sampleName, undefined, inst.volume, 1.0);
+          // Apply velocity scaling to sample volume
+          const gainScale = velocityRef.current / 127;
+          triggerSample(inst.sampleName, undefined, inst.volume * gainScale, 1.0);
         }
       } catch (err) {
         console.error('Piano keyboard: failed to trigger note:', err);
@@ -150,9 +153,12 @@ export function usePianoKeyboard(): void {
 
           if (!inst || !audioInitializedRef.current) return;
 
-          // For synths: just remove from tracking, synth handles polyphony and ADSR naturally
-          // For samplers: nothing to do on key up
-          // The synth engine will let voices decay naturally via their ADSR envelopes
+          // For synths: release the note if there are no more keys held
+          if (inst.type === 'synth' && heldKeysRef.current.size === 0) {
+            const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
+            engine.noteOff();
+          }
+          // For samplers: nothing to do on key up (sample plays to completion)
         } catch (err) {
           console.error('Piano keyboard: failed on key release:', err);
         }
