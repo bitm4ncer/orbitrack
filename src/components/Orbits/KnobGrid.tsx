@@ -117,7 +117,7 @@ function AddInstrumentCard() {
   return (
     <div
       className="knob-cell flex flex-col items-center justify-center gap-4 p-4 rounded-lg select-none"
-      style={{ background: 'rgba(255,255,255,0.08)', border: 'none' }}
+      style={{ background: 'rgba(0,0,0,0.25)', border: 'none' }}
     >
       {/* 3 big buttons */}
       <div className="w-full flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
@@ -131,19 +131,19 @@ function AddInstrumentCard() {
             onClick={() => createInstrument(type)}
             className="text-[13px] uppercase tracking-wider transition-all cursor-pointer font-medium w-full"
             style={{
-              color: '#999',
-              border: '1px solid rgba(255,255,255,0.12)',
-              background: 'rgba(255,255,255,0.04)',
+              color: '#777',
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(0,0,0,0.2)',
               padding: '12px 16px',
               borderRadius: '6px',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-              e.currentTarget.style.color = '#aaa';
+              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+              e.currentTarget.style.color = '#888';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
-              e.currentTarget.style.color = '#999';
+              e.currentTarget.style.background = 'rgba(0,0,0,0.2)';
+              e.currentTarget.style.color = '#777';
             }}
           >
             {label}
