@@ -242,9 +242,19 @@ function ShareMenu({ anchorRef }: { anchorRef: React.RefObject<HTMLButtonElement
               ? 'bg-green-500/20 text-green-400 border border-green-500/40'
               : copyStatus === 'error'
                 ? 'bg-red-500/20 text-red-400 border border-red-500/40'
-                : 'bg-accent/20 text-accent border border-accent/40 hover:bg-accent/30'
-          }
-          disabled:opacity-50`}
+                : 'border disabled:opacity-50'
+          }`}
+        style={
+          copyStatus !== 'copied' && copyStatus !== 'error'
+            ? {
+                backgroundColor: '#c1eeca',
+                color: '#1a1a1a',
+                borderColor: '#a8dab0',
+              }
+            : copyStatus === 'copied'
+              ? {}
+              : {}
+        }
       >
         {copyLabel}
       </button>

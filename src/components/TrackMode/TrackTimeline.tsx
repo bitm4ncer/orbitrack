@@ -298,17 +298,19 @@ export function TrackTimeline() {
         {/* Scene palette chips */}
         <div className="flex items-center gap-1 flex-1 overflow-x-auto">
           {scenes.map((scene) => (
-            <div
+            <button
               key={scene.id}
-              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap cursor-default transition-colors hover:opacity-80"
+              onClick={() => handleAddScene(scene.id)}
+              className="px-2 py-1 rounded text-xs font-medium whitespace-nowrap transition-colors hover:opacity-100 cursor-pointer active:scale-95"
               style={{
                 backgroundColor: scene.color + '4d',
                 color: 'white',
+                opacity: 0.75,
               }}
-              title={scene.name}
+              title={`Click to add "${scene.name}" to arrangement`}
             >
               {scene.name}
-            </div>
+            </button>
           ))}
         </div>
       </div>
