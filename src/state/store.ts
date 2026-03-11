@@ -33,7 +33,7 @@ import { createSceneBus, routeOrbitToScene, unrouteOrbitFromScene, destroySceneB
 import { fetchSampleTree, type SampleEntry } from '../audio/sampleApi';
 import { removeSynthEngine } from '../audio/synthManager';
 import type { MidiSettings } from '../types/midi';
-import { DEFAULT_MIDI_SETTINGS } from '../types/midi';
+import { saveMidiSettings, loadMidiSettings } from '../storage/midiSettingsStorage';
 
 // LLM Generation settings types
 export type LLMEndpointType = 'none' | 'ollama' | 'claude' | 'custom';
@@ -456,7 +456,7 @@ export const useStore = create<StoreState>((set, get) => ({
   masterEffects: [],
   masterVolume: 0.8,
   genSettings: DEFAULT_GEN_SETTINGS,
-  midiSettings: DEFAULT_MIDI_SETTINGS,
+  midiSettings: loadMidiSettings(),
 
   // Transport actions
   setBpm: (bpm: number) => set({ bpm }),
@@ -1186,9 +1186,11 @@ export const useStore = create<StoreState>((set, get) => ({
     genSettings: { ...state.genSettings, ...settings },
   })),
 
-  setMidiSettings: (settings) => set((state) => ({
-    midiSettings: { ...state.midiSettings, ...settings },
-  })),
+  setMidiSettings: (settings) => set((state) => {
+    const newSettings = { ...state.midiSettings, ...settings };
+    saveMidiSettings(newSettings);
+    return { midiSettings: newSettings };
+  }),
 
   // ── Group actions ──────────────────────────────────────────────────────────
 

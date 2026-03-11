@@ -219,10 +219,9 @@ export function GridSequencer() {
   const totalSteps = loopSize;
   const gridRes = gridResolution;
 
-  // 2 octaves of MIDI notes, from high to low — filtered by scale
-  const startNote = (octaveOffset + 1) * 12;
+  // All MIDI octaves (0-127), from high to low — filtered by scale
   const allRows: number[] = [];
-  for (let i = 23; i >= 0; i--) allRows.push(startNote + i);
+  for (let i = 127; i >= 0; i--) allRows.push(i);
   const isChromatic = scaleType === 'chromatic';
   const rows = isChromatic ? allRows : allRows.filter((n) => isNoteInScale(n, scaleRoot, scaleType));
 
@@ -839,7 +838,6 @@ export function GridSequencer() {
           {scaleSelector}
           <div className="ml-auto flex items-center gap-1">
             <span className="text-[10px] text-text-secondary mr-2">{loopSize} steps</span>
-            {octaveButtons}
           </div>
         </div>
 

@@ -148,7 +148,7 @@ export function usePianoKeyboard(): void {
             const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
 
             if (heldKeysRef.current.size > 0) {
-              // Retrigger last held key
+              // Retrigger last held key without calling noteOff first
               const lastKey = Array.from(heldKeysRef.current.keys()).pop();
               if (lastKey) {
                 const midiNote = heldKeysRef.current.get(lastKey)!;

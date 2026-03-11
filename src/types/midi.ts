@@ -13,12 +13,12 @@ export type MidiTargetType =
 export interface MidiCCMapping {
   cc: number;
   targetType: MidiTargetType;
-  orbitIndex?: number;     // For orbit-specific targets
-  effectIndex?: number;    // For effect-specific targets
-  paramName?: string;      // 'wet', 'rate', etc.
-  minValue: number;        // Mapped minimum (e.g., 0 for volume)
-  maxValue: number;        // Mapped maximum (e.g., 1 for volume, 200 for BPM)
-  deviceId?: string;       // Optional: lock to specific device
+  orbitIndex?: number;
+  effectIndex?: number;
+  paramName?: string;
+  minValue: number;
+  maxValue: number;
+  deviceId?: string;
 }
 
 export interface MidiNoteMapping {
@@ -52,7 +52,6 @@ export const DEFAULT_MIDI_SETTINGS: MidiSettings = {
   midiInputDeviceId: null,
   midiOutputDeviceId: null,
   ccMappings: [
-    // Default mappings: CC 1 → Master Volume, CC 74 → Filter Cutoff on first orbit
     {
       cc: 1,
       targetType: 'masterVolume',
