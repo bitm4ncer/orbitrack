@@ -3,6 +3,8 @@ import * as Tone from 'tone';
 import { PASTEL_COLORS } from '../canvas/colors';
 import type { Instrument } from '../types/instrument';
 import type { Effect, EffectType } from '../types/effects';
+import type { InstrumentGroup } from '../types/group';
+import { GROUP_COLORS } from '../types/group';
 import type { SuperdoughSynthParams, SuperdoughSamplerParams } from '../types/superdough';
 import type { SynthParams } from '../audio/synth/types';
 import { DEFAULT_SYNTH_PARAMS, DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
@@ -26,7 +28,29 @@ import {
   type StoredRecording,
 } from '../storage/recordingStore';
 import { postSync } from '../storage/recordingSync';
+import { createGroupBus, routeOrbitToGroup, unrouteOrbitFromGroup, destroyGroupBus, destroyAllGroupBuses, initGroupBusesFromState } from '../audio/groupBus';
 import { fetchSampleTree, type SampleEntry } from '../audio/sampleApi';
+
+// LLM Generation settings types
+export type LLMEndpointType = 'none' | 'ollama' | 'claude' | 'custom';
+
+export interface GenSettings {
+  endpointType: LLMEndpointType;
+  ollamaModel: string;
+  ollamaUrl: string;
+  customUrl: string;
+  claudeModel: string;
+  streamingEnabled: boolean;
+}
+
+export const DEFAULT_GEN_SETTINGS: GenSettings = {
+  endpointType: 'none',
+  ollamaModel: 'llama3.2',
+  ollamaUrl: 'http://localhost:11434',
+  customUrl: '',
+  claudeModel: 'claude-3-5-haiku-20241022',
+  streamingEnabled: false,
+};
 
 function generateEvenHits(count: number): number[] {
   return Array.from({ length: count }, (_, i) => i / count);
@@ -136,6 +160,13 @@ export interface StoreState {
   // Instruments
   instruments: Instrument[];
   selectedInstrumentId: string | null;
+  selectedInstrumentIds: string[];
+  selectedGroupId: string | null;
+  renamingId: string | null;          // ID of instrument or group currently being renamed
+
+  // Groups
+  groups: InstrumentGroup[];
+  groupEffects: Record<string, Effect[]>;
 
   // Transport actions
   setBpm: (bpm: number) => void;
@@ -153,6 +184,7 @@ export interface StoreState {
   removeHit: (id: string, hitIndex: number) => void;
   moveSamplerNoteToStep: (id: string, fromStep: number, toStep: number, midiNote: number) => void;
   selectInstrument: (id: string | null) => void;
+  toggleSelectInstrument: (id: string) => void;
   toggleMute: (id: string) => void;
   toggleSolo: (id: string) => void;
   removeInstrument: (id: string) => void;
@@ -243,6 +275,23 @@ export interface StoreState {
 
   setMasterVolume: (vol: number) => void;
 
+  // Group actions
+  groupSelected: () => void;
+  ungroupSelected: () => void;
+  selectGroup: (groupId: string | null) => void;
+  toggleGroupMute: (groupId: string) => void;
+  toggleGroupSolo: (groupId: string) => void;
+  setGroupVolume: (groupId: string, volume: number) => void;
+  toggleGroupCollapsed: (groupId: string) => void;
+  renameGroup: (groupId: string, name: string) => void;
+  setRenamingId: (id: string | null) => void;
+  addGroupEffect: (groupId: string, type: EffectType) => void;
+  removeGroupEffect: (groupId: string, effectId: string) => void;
+  setGroupEffectParam: (groupId: string, effectId: string, key: string, value: number) => void;
+  toggleGroupEffectEnabled: (groupId: string, effectId: string) => void;
+  toggleGroupEffectCollapsed: (groupId: string, effectId: string) => void;
+  reorderGroupEffects: (groupId: string, fromIdx: number, toIdx: number) => void;
+
   // Recording
   isRecording: boolean;
   recordings: StoredRecording[];
@@ -283,6 +332,10 @@ export interface StoreState {
   setDetectedBpm: (instrumentId: string, bpm: number) => void;
   setLooperBpmMultiplier: (instrumentId: string, multiplier: number) => void;
 
+  // Generation settings (LLM endpoints, etc.)
+  genSettings: GenSettings;
+  setGenSettings: (settings: Partial<GenSettings>) => void;
+
   // Set (project) management
   currentSetId: string | null;
   currentSetName: string;
@@ -295,6 +348,9 @@ export interface StoreState {
     gridGlide: Record<string, boolean[]>;
     gridLengths: Record<string, number[]>;
     instrumentEffects: Record<string, Effect[]>;
+    masterEffects: Effect[];
+    groups: InstrumentGroup[];
+    groupEffects: Record<string, Effect[]>;
     customSamples: { key: string; url: string; name: string }[];
   };
   loadSet: (set: OrbeatSet) => void;
@@ -311,6 +367,13 @@ export const useStore = create<StoreState>((set, get) => ({
   // Instruments
   instruments: defaultInstruments,
   selectedInstrumentId: null,
+  selectedInstrumentIds: [],
+  selectedGroupId: null,
+  renamingId: null,
+
+  // Groups
+  groups: [],
+  groupEffects: {},
 
   // Grid sequencer — pre-populate C4 (MIDI 60) for all default instrument hits
   gridNotes: (() => {
@@ -350,6 +413,7 @@ export const useStore = create<StoreState>((set, get) => ({
   instrumentEffects: {},
   masterEffects: [],
   masterVolume: 0.8,
+  genSettings: DEFAULT_GEN_SETTINGS,
 
   // Transport actions
   setBpm: (bpm) => set({ bpm }),
@@ -503,7 +567,23 @@ export const useStore = create<StoreState>((set, get) => ({
       return { instruments: newInstruments, gridNotes: grid, gridGlide: gGlide, gridLengths: gLengths };
     }),
 
-  selectInstrument: (id) => set({ selectedInstrumentId: id }),
+  selectInstrument: (id) => set({
+    selectedInstrumentId: id,
+    selectedInstrumentIds: id ? [id] : [],
+    selectedGroupId: null,
+  }),
+
+  toggleSelectInstrument: (id) =>
+    set((s) => {
+      const ids = s.selectedInstrumentIds.includes(id)
+        ? s.selectedInstrumentIds.filter((x) => x !== id)
+        : [...s.selectedInstrumentIds, id];
+      return {
+        selectedInstrumentIds: ids,
+        selectedInstrumentId: ids[ids.length - 1] ?? null,
+        selectedGroupId: null,
+      };
+    }),
 
   toggleMute: (id) =>
     set((s) => ({
@@ -519,24 +599,54 @@ export const useStore = create<StoreState>((set, get) => ({
       ),
     })),
 
-  removeInstrument: (id) =>
-    set((s) => {
-      const instruments = s.instruments.filter((i) => i.id !== id);
-      const { [id]: _gn, ...gridNotes } = s.gridNotes;
-      const { [id]: _gg, ...gridGlide } = s.gridGlide;
-      const { [id]: _gl, ...gridLengths } = s.gridLengths;
-      const { [id]: _fx, ...instrumentEffects } = s.instrumentEffects;
-      const { [id]: _le, ...looperEditors } = s.looperEditors;
-      return {
-        instruments,
-        gridNotes,
-        gridGlide,
-        gridLengths,
-        instrumentEffects,
-        looperEditors,
-        selectedInstrumentId: s.selectedInstrumentId === id ? null : s.selectedInstrumentId,
-      };
-    }),
+  removeInstrument: (id) => {
+    const s = get();
+    const inst = s.instruments.find((i) => i.id === id);
+    // Unroute from group bus if grouped
+    if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+    const instruments = s.instruments.filter((i) => i.id !== id);
+    const { [id]: _gn, ...gridNotes } = s.gridNotes;
+    const { [id]: _gg, ...gridGlide } = s.gridGlide;
+    const { [id]: _gl, ...gridLengths } = s.gridLengths;
+    const { [id]: _fx, ...instrumentEffects } = s.instrumentEffects;
+    const { [id]: _le, ...looperEditors } = s.looperEditors;
+    // Remove from any group; dissolve groups with <2 members
+    let groups = s.groups.map((g) =>
+      g.instrumentIds.includes(id)
+        ? { ...g, instrumentIds: g.instrumentIds.filter((x) => x !== id) }
+        : g
+    );
+    const dissolvedIds = groups.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
+    groups = groups.filter((g) => g.instrumentIds.length >= 2);
+    const groupEffects = { ...s.groupEffects };
+    for (const did of dissolvedIds) {
+      // Unroute remaining members and destroy dissolved bus
+      const oldGroup = s.groups.find((g) => g.id === did);
+      if (oldGroup) {
+        for (const instId of oldGroup.instrumentIds) {
+          if (instId !== id) {
+            const member = s.instruments.find((i) => i.id === instId);
+            if (member) unrouteOrbitFromGroup(member.orbitIndex);
+          }
+        }
+      }
+      destroyGroupBus(did);
+      delete groupEffects[did];
+    }
+    set({
+      instruments,
+      gridNotes,
+      gridGlide,
+      gridLengths,
+      instrumentEffects,
+      looperEditors,
+      groups,
+      groupEffects,
+      selectedInstrumentId: s.selectedInstrumentId === id ? null : s.selectedInstrumentId,
+      selectedInstrumentIds: s.selectedInstrumentIds.filter((x) => x !== id),
+      selectedGroupId: dissolvedIds.includes(s.selectedGroupId ?? '') ? null : s.selectedGroupId,
+    });
+  },
 
   duplicateInstrument: (id) =>
     set((s) => {
@@ -861,20 +971,11 @@ export const useStore = create<StoreState>((set, get) => ({
   addEffect: (instrumentId, type) =>
     set((s) => {
       const EFFECT_LABELS: Partial<Record<EffectType, string>> = {
-        eq3: 'EQ 3-Band',
-        reverb: 'Reverb',
-        delay: 'Delay',
-        compressor: 'Compressor',
-        chorus: 'Chorus',
-        phaser: 'Phaser',
-        distortion: 'Distortion',
-        filter: 'Filter',
-        bitcrusher: 'Bit Crusher',
-        parame: 'Param EQ',
-        tremolo: 'Tremolo',
-        ringmod: 'Ring Mod',
-        trancegate: 'Orb Gate',
-        pingpong: 'Ping Pong',
+        eq3: 'EQ 3-Band', reverb: 'Reverb', delay: 'Delay', compressor: 'Compressor',
+        chorus: 'Chorus', phaser: 'Phaser', distortion: 'Distortion', filter: 'Filter',
+        bitcrusher: 'Bit Crusher', parame: 'Param EQ', tremolo: 'Tremolo', ringmod: 'Ring Mod',
+        trancegate: 'Orb Gate', limiter: 'Limiter', drumbuss: 'Drum Buss',
+        stereoimage: 'Stereo Image',
       };
       const effect: Effect = {
         id: createId(),
@@ -884,6 +985,11 @@ export const useStore = create<StoreState>((set, get) => ({
         params: DEFAULT_EFFECT_PARAMS(type),
         collapsed: false,
       };
+      if (instrumentId.startsWith('__group_')) {
+        const gid = instrumentId.slice(8, -2);
+        const prev = s.groupEffects[gid] ?? [];
+        return { groupEffects: { ...s.groupEffects, [gid]: [...prev, effect] } };
+      }
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return { instrumentEffects: { ...s.instrumentEffects, [instrumentId]: [...prev, effect] } };
     }),
@@ -894,7 +1000,7 @@ export const useStore = create<StoreState>((set, get) => ({
         eq3: 'EQ 3-Band', reverb: 'Reverb', delay: 'Delay', compressor: 'Compressor',
         chorus: 'Chorus', phaser: 'Phaser', distortion: 'Distortion', filter: 'Filter',
         bitcrusher: 'Bit Crusher', parame: 'Param EQ', tremolo: 'Tremolo', ringmod: 'Ring Mod',
-        trancegate: 'Orb Gate', pingpong: 'Ping Pong',
+        trancegate: 'Orb Gate',
       };
       const effect: Effect = {
         id: createId(),
@@ -911,6 +1017,11 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       if (instrumentId === '__master__')
         return { masterEffects: s.masterEffects.filter((e) => e.id !== effectId) };
+      if (instrumentId.startsWith('__group_')) {
+        const gid = instrumentId.slice(8, -2);
+        const prev = s.groupEffects[gid] ?? [];
+        return { groupEffects: { ...s.groupEffects, [gid]: prev.filter((e) => e.id !== effectId) } };
+      }
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
         instrumentEffects: {
@@ -924,6 +1035,11 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       if (instrumentId === '__master__')
         return { masterEffects: s.masterEffects.map((e) => e.id === effectId ? { ...e, params: { ...e.params, [key]: value } } : e) };
+      if (instrumentId.startsWith('__group_')) {
+        const gid = instrumentId.slice(8, -2);
+        const prev = s.groupEffects[gid] ?? [];
+        return { groupEffects: { ...s.groupEffects, [gid]: prev.map((e) => e.id === effectId ? { ...e, params: { ...e.params, [key]: value } } : e) } };
+      }
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
         instrumentEffects: {
@@ -939,6 +1055,11 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       if (instrumentId === '__master__')
         return { masterEffects: s.masterEffects.map((e) => e.id === effectId ? { ...e, enabled: !e.enabled } : e) };
+      if (instrumentId.startsWith('__group_')) {
+        const gid = instrumentId.slice(8, -2);
+        const prev = s.groupEffects[gid] ?? [];
+        return { groupEffects: { ...s.groupEffects, [gid]: prev.map((e) => e.id === effectId ? { ...e, enabled: !e.enabled } : e) } };
+      }
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
         instrumentEffects: {
@@ -952,6 +1073,11 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       if (instrumentId === '__master__')
         return { masterEffects: s.masterEffects.map((e) => e.id === effectId ? { ...e, collapsed: !e.collapsed } : e) };
+      if (instrumentId.startsWith('__group_')) {
+        const gid = instrumentId.slice(8, -2);
+        const prev = s.groupEffects[gid] ?? [];
+        return { groupEffects: { ...s.groupEffects, [gid]: prev.map((e) => e.id === effectId ? { ...e, collapsed: !e.collapsed } : e) } };
+      }
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
         instrumentEffects: {
@@ -969,6 +1095,13 @@ export const useStore = create<StoreState>((set, get) => ({
         effects.splice(toIdx, 0, item);
         return { masterEffects: effects };
       }
+      if (instrumentId.startsWith('__group_')) {
+        const gid = instrumentId.slice(8, -2);
+        const effects = [...(s.groupEffects[gid] ?? [])];
+        const [item] = effects.splice(fromIdx, 1);
+        effects.splice(toIdx, 0, item);
+        return { groupEffects: { ...s.groupEffects, [gid]: effects } };
+      }
       const effects = [...(s.instrumentEffects[instrumentId] ?? [])];
       const [item] = effects.splice(fromIdx, 1);
       effects.splice(toIdx, 0, item);
@@ -976,6 +1109,248 @@ export const useStore = create<StoreState>((set, get) => ({
     }),
 
   setMasterVolume: (masterVolume) => set({ masterVolume }),
+
+  setGenSettings: (settings) => set((state) => ({
+    genSettings: { ...state.genSettings, ...settings },
+  })),
+
+  // ── Group actions ──────────────────────────────────────────────────────────
+
+  groupSelected: () => {
+    const s = get();
+    const ids = s.selectedInstrumentIds;
+    if (ids.length < 2) return;
+    // Remove selected instruments from any existing groups — unroute from old buses
+    const oldGroups = s.groups;
+    for (const g of oldGroups) {
+      for (const instId of g.instrumentIds) {
+        if (ids.includes(instId)) {
+          const inst = s.instruments.find((i) => i.id === instId);
+          if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+        }
+      }
+    }
+    let groups = oldGroups.map((g) => ({
+      ...g,
+      instrumentIds: g.instrumentIds.filter((x) => !ids.includes(x)),
+    }));
+    // Dissolve groups that became too small
+    const dissolvedIds = groups.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
+    groups = groups.filter((g) => g.instrumentIds.length >= 2);
+    const groupEffects = { ...s.groupEffects };
+    for (const did of dissolvedIds) {
+      delete groupEffects[did];
+      // Unroute remaining members of dissolved groups
+      const oldGroup = oldGroups.find((g) => g.id === did);
+      if (oldGroup) {
+        for (const instId of oldGroup.instrumentIds) {
+          if (!ids.includes(instId)) {
+            const inst = s.instruments.find((i) => i.id === instId);
+            if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+          }
+        }
+      }
+      destroyGroupBus(did);
+    }
+    // Create new group
+    const groupId = createId();
+    const usedColors = groups.map((g) => g.color);
+    const color = GROUP_COLORS.find((c) => !usedColors.includes(c)) ?? GROUP_COLORS[groups.length % GROUP_COLORS.length];
+    const newGroup: InstrumentGroup = {
+      id: groupId,
+      name: `Group ${groups.length + 1}`,
+      color,
+      instrumentIds: [...ids],
+      muted: false,
+      solo: false,
+      volume: 0,
+      collapsed: false,
+    };
+    groups = [...groups, newGroup];
+    groupEffects[groupId] = [];
+    // Reorder instruments so grouped instruments are adjacent
+    const instruments = [...s.instruments];
+    const grouped = ids.map((id) => instruments.find((i) => i.id === id)!).filter(Boolean);
+    const rest = instruments.filter((i) => !ids.includes(i.id));
+    const firstIdx = instruments.findIndex((i) => ids.includes(i.id));
+    const before = rest.filter((_, idx) => {
+      const origIdx = instruments.indexOf(rest[idx]);
+      return origIdx < firstIdx;
+    });
+    const after = rest.filter((i) => !before.includes(i));
+    set({
+      instruments: [...before, ...grouped, ...after],
+      groups,
+      groupEffects,
+      selectedGroupId: groupId,
+    });
+    // Wire audio: create group bus and route orbits
+    createGroupBus(groupId);
+    for (const instId of ids) {
+      const inst = s.instruments.find((i) => i.id === instId);
+      if (inst) routeOrbitToGroup(inst.orbitIndex, groupId);
+    }
+  },
+
+  ungroupSelected: () => {
+    const s = get();
+    const groupEffects = { ...s.groupEffects };
+    // If a group is selected, dissolve it entirely
+    if (s.selectedGroupId) {
+      const group = s.groups.find((g) => g.id === s.selectedGroupId);
+      if (group) {
+        for (const instId of group.instrumentIds) {
+          const inst = s.instruments.find((i) => i.id === instId);
+          if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+        }
+        destroyGroupBus(s.selectedGroupId);
+      }
+      const groups = s.groups.filter((g) => g.id !== s.selectedGroupId);
+      delete groupEffects[s.selectedGroupId];
+      set({ groups, groupEffects, selectedGroupId: null });
+      return;
+    }
+    // Otherwise, remove selected instruments from their groups
+    const ids = s.selectedInstrumentIds;
+    if (ids.length === 0) return;
+    // Unroute selected instruments
+    for (const instId of ids) {
+      const inst = s.instruments.find((i) => i.id === instId);
+      if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+    }
+    let groups = s.groups.map((g) => ({
+      ...g,
+      instrumentIds: g.instrumentIds.filter((x) => !ids.includes(x)),
+    }));
+    const dissolvedIds = groups.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
+    groups = groups.filter((g) => g.instrumentIds.length >= 2);
+    for (const did of dissolvedIds) {
+      delete groupEffects[did];
+      // Unroute remaining members and destroy dissolved bus
+      const oldGroup = s.groups.find((g) => g.id === did);
+      if (oldGroup) {
+        for (const instId of oldGroup.instrumentIds) {
+          if (!ids.includes(instId)) {
+            const inst = s.instruments.find((i) => i.id === instId);
+            if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+          }
+        }
+      }
+      destroyGroupBus(did);
+    }
+    set({
+      groups,
+      groupEffects,
+      selectedGroupId: dissolvedIds.includes(s.selectedGroupId ?? '') ? null : s.selectedGroupId,
+    });
+  },
+
+  selectGroup: (groupId) =>
+    set((s) => {
+      if (!groupId) return { selectedGroupId: null };
+      const group = s.groups.find((g) => g.id === groupId);
+      if (!group) return { selectedGroupId: null };
+      return {
+        selectedGroupId: groupId,
+        selectedInstrumentIds: [...group.instrumentIds],
+        selectedInstrumentId: group.instrumentIds[0] ?? null,
+      };
+    }),
+
+  toggleGroupMute: (groupId) =>
+    set((s) => ({
+      groups: s.groups.map((g) => g.id === groupId ? { ...g, muted: !g.muted } : g),
+    })),
+
+  toggleGroupSolo: (groupId) =>
+    set((s) => ({
+      groups: s.groups.map((g) => g.id === groupId ? { ...g, solo: !g.solo } : g),
+    })),
+
+  setGroupVolume: (groupId, volume) =>
+    set((s) => ({
+      groups: s.groups.map((g) => g.id === groupId ? { ...g, volume } : g),
+    })),
+
+  toggleGroupCollapsed: (groupId) =>
+    set((s) => ({
+      groups: s.groups.map((g) => g.id === groupId ? { ...g, collapsed: !g.collapsed } : g),
+    })),
+
+  renameGroup: (groupId, name) =>
+    set((s) => ({
+      groups: s.groups.map((g) => g.id === groupId ? { ...g, name } : g),
+    })),
+
+  setRenamingId: (id) => set({ renamingId: id }),
+
+  addGroupEffect: (groupId, type) =>
+    set((s) => {
+      const EFFECT_LABELS: Partial<Record<EffectType, string>> = {
+        eq3: 'EQ 3-Band', reverb: 'Reverb', delay: 'Delay', compressor: 'Compressor',
+        chorus: 'Chorus', phaser: 'Phaser', distortion: 'Distortion', filter: 'Filter',
+        bitcrusher: 'Bit Crusher', parame: 'Param EQ', tremolo: 'Tremolo', ringmod: 'Ring Mod',
+        trancegate: 'Orb Gate', limiter: 'Limiter', drumbuss: 'Drum Buss',
+        stereoimage: 'Stereo Image',
+      };
+      const effect: Effect = {
+        id: createId(),
+        type,
+        label: EFFECT_LABELS[type] ?? type,
+        enabled: true,
+        params: DEFAULT_EFFECT_PARAMS(type),
+        collapsed: false,
+      };
+      const prev = s.groupEffects[groupId] ?? [];
+      return { groupEffects: { ...s.groupEffects, [groupId]: [...prev, effect] } };
+    }),
+
+  removeGroupEffect: (groupId, effectId) =>
+    set((s) => {
+      const prev = s.groupEffects[groupId] ?? [];
+      return { groupEffects: { ...s.groupEffects, [groupId]: prev.filter((e) => e.id !== effectId) } };
+    }),
+
+  setGroupEffectParam: (groupId, effectId, key, value) =>
+    set((s) => {
+      const prev = s.groupEffects[groupId] ?? [];
+      return {
+        groupEffects: {
+          ...s.groupEffects,
+          [groupId]: prev.map((e) => e.id === effectId ? { ...e, params: { ...e.params, [key]: value } } : e),
+        },
+      };
+    }),
+
+  toggleGroupEffectEnabled: (groupId, effectId) =>
+    set((s) => {
+      const prev = s.groupEffects[groupId] ?? [];
+      return {
+        groupEffects: {
+          ...s.groupEffects,
+          [groupId]: prev.map((e) => e.id === effectId ? { ...e, enabled: !e.enabled } : e),
+        },
+      };
+    }),
+
+  toggleGroupEffectCollapsed: (groupId, effectId) =>
+    set((s) => {
+      const prev = s.groupEffects[groupId] ?? [];
+      return {
+        groupEffects: {
+          ...s.groupEffects,
+          [groupId]: prev.map((e) => e.id === effectId ? { ...e, collapsed: !e.collapsed } : e),
+        },
+      };
+    }),
+
+  reorderGroupEffects: (groupId, fromIdx, toIdx) =>
+    set((s) => {
+      const effects = [...(s.groupEffects[groupId] ?? [])];
+      const [item] = effects.splice(fromIdx, 1);
+      effects.splice(toIdx, 0, item);
+      return { groupEffects: { ...s.groupEffects, [groupId]: effects } };
+    }),
 
   // Recording
   isRecording: false,
@@ -1645,11 +2020,17 @@ export const useStore = create<StoreState>((set, get) => ({
       gridGlide: s.gridGlide,
       gridLengths: s.gridLengths,
       instrumentEffects: s.instrumentEffects,
+      masterEffects: s.masterEffects,
+      groups: s.groups,
+      groupEffects: s.groupEffects,
       customSamples: s.customSamples,
     };
   },
 
   loadSet: (orbeatSet: OrbeatSet) => {
+    // Tear down existing group buses before loading new state
+    destroyAllGroupBuses();
+
     // Re-register custom samples from embedded data and pre-decode into superdough's buffer cache
     const customSamples: { key: string; url: string; name: string }[] = [];
     if (orbeatSet.customSamples) {
@@ -1683,10 +2064,15 @@ export const useStore = create<StoreState>((set, get) => ({
       gridGlide: orbeatSet.gridGlide,
       gridLengths: orbeatSet.gridLengths,
       instrumentEffects: orbeatSet.instrumentEffects,
+      masterEffects: orbeatSet.masterEffects ?? [],
+      groups: orbeatSet.groups ?? [],
+      groupEffects: orbeatSet.groupEffects ?? {},
       customSamples,
       currentSetId: orbeatSet.meta.id,
       currentSetName: orbeatSet.meta.name,
       selectedInstrumentId: orbeatSet.instruments[0]?.id ?? null,
+      selectedInstrumentIds: orbeatSet.instruments[0] ? [orbeatSet.instruments[0].id] : [],
+      selectedGroupId: null,
     });
 
     // Re-init looper editors — async decode + BPM detection
@@ -1714,9 +2100,15 @@ export const useStore = create<StoreState>((set, get) => ({
 
     // Clear undo history — new project context
     import('./undoHistory').then((m) => m.clearHistory());
+
+    // Re-initialize group buses from loaded state
+    if (orbeatSet.groups && orbeatSet.groups.length > 0) {
+      initGroupBusesFromState(orbeatSet.groups, orbeatSet.instruments);
+    }
   },
 
   newSet: () => {
+    destroyAllGroupBuses();
     orbitCounter = 0;
     const instruments = defaultInstruments.map((inst) => ({
       ...inst,
@@ -1736,10 +2128,15 @@ export const useStore = create<StoreState>((set, get) => ({
       gridGlide: {},
       gridLengths: {},
       instrumentEffects: {},
+      masterEffects: [],
+      groups: [],
+      groupEffects: {},
       customSamples: [],
       currentSetId: null,
       currentSetName: generateName(),
       selectedInstrumentId: null,
+      selectedInstrumentIds: [],
+      selectedGroupId: null,
       isPlaying: false,
       currentStep: -1,
       transportProgress: 0,

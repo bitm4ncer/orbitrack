@@ -12,7 +12,7 @@ export interface EffectParamDef {
 
 export const EFFECT_PARAM_DEFS: Partial<Record<EffectType, EffectParamDef[]>> & Record<
   'eq3'|'compressor'|'reverb'|'delay'|'chorus'|'phaser'|'distortion'|'filter'|
-  'bitcrusher'|'parame'|'tremolo'|'ringmod'|'trancegate'|'pingpong'|
+  'bitcrusher'|'parame'|'tremolo'|'ringmod'|'trancegate'|
   'limiter'|'drumbuss'|'stereoimage',
   EffectParamDef[]
 > = {
@@ -27,6 +27,9 @@ export const EFFECT_PARAM_DEFS: Partial<Record<EffectType, EffectParamDef[]>> & 
     { key: 'time',     label: 'Time',     min: 0.01, max: 2,     step: 0.001, defaultValue: 0.25, unit: 's' },
     { key: 'feedback', label: 'Feedback', min: 0,    max: 0.95,  step: 0.01,  defaultValue: 0.4 },
     { key: 'tone',     label: 'Hi-Cut',   min: 500,  max: 20000, step: 100,   defaultValue: 8000, unit: 'Hz' },
+    { key: 'mode',     label: 'Mode',     min: 0,    max: 4,     step: 1,     defaultValue: 0 },
+    { key: 'sync',     label: 'Sync',     min: 0,    max: 1,     step: 1,     defaultValue: 0 },
+    { key: 'syncDiv',  label: 'Division', min: 0,    max: 14,    step: 1,     defaultValue: 8 },
   ],
   eq3: [
     { key: 'low',     label: 'Low',      min: -18, max: 18,   step: 0.5, defaultValue: 0,    unit: 'dB' },
@@ -133,13 +136,6 @@ export const EFFECT_PARAM_DEFS: Partial<Record<EffectType, EffectParamDef[]>> & 
       key: `s${i}`, label: `S${i}`, min: 0, max: 1, step: 1, defaultValue: 1,
     })),
   ],
-  pingpong: [
-    { key: 'amount',   label: 'Mix',      min: 0,   max: 1,     step: 0.01,  defaultValue: 0.4 },
-    { key: 'time',     label: 'Time',     min: 0.01, max: 2,    step: 0.001, defaultValue: 0.25, unit: 's' },
-    { key: 'feedback', label: 'Feedback', min: 0,   max: 0.9,   step: 0.01,  defaultValue: 0.45 },
-    { key: 'tone',     label: 'Hi-Cut',   min: 500, max: 20000, step: 100,   defaultValue: 8000, unit: 'Hz' },
-    { key: 'spread',   label: 'Spread',   min: 0,   max: 1,     step: 0.01,  defaultValue: 1 },
-  ],
   limiter: [
     { key: 'ceiling', label: 'Ceiling', min: -12, max: 0,   step: 0.1,  defaultValue: -1.0, unit: 'dB' },
     { key: 'release', label: 'Release', min: 0.02, max: 1,  step: 0.01, defaultValue: 0.08, unit: 's' },
@@ -172,11 +168,31 @@ export const QUICK_PARAM_KEYS: Partial<Record<EffectType, string[]>> = {
   tremolo:    ['amount', 'rate'],
   ringmod:    ['frequency', 'amount'],
   trancegate:   ['amount', 'steps'],
-  pingpong:     ['amount', 'time', 'feedback'],
   limiter:      ['ceiling', 'release'],
   drumbuss:     ['drive', 'mix', 'compress'],
   stereoimage:  ['width', 'monoLow'],
 };
+
+/** Delay sync subdivision table — index maps to beat multiplier */
+export const DELAY_SYNC_DIVS: { label: string; mult: number }[] = [
+  { label: '1/32',  mult: 0.125 },
+  { label: '1/16T', mult: 1 / 6 },
+  { label: '1/16',  mult: 0.25 },
+  { label: '1/8T',  mult: 1 / 3 },
+  { label: '1/16D', mult: 0.375 },
+  { label: '1/8',   mult: 0.5 },
+  { label: '1/4T',  mult: 2 / 3 },
+  { label: '1/8D',  mult: 0.75 },
+  { label: '1/4',   mult: 1.0 },
+  { label: '1/2T',  mult: 4 / 3 },
+  { label: '1/4D',  mult: 1.5 },
+  { label: '1/2',   mult: 2.0 },
+  { label: '1/1T',  mult: 8 / 3 },
+  { label: '1/2D',  mult: 3.0 },
+  { label: '1/1',   mult: 4.0 },
+];
+
+export const DELAY_MODE_LABELS = ['Normal', 'Tape', 'Lo-Fi', 'Multi', 'P.Pong'];
 
 export function DEFAULT_EFFECT_PARAMS(type: EffectType): Record<string, number> {
   const defs = EFFECT_PARAM_DEFS[type as keyof typeof EFFECT_PARAM_DEFS];

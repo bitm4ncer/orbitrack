@@ -83,5 +83,31 @@ function applyGenreRules(hits: boolean[], genre: string, loopSize: number): void
         hits[i] = true;
       }
       break;
+
+    case 'trap':
+      // Sparse kick, let template dominate
+      hits[0] = true;
+      break;
+
+    case 'jungle':
+      // Preserve stochastic Amen feel from template
+      hits[0] = true;
+      break;
+
+    case 'garage':
+      // Ensure hit on 1 and 8 (2-step skippy feel)
+      hits[0] = true;
+      if (loopSize >= 16) hits[8] = true;
+      break;
+
+    case 'afrobeat':
+      // Preserve cross-rhythm character from template
+      hits[0] = true;
+      break;
+
+    case 'ambient':
+      // Very minimal - just hit on 1
+      hits[0] = true;
+      break;
   }
 }

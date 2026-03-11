@@ -190,8 +190,7 @@ export function LoopBrowser() {
       ref={containerRef}
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      className="bg-bg-secondary border-l border-border flex flex-col shrink-0 h-full min-h-0 outline-none overflow-hidden"
-      style={{ width: 300 }}
+      className="bg-bg-secondary border-l border-border flex flex-col shrink-0 h-full min-h-0 outline-none overflow-hidden w-full"
     >
       {/* Target + Looper params */}
       <div className="text-[9px] text-text-secondary px-4 pt-3 pb-1 shrink-0">
@@ -224,8 +223,6 @@ export function LoopBrowser() {
           <div className="flex gap-2 justify-around mt-3">
             <Knob label="Offset" value={lp.startOffset} min={0} max={1} decimals={2} color={color}
               onChange={(v) => updateLooperParams(selectedId, { startOffset: v })} />
-            <Knob label="Degrade" value={lp.degrade} min={0} max={1} decimals={2} color={color}
-              onChange={(v) => updateLooperParams(selectedId, { degrade: v })} />
           </div>
         </div>
       )}

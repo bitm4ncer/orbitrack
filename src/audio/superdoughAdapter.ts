@@ -76,6 +76,9 @@ export function triggerSuperdough(
     const speed = sp.speed * Math.pow(2, (midiNote - rootNote) / 12);
     const effectOverrides = getEffectOverrides(instrument, state);
 
+    // Enforce minimum release to prevent clicks
+    const safeRelease = Math.max(sp.release, 0.005);
+
     superdough({
       s: instrument.sampleName,
       gain: sp.gain * instGain,
@@ -83,7 +86,7 @@ export function triggerSuperdough(
       begin: sp.begin,
       end: sp.end,
       attack: sp.attack,
-      release: sp.release,
+      release: safeRelease,
       cutoff: sp.cutoff,
       resonance: sp.resonance,
       pan: (sp.pan + 1) / 2,
@@ -155,28 +158,6 @@ export function triggerLooperSlice(
   const safeAttack = Math.max(lp.attack, 0.002);
   const safeRelease = Math.max(lp.release, 0.005);
 
-  // Degrade: creative destruction via crush (bit depth), coarse (SR reduction), and shape (waveshaper)
-  // 0 = clean, 1 = maximum glitch. Three layers that progressively stack:
-  //   0.0–0.3: shape distortion (warm overdrive → harsh clip)
-  //   0.1–0.7: crush (bit reduction 16 → 2)
-  //   0.3–1.0: coarse (sample-rate reduction, extreme aliasing)
-  const degradeParams: Record<string, number> = {};
-  const deg = lp.degrade ?? 0;
-  if (deg > 0.01) {
-    // Layer 1: Waveshaper distortion — immediate audible grit
-    degradeParams.shape = deg * 0.8;
-    // Layer 2: Bit depth crush — 16 → 2
-    if (deg > 0.1) {
-      const crushNorm = (deg - 0.1) / 0.9;
-      degradeParams.crush = Math.max(2, Math.round(16 - crushNorm * 14));
-    }
-    // Layer 3: Sample rate reduction — kicks in at 30%, exponential ramp
-    if (deg > 0.3) {
-      const coarseNorm = (deg - 0.3) / 0.7;
-      degradeParams.coarse = Math.max(2, Math.round(2 + coarseNorm * coarseNorm * 48));
-    }
-  }
-
   const instGain = dbToLinear(instrument.volume);
   const effectOverrides = getEffectOverrides(instrument, state);
 
@@ -192,7 +173,6 @@ export function triggerLooperSlice(
     resonance: lp.resonance,
     pan: (lp.pan + 1) / 2,
     orbit: instrument.orbitIndex,
-    ...degradeParams,
     ...effectOverrides,
   }, safeTime(audioTime), availableSec);
 }

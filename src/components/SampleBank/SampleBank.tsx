@@ -3,6 +3,8 @@ import { useStore } from '../../state/store';
 import { fetchSampleTree, type SampleEntry } from '../../audio/sampleApi';
 import { previewSample, stopPreview } from '../../audio/sampler';
 import { WaveformView } from './WaveformView';
+import type { SuperdoughSamplerParams } from '../../types/superdough';
+import { DEFAULT_SAMPLER_PARAMS } from '../../types/superdough';
 
 // MIDI note number → label (C-1 = 0, C4 = 60, C8 = 108)
 function midiToLabel(note: number): string {
@@ -22,10 +24,11 @@ const ALIAS_PATHS: Record<string, string> = {
 // Circular SVG knob — border and indicator inherit color prop.
 // Drag: captures startY + startValue at mousedown so the stale-closure bug is avoided.
 // Text input: click the value label to type an exact number.
-function Knob({ label, value, min, max, step = 0.001, decimals = 2, unit = '', color, onChange }: {
+function Knob({ label, value, min, max, step = 0.001, decimals = 2, unit = '', color, onChange, onDragEnd }: {
   label: string; value: number; min: number; max: number;
   step?: number; decimals?: number; unit?: string; color: string;
   onChange: (v: number) => void;
+  onDragEnd?: (v: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
@@ -44,17 +47,20 @@ function Knob({ label, value, min, max, step = 0.001, decimals = 2, unit = '', c
     const startY = e.clientY;
     const startValue = value;
     const range = max - min;
+    let lastValue = value;
 
     const onMove = (ev: MouseEvent) => {
       const dy = startY - ev.clientY; // up = increase
       const delta = (dy / 120) * range;
       const raw = Math.max(min, Math.min(max, startValue + delta));
       const snapped = Math.round(raw / step) * step;
-      onChange(parseFloat(snapped.toFixed(decimals)));
+      lastValue = parseFloat(snapped.toFixed(decimals));
+      onChange(lastValue);
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      onDragEnd?.(lastValue);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -140,6 +146,8 @@ export function SampleBank() {
   const [searchQuery, setSearchQuery] = useState('');
   const [previewingUrl, setPreviewingUrl] = useState<string | null>(null);
   const [waveformUrl, setWaveformUrl] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  const [draft, setDraft] = useState<SuperdoughSamplerParams>(() => sp ?? DEFAULT_SAMPLER_PARAMS);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputId = useId();
 
@@ -147,6 +155,11 @@ export function SampleBank() {
   useEffect(() => {
     fetchSampleTree().then((t) => setTree(t));
   }, []);
+
+  // Sync draft params when instrument changes
+  useEffect(() => {
+    if (sp) setDraft(sp);
+  }, [selectedId, sp?.gain, sp?.speed, sp?.attack, sp?.release, sp?.pan, sp?.cutoff, sp?.resonance, sp?.begin, sp?.end, sp?.rootNote]);
 
   // Derive waveform URL for the currently assigned sample.
   // sampleName is the superdough key (e.g. 'name_ts'); samplePath is the original
@@ -310,17 +323,29 @@ export function SampleBank() {
       ref={containerRef}
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      className="sample-bank bg-bg-secondary border-l border-border flex flex-col shrink-0 h-full min-h-0 outline-none overflow-hidden"
-      style={{ width: 300 }}
+      className="sample-bank bg-bg-secondary border-l border-border flex flex-col shrink-0 h-full min-h-0 outline-none overflow-hidden w-full"
     >
-      {/* Target instrument indicator */}
-      <div className="text-[9px] text-text-secondary px-4 pt-3 pb-1.5 shrink-0">
-        <span className="text-text-secondary/60">target: </span>
-        <span style={{ color }}>{targetInst.name}</span>
+      {/* Target instrument indicator + collapse */}
+      <div className="flex items-center justify-between text-[9px] text-text-secondary px-4 pt-3 pb-1.5 shrink-0">
+        <div>
+          <span className="text-text-secondary/60">target: </span>
+          <span style={{ color }}>{targetInst.name}</span>
+        </div>
+        <button
+          onClick={() => setCollapsed(c => !c)}
+          title={collapsed ? 'Expand sampler' : 'Collapse sampler'}
+          className="flex-shrink-0 p-1 hover:bg-white/10 rounded transition-colors"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"
+            className="text-text-secondary/60 hover:text-text-primary transition-colors"
+            style={{ transform: `rotate(${collapsed ? 180 : 0}deg)`, transition: 'transform 0.2s' }}>
+            <polyline points="3 10 7 6 11 10" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
       </div>
 
       {/* Waveform — shows previewed file while browsing, otherwise the assigned sample */}
-      {(previewingUrl || waveformUrl) && (() => {
+      {!collapsed && (previewingUrl || waveformUrl) && (() => {
         // Resolve the URL to display: preview takes priority over assigned sample
         const previewCs = previewingUrl
           ? customSamples.find((c) => c.key === previewingUrl)
@@ -332,11 +357,16 @@ export function SampleBank() {
           <div className="px-4 pb-2 shrink-0">
             <WaveformView
               sampleUrl={displayUrl}
-              begin={!previewingUrl ? (sp?.begin ?? 0) : 0}
-              end={!previewingUrl ? (sp?.end ?? 1) : 1}
+              begin={!previewingUrl ? (draft?.begin ?? 0) : 0}
+              end={!previewingUrl ? (draft?.end ?? 1) : 1}
+              attack={!previewingUrl ? (draft?.attack ?? 0) : 0}
+              release={!previewingUrl ? (draft?.release ?? 0) : 0}
               color={color}
               onRegionChange={!previewingUrl && selectedId
-                ? (b, e) => updateSamplerParams(selectedId, { begin: b, end: e })
+                ? (b, e) => {
+                  setDraft(d => ({...d, begin: b, end: e}));
+                  updateSamplerParams(selectedId, { begin: b, end: e });
+                }
                 : undefined
               }
             />
@@ -345,31 +375,42 @@ export function SampleBank() {
       })()}
 
       {/* Sample parameters */}
-      {sp && selectedId && (
+      {sp && selectedId && !collapsed && (
         <div className="px-4 py-3 border-b border-border/50 shrink-0">
           <div className="flex gap-2 justify-around mb-3">
-            <Knob label="A" value={sp.attack} min={0} max={2} decimals={3} unit="s" color={color}
-              onChange={(v) => updateSamplerParams(selectedId, { attack: v })} />
-            <Knob label="R" value={sp.release} min={0} max={2} decimals={3} unit="s" color={color}
-              onChange={(v) => updateSamplerParams(selectedId, { release: v })} />
-            <Knob label="Vol" value={sp.gain} min={0} max={1} decimals={2} color={color}
-              onChange={(v) => updateSamplerParams(selectedId, { gain: v })} />
-            <Knob label="Pan" value={sp.pan} min={-1} max={1} decimals={2} color={color}
-              onChange={(v) => updateSamplerParams(selectedId, { pan: v })} />
+            <Knob label="A" value={draft.attack} min={0} max={2} step={0.01} decimals={3} unit="s" color={color}
+              onChange={(v) => setDraft(d => ({...d, attack: v}))}
+              onDragEnd={(v) => updateSamplerParams(selectedId, { attack: v })} />
+            <Knob label="R" value={draft.release} min={0} max={2} step={0.01} decimals={3} unit="s" color={color}
+              onChange={(v) => setDraft(d => ({...d, release: v}))}
+              onDragEnd={(v) => updateSamplerParams(selectedId, { release: v })} />
+            <Knob label="Vol" value={draft.gain} min={0} max={1} decimals={2} color={color}
+              onChange={(v) => setDraft(d => ({...d, gain: v}))}
+              onDragEnd={(v) => updateSamplerParams(selectedId, { gain: v })} />
+            <Knob label="Pan" value={draft.pan} min={-1} max={1} decimals={2} color={color}
+              onChange={(v) => setDraft(d => ({...d, pan: v}))}
+              onDragEnd={(v) => updateSamplerParams(selectedId, { pan: v })} />
           </div>
           <div className="flex gap-2 justify-around">
-            <Knob label="Cutoff" value={sp.cutoff} min={20} max={20000} step={10} decimals={0} unit="Hz" color={color}
-              onChange={(v) => updateSamplerParams(selectedId, { cutoff: v })} />
-            <Knob label="Res" value={sp.resonance} min={0} max={50} decimals={1} color={color}
-              onChange={(v) => updateSamplerParams(selectedId, { resonance: v })} />
-            <Knob label="Speed" value={sp.speed} min={0.1} max={4} decimals={2} color={color}
-              onChange={(v) => updateSamplerParams(selectedId, { speed: v })} />
+            <Knob label="Cutoff" value={draft.cutoff} min={20} max={20000} step={10} decimals={0} unit="Hz" color={color}
+              onChange={(v) => setDraft(d => ({...d, cutoff: v}))}
+              onDragEnd={(v) => updateSamplerParams(selectedId, { cutoff: v })} />
+            <Knob label="Res" value={draft.resonance} min={0} max={50} decimals={1} color={color}
+              onChange={(v) => setDraft(d => ({...d, resonance: v}))}
+              onDragEnd={(v) => updateSamplerParams(selectedId, { resonance: v })} />
+            <Knob label="Speed" value={draft.speed} min={0.1} max={4} decimals={2} color={color}
+              onChange={(v) => setDraft(d => ({...d, speed: v}))}
+              onDragEnd={(v) => updateSamplerParams(selectedId, { speed: v })} />
             {/* Root Note */}
             <div className="flex flex-col items-center gap-0.5">
               <span className="text-[8px] text-text-secondary uppercase tracking-wider">Root</span>
               <select
-                value={sp.rootNote ?? 60}
-                onChange={(e) => updateSamplerParams(selectedId, { rootNote: parseInt(e.target.value) })}
+                value={draft.rootNote ?? 60}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value);
+                  setDraft(d => ({...d, rootNote: val}));
+                  updateSamplerParams(selectedId, { rootNote: val });
+                }}
                 className="bg-bg-tertiary text-text-primary text-[8px] rounded px-1 py-0.5 border border-border
                            cursor-pointer mt-9"
                 style={{ width: 40 }}

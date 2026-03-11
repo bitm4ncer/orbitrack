@@ -1,6 +1,7 @@
 import type { SynthParams } from '../audio/synth/types';
 import type { Instrument } from './instrument';
 import type { Effect } from './effects';
+import type { InstrumentGroup } from './group';
 
 // ── Synth Presets ─────────────────────────────────────────────────────────────
 
@@ -15,6 +16,13 @@ export interface PresetMeta {
 
 export interface SynthPreset extends PresetMeta {
   params: SynthParams;
+}
+
+// ── Effect Presets ───────────────────────────────────────────────────────────
+
+export interface EffectPreset extends PresetMeta {
+  effectType: string;                // EffectType — e.g. 'delay', 'reverb'
+  params: Record<string, number>;
 }
 
 // ── Sets (Projects) ───────────────────────────────────────────────────────────
@@ -44,6 +52,9 @@ export interface OrbeatSet {
   gridGlide: Record<string, boolean[]>;
   gridLengths: Record<string, number[]>;
   instrumentEffects: Record<string, Effect[]>;
+  masterEffects?: Effect[];
+  groups?: InstrumentGroup[];
+  groupEffects?: Record<string, Effect[]>;
   customSamples?: EmbeddedSample[];
 }
 

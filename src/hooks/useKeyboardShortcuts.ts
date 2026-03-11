@@ -3,6 +3,7 @@ import { toggleTransport } from '../audio/transport';
 import { initAudio } from '../audio/engine';
 import { loadSamples } from '../audio/sampler';
 import { undo, redo } from '../state/undoHistory';
+import { useStore } from '../state/store';
 
 const audioInitRef = { initialized: false };
 
@@ -38,6 +39,32 @@ export function useKeyboardShortcuts(): void {
         e.preventDefault();
         redo();
         return;
+      }
+
+      // Group: Ctrl+G / Cmd+G
+      if (isMod && e.code === 'KeyG' && !e.shiftKey) {
+        e.preventDefault();
+        useStore.getState().groupSelected();
+        return;
+      }
+
+      // Ungroup: Ctrl+Shift+G / Cmd+Shift+G
+      if (isMod && e.code === 'KeyG' && e.shiftKey) {
+        e.preventDefault();
+        useStore.getState().ungroupSelected();
+        return;
+      }
+
+      // Rename: Enter — start renaming selected instrument or group
+      if (e.code === 'Enter' && !isMod && !e.shiftKey) {
+        const s = useStore.getState();
+        if (s.renamingId) return; // already renaming — let the input handle Enter
+        const targetId = s.selectedGroupId ?? s.selectedInstrumentId;
+        if (targetId) {
+          e.preventDefault();
+          s.setRenamingId(targetId);
+          return;
+        }
       }
 
       if (e.code === 'Space') {

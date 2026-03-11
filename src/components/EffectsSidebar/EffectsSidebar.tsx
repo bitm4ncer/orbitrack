@@ -502,7 +502,6 @@ const MASTER_FX_OPTIONS: { type: import('../../types/effects').EffectType; label
   { type: 'bitcrusher', label: 'Bit Crusher', icon: '⊞' },
   { type: 'tremolo',    label: 'Tremolo',     icon: '∿' },
   { type: 'ringmod',    label: 'Ring Mod',    icon: '⊗' },
-  { type: 'pingpong',   label: 'Ping Pong',   icon: '⇄' },
   { type: 'limiter',     label: 'Limiter',      icon: '⊔' },
   { type: 'drumbuss',    label: 'Drum Buss',    icon: '⊚' },
   { type: 'stereoimage', label: 'Stereo Image', icon: '↔' },
@@ -557,17 +556,22 @@ function AddMasterEffectMenu() {
 
 export function EffectsSidebar() {
   const selectedId      = useStore((s) => s.selectedInstrumentId);
+  const selectedGroupId = useStore((s) => s.selectedGroupId);
   const instruments     = useStore((s) => s.instruments);
   const instrumentEffects = useStore((s) => s.instrumentEffects);
+  const groups          = useStore((s) => s.groups);
+  const groupEffectsMap = useStore((s) => s.groupEffects);
   const masterVolume    = useStore((s) => s.masterVolume);
   const setMasterVolume = useStore((s) => s.setMasterVolume);
   const reorderEffects  = useStore((s) => s.reorderEffects);
+  const reorderGroupEffects = useStore((s) => s.reorderGroupEffects);
   const masterEffects   = useStore((s) => s.masterEffects);
   const isRecording     = useStore((s) => s.isRecording);
 
-  // 'master' is the default view; selecting an instrument auto-switches to 'instrument'
-  const [fxView, setFxView] = useState<'master' | 'instrument'>('master');
+  // 'master' | 'instrument' | 'group'
+  const [fxView, setFxView] = useState<'master' | 'instrument' | 'group'>('master');
   const prevSelectedId = useRef<string | null>(null);
+  const prevGroupId = useRef<string | null>(null);
 
   // Auto-switch to instrument view when a (new) instrument is selected
   useEffect(() => {
@@ -575,25 +579,38 @@ export function EffectsSidebar() {
     prevSelectedId.current = selectedId;
   }, [selectedId]);
 
-  const showMaster = fxView === 'master' || !selectedId;
+  // Auto-switch to group view when a group is selected
+  useEffect(() => {
+    if (selectedGroupId && selectedGroupId !== prevGroupId.current) setFxView('group');
+    prevGroupId.current = selectedGroupId;
+  }, [selectedGroupId]);
+
+  const showMaster = fxView === 'master' || (!selectedId && !selectedGroupId);
+  const showGroup = fxView === 'group' && selectedGroupId;
   const selectedInstrument = instruments.find((i) => i.id === selectedId);
+  const selectedGroup = groups.find((g) => g.id === selectedGroupId);
   const instEffects = selectedId ? (instrumentEffects[selectedId] ?? []) : [];
+  const grpEffects = selectedGroupId ? (groupEffectsMap[selectedGroupId] ?? []) : [];
 
   const dragIndex = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const masterDragIdx = useRef<number | null>(null);
   const [masterDragOver, setMasterDragOver] = useState<number | null>(null);
+  const groupDragIdx = useRef<number | null>(null);
+  const [groupDragOver, setGroupDragOver] = useState<number | null>(null);
 
   return (
-    <div className="flex flex-col h-full w-[300px] bg-bg-secondary border-l border-border shrink-0 select-none">
+    <div className="flex flex-col h-full w-full bg-bg-secondary border-l border-border shrink-0 select-none">
 
       {/* Header — shows which view is active */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 min-w-0">
-        {!showMaster && selectedInstrument && (
+        {showGroup && selectedGroup ? (
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selectedGroup.color }} />
+        ) : !showMaster && selectedInstrument ? (
           <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selectedInstrument.color }} />
-        )}
+        ) : null}
         <span className="fx-header-text text-text-secondary truncate">
-          {showMaster ? 'Master FX' : (selectedInstrument ? `${selectedInstrument.name} FX` : 'FX Chain')}
+          {showGroup && selectedGroup ? `${selectedGroup.name} FX` : showMaster ? 'Master FX' : (selectedInstrument ? `${selectedInstrument.name} FX` : 'FX Chain')}
         </span>
       </div>
 
@@ -621,6 +638,31 @@ export function EffectsSidebar() {
                   setMasterDragOver(null);
                 }}
                 onDragEnd={() => { masterDragIdx.current = null; setMasterDragOver(null); }}
+              />
+            ))
+          )
+        ) : showGroup && selectedGroupId ? (
+          grpEffects.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-4">
+              <span className="text-[28px] opacity-20">⊞</span>
+              <span className="fx-empty-text text-text-secondary/60">No group effects yet.</span>
+            </div>
+          ) : (
+            grpEffects.map((effect, i) => (
+              <EffectBlock
+                key={effect.id}
+                effect={effect}
+                instrumentId={`__group_${selectedGroupId}__`}
+                index={i}
+                isDragOver={groupDragOver === i}
+                onDragStart={() => { groupDragIdx.current = i; }}
+                onDragOver={(e) => { e.preventDefault(); setGroupDragOver(i); }}
+                onDrop={() => {
+                  if (groupDragIdx.current !== null && groupDragIdx.current !== i)
+                    reorderGroupEffects(selectedGroupId, groupDragIdx.current, i);
+                  setGroupDragOver(null);
+                }}
+                onDragEnd={() => { groupDragIdx.current = null; setGroupDragOver(null); }}
               />
             ))
           )
@@ -659,7 +701,9 @@ export function EffectsSidebar() {
       <div className="px-3 py-2 border-t border-border/30">
         {showMaster
           ? <AddMasterEffectMenu />
-          : selectedId && <AddEffectMenu instrumentId={selectedId} />
+          : showGroup && selectedGroupId
+            ? <AddEffectMenu instrumentId={`__group_${selectedGroupId}__`} />
+            : selectedId && <AddEffectMenu instrumentId={selectedId} />
         }
       </div>
 

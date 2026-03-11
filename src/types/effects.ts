@@ -12,7 +12,6 @@ export type EffectType =
   | 'tremolo'
   | 'ringmod'
   | 'trancegate'
-  | 'pingpong'
   | 'limiter'
   | 'drumbuss'
   | 'stereoimage';

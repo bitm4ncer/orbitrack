@@ -4,15 +4,18 @@ import type {
   GenerationParams,
   GenerationContext,
   GeneratedPattern,
+  OctaveOverride,
 } from './types';
 import { generateRandom } from './generators/random';
 import { generateScaleBased } from './generators/scaleBased';
 import { generateChordBased } from './generators/chordBased';
 import { generateBassline } from './generators/bassline';
 import { generateDrumPattern } from './generators/drumPattern';
+import { classifyInstrument } from './sampleClassifier';
 
 /**
  * Run the selected generator and return a pattern (does NOT apply to store).
+ * Note: 'prompt' mode is async and must be handled separately via generateFromPrompt.
  */
 export function runGenerator(
   ctx: GenerationContext,
@@ -33,6 +36,9 @@ export function runGenerator(
       return generateBassline(ctx, genParams.params, rng);
     case 'drumPattern':
       return generateDrumPattern(ctx, genParams.params, rng, sampleName);
+    case 'prompt':
+      // Prompt mode is async — return empty pattern, UI handles LLM call separately
+      return { events: [] };
     default:
       return { events: [] };
   }
@@ -41,14 +47,22 @@ export function runGenerator(
 /**
  * Build a GenerationContext from current store state for a given instrument.
  */
-export function buildContext(instrumentId: string): GenerationContext | null {
+export function buildContext(
+  instrumentId: string,
+  octaveOverride?: OctaveOverride,
+): GenerationContext | null {
   const s = useStore.getState();
   const inst = s.instruments.find((i) => i.id === instrumentId);
   if (!inst) return null;
 
-  // Determine octave range from current octaveOffset
-  const startNote = (s.octaveOffset + 1) * 12;
-  const octaveRange: [number, number] = [startNote, startNote + 23];
+  // Determine octave range: use override if provided, else use global offset
+  const octaveBase = octaveOverride?.base ?? s.octaveOffset + 1;
+  const octaveSpan = octaveOverride?.span ?? 2;
+  const startNote = octaveBase * 12;
+  const octaveRange: [number, number] = [startNote, startNote + octaveSpan * 12 - 1];
+
+  // Classify the instrument for role-aware generation
+  const instrumentRole = classifyInstrument(inst.sampleName ?? '', inst.name);
 
   return {
     scaleRoot: s.scaleRoot,
@@ -57,6 +71,9 @@ export function buildContext(instrumentId: string): GenerationContext | null {
     gridResolution: s.gridResolution,
     instrumentType: inst.type === 'looper' ? 'sampler' : inst.type as 'synth' | 'sampler',
     octaveRange,
+    instrumentRole,
+    octaveBase,
+    octaveSpan,
   };
 }
 
@@ -112,8 +129,9 @@ export function generateAndApply(
   instrumentId: string,
   genParams: GenerationParams,
   seed: number,
+  octaveOverride?: OctaveOverride,
 ): GeneratedPattern | null {
-  const ctx = buildContext(instrumentId);
+  const ctx = buildContext(instrumentId, octaveOverride);
   if (!ctx) return null;
 
   const inst = useStore.getState().instruments.find((i) => i.id === instrumentId);

@@ -14,6 +14,7 @@ import { fetchSampleTree, type SampleEntry } from './audio/sampleApi';
 import { useEffect, useRef, useState } from 'react';
 import * as Tone from 'tone';
 import { seedFactory } from './storage/seedFactory';
+import { seedEffectFactory } from './storage/seedEffectFactory';
 import { initRecordingSync } from './storage/recordingSync';
 import { restoreAutosave, initSessionAutosave } from './storage/sessionAutosave';
 import { initUndoHistory } from './state/undoHistory';
@@ -41,6 +42,9 @@ function App() {
   const [fxSidebarOpen, setFxSidebarOpen] = useState(true);
   const DEFAULT_BOTTOM_H = 24 * 20 + 33;
   const { height: bottomHeight, onMouseDown: onResizeMouseDown } = useResizable(DEFAULT_BOTTOM_H);
+  const { size: layerWidth, onMouseDown: onLayerResizeDown } = useResizable(300, 160, 'x');
+  const { size: fxWidth, onMouseDown: onFxResizeDown } = useResizable(300, 160, 'x');
+  const { size: rightPanelWidth, onMouseDown: onRightPanelResizeDown } = useResizable(300, 160, 'x');
 
   // Delayed unmount: keep content rendered during the close animation
   const [bottomContentMounted, setBottomContentMounted] = useState(hasSelection);
@@ -77,6 +81,7 @@ function App() {
 
       // Seed factory presets & hydrate recordings
       seedFactory();
+      seedEffectFactory();
       useStore.getState().hydrateRecordings();
       initRecordingSync();
       initSessionAutosave();
@@ -129,10 +134,21 @@ function App() {
           </span>
         </button>
 
+        {/* Resize handle on left edge of layers sidebar */}
+        {layerSidebarOpen && (
+          <div
+            className="resize-handle cursor-ew-resize shrink-0 flex items-center justify-center group hover:bg-accent/10 transition-colors"
+            style={{ width: 4, borderRight: '1px solid rgba(255,255,255,0.1)' }}
+            onMouseDown={onLayerResizeDown}
+          >
+            <div className="h-10 w-0.5 rounded-full bg-border/60 group-hover:bg-accent/60 transition-colors" />
+          </div>
+        )}
+
         {/* Layers sidebar */}
         <div
-          className="overflow-hidden transition-all duration-300 shrink-0 h-full"
-          style={{ width: layerSidebarOpen ? 300 : 0 }}
+          className="overflow-hidden transition-[width] duration-300 shrink-0 h-full"
+          style={{ width: layerSidebarOpen ? layerWidth : 0 }}
         >
           <InstrumentRack />
         </div>
@@ -148,10 +164,21 @@ function App() {
           </span>
         </button>
 
+        {/* Resize handle on left edge of FX sidebar */}
+        {fxSidebarOpen && (
+          <div
+            className="resize-handle cursor-ew-resize shrink-0 flex items-center justify-center group hover:bg-accent/10 transition-colors"
+            style={{ width: 4, borderRight: '1px solid rgba(255,255,255,0.1)' }}
+            onMouseDown={onFxResizeDown}
+          >
+            <div className="h-10 w-0.5 rounded-full bg-border/60 group-hover:bg-accent/60 transition-colors" />
+          </div>
+        )}
+
         {/* FX Chain sidebar */}
         <div
-          className="overflow-hidden transition-all duration-300 shrink-0 h-full"
-          style={{ width: fxSidebarOpen ? 300 : 0 }}
+          className="overflow-hidden transition-[width] duration-300 shrink-0 h-full"
+          style={{ width: fxSidebarOpen ? fxWidth : 0 }}
         >
           <EffectsSidebar />
         </div>
@@ -178,9 +205,23 @@ function App() {
               style={{ height: bottomHeight }}
             >
               {isLooperSelected ? <LooperEditor /> : <GridSequencer />}
-              {isSynthSelected && <SynthPanel />}
-              {isSamplerSelected && <SampleBank />}
-              {isLooperSelected && <LoopBrowser />}
+              {/* Right panel resize handle + container */}
+              {(isSynthSelected || isSamplerSelected || isLooperSelected) && (
+                <>
+                  <div
+                    className="resize-handle cursor-ew-resize shrink-0 flex items-center justify-center group hover:bg-accent/10 transition-colors"
+                    style={{ width: 4, borderLeft: '1px solid rgba(255,255,255,0.1)' }}
+                    onMouseDown={onRightPanelResizeDown}
+                  >
+                    <div className="h-10 w-0.5 rounded-full bg-border/60 group-hover:bg-accent/60 transition-colors" />
+                  </div>
+                  <div className="shrink-0 h-full overflow-y-auto" style={{ width: rightPanelWidth }}>
+                    {isSynthSelected && <SynthPanel />}
+                    {isSamplerSelected && <SampleBank />}
+                    {isLooperSelected && <LoopBrowser />}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>

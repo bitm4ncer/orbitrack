@@ -2,8 +2,7 @@ import * as Tone from 'tone';
 import { useStore } from '../state/store';
 import { triggerSuperdough, triggerLooperSlice } from './superdoughAdapter';
 import { applyOrbitToneEffects } from './orbitEffects';
-import { DEFAULT_LOOPER_PARAMS } from '../types/looper';
-import type { Effect } from '../types/effects';
+import { applyGroupEffects, setGroupBusVolume, setGroupBusMuted } from './groupBus';
 
 let schedulerId: number | null = null;
 let effectSyncId: ReturnType<typeof setInterval> | null = null;
@@ -18,7 +17,9 @@ let _lastFired: Map<string, Map<number, number>> = new Map();
 
 // Effect sync change detection — skip applyOrbitToneEffects when nothing changed.
 // Zustand always creates a new array reference on write, so reference equality is valid.
-const _lastApplied = new Map<string, { ref: unknown; bpm: number; degrade: number }>();
+const _lastApplied = new Map<string, { ref: unknown; bpm: number }>();
+const _lastGroupApplied = new Map<string, { ref: unknown; bpm: number }>();
+const _lastGroupState = new Map<string, { muted: boolean; volume: number }>();
 
 // Tick-level caches — recomputed only when instruments array reference changes.
 let _instrRef: unknown = null;
@@ -85,33 +86,32 @@ function startEffectSync(): void {
     try {
       const state = useStore.getState();
       for (const inst of state.instruments) {
-        let effects = state.instrumentEffects[inst.id] ?? [];
+        const effects = state.instrumentEffects[inst.id] ?? [];
 
-        // Inject looper degrade as a synthetic bitcrusher effect on this orbit
-        if (inst.type === 'looper') {
-          const deg = inst.looperParams?.degrade ?? DEFAULT_LOOPER_PARAMS.degrade;
-          if (deg > 0.01) {
-            // bits: 16 → 1, downsample: 0 → 1, amount: 0 → 1
-            const bits = Math.max(1, Math.round(16 - deg * 15));
-            const downsample = Math.min(1, deg * deg);  // quadratic: subtle start, aggressive end
-            const degradeEffect: Effect = {
-              id: '__degrade__', type: 'bitcrusher', label: 'Degrade',
-              enabled: true, collapsed: false,
-              params: { bits, downsample, amount: Math.min(1, deg * 1.5) },
-            };
-            // Prepend so user-added bitcrusher can stack on top
-            const hasUserBc = effects.some((e) => e.type === 'bitcrusher' && e.enabled);
-            if (!hasUserBc) effects = [...effects, degradeEffect];
-          }
-        }
-
-        // Skip if neither effects array, bpm, nor degrade changed since last apply.
-        const curDegrade = inst.looperParams?.degrade ?? 0;
+        // Skip if neither effects array nor bpm changed since last apply.
         const prev = _lastApplied.get(inst.id);
-        const origEffects = state.instrumentEffects[inst.id] ?? [];
-        if (prev?.ref === origEffects && prev?.bpm === state.bpm && prev?.degrade === curDegrade) continue;
-        _lastApplied.set(inst.id, { ref: origEffects, bpm: state.bpm, degrade: curDegrade });
+        if (prev?.ref === effects && prev?.bpm === state.bpm) continue;
+        _lastApplied.set(inst.id, { ref: effects, bpm: state.bpm });
         applyOrbitToneEffects(inst.orbitIndex, effects, state.bpm);
+      }
+
+      // Group effects sync
+      for (const group of state.groups) {
+        const effects = state.groupEffects[group.id] ?? [];
+        const prev = _lastGroupApplied.get(group.id);
+        if (prev?.ref === effects && prev?.bpm === state.bpm) continue;
+        _lastGroupApplied.set(group.id, { ref: effects, bpm: state.bpm });
+        applyGroupEffects(group.id, effects, state.bpm);
+
+        // Sync group mute/volume state
+        const lastState = _lastGroupState.get(group.id);
+        if (!lastState || lastState.muted !== group.muted) {
+          setGroupBusMuted(group.id, group.muted);
+        }
+        if (!lastState || lastState.volume !== group.volume) {
+          setGroupBusVolume(group.id, group.volume);
+        }
+        _lastGroupState.set(group.id, { muted: group.muted, volume: group.volume });
       }
     } catch { /* safe to ignore */ }
   }, 40);
@@ -133,6 +133,8 @@ export function stopTransport(): void {
   _globalStep = 0;
   _lastFired.clear();
   _lastApplied.clear();
+  _lastGroupApplied.clear();
+  _lastGroupState.clear();
   _instrRef = null;
 
   if (schedulerId !== null) {

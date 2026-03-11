@@ -1,8 +1,20 @@
 import * as Tone from 'tone';
 import { samples, loadBuffer, getAudioContext as getSdAudioContext, setAudioContext, loadWorklets } from 'superdough';
 import { initRoutingEngine } from './routingEngine';
+import { initGroupBusesFromState } from './groupBus';
 
 let initialized = false;
+
+/** Re-initialize group buses from current store state (called after audio init). */
+async function initGroupBusesFromStore(): Promise<void> {
+  try {
+    const { useStore } = await import('../state/store');
+    const s = useStore.getState();
+    if (s.groups && s.groups.length > 0) {
+      initGroupBusesFromState(s.groups, s.instruments);
+    }
+  } catch { /* store not ready yet — safe to skip */ }
+}
 
 // Suppress superdough's internal "node.onended" deprecation warning — it fires
 // from inside the library's own legacy code path, not from our code, and there
@@ -79,6 +91,9 @@ export async function initAudio(): Promise<void> {
   initRoutingEngine();
 
   initialized = true;
+
+  // Re-initialize group buses if groups exist in store (e.g. from autosave restore)
+  initGroupBusesFromStore();
 }
 
 export function isAudioReady(): boolean {

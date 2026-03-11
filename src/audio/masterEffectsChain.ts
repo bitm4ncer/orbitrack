@@ -6,7 +6,7 @@
  *     → masterInput
  *     → [EQ3 → Chorus → Phaser → Filter → Distortion → Reverb → Delay
  *        → BitCrusher → ParamEQ → Tremolo → RingMod → Compressor
- *        → TranceGate → PingPong]
+ *        → TranceGate → PingPong(via Delay mode 4)]
  *     → masterOutput
  *     → ctx.destination
  *
@@ -17,6 +17,7 @@ import { getAudioContext, getSuperdoughAudioController } from 'superdough';
 import { useStore } from '../state/store';
 import type { Effect } from '../types/effects';
 import { EQ_BAND_TYPES, getTranceGatePhase as _getTranceGatePhase } from './orbitEffects';
+import { DELAY_SYNC_DIVS } from './effectParams';
 
 // Re-export so TranceGateDisplay can call getTranceGatePhase(-1) for master
 export { _getTranceGatePhase as getTranceGatePhaseForMaster };
@@ -136,7 +137,7 @@ function makeDistortionCurve(type: number, drive: number): Float32Array {
 
 // ── Node graph ─────────────────────────────────────────────────────────────
 
-interface MasterChain {
+export interface MasterChain {
   masterInput:  GainNode;
   masterOutput: GainNode;
   // EQ3
@@ -200,7 +201,7 @@ interface MasterChain {
 let masterChain: MasterChain | null = null;
 let masterChainIntercepted = false;
 
-function createMasterChain(ac: AudioContext): MasterChain {
+export function createMasterChain(ac: AudioContext): MasterChain {
   const masterInput  = ac.createGain(); masterInput.gain.value  = 1;
   const masterOutput = ac.createGain(); masterOutput.gain.value = 1;
 
@@ -475,9 +476,8 @@ export function initMasterChain(): void {
   });
 }
 
-export function applyMasterEffects(effects: Effect[], bpm = 120): void {
-  if (!masterChain) return;
-  const chain = masterChain;
+/** Apply effects to any MasterChain instance (used by both master and group buses). */
+export function applyEffectsToChain(chain: MasterChain, effects: Effect[], bpm = 120): void {
 
   const eq3Effect        = effects.find((e) => e.type === 'eq3'          && e.enabled);
   const chorusEffect     = effects.find((e) => e.type === 'chorus'       && e.enabled);
@@ -492,7 +492,6 @@ export function applyMasterEffects(effects: Effect[], bpm = 120): void {
   const ringmodEffect    = effects.find((e) => e.type === 'ringmod'      && e.enabled);
   const compressorEffect = effects.find((e) => e.type === 'compressor'   && e.enabled);
   const tranceEffect     = effects.find((e) => e.type === 'trancegate'   && e.enabled);
-  const pingpongEffect   = effects.find((e) => e.type === 'pingpong'     && e.enabled);
   const drumbussEffect   = effects.find((e) => e.type === 'drumbuss'     && e.enabled);
   const stereoimageEffect= effects.find((e) => e.type === 'stereoimage'  && e.enabled);
   const limiterEffect    = effects.find((e) => e.type === 'limiter'      && e.enabled);
@@ -580,11 +579,33 @@ export function applyMasterEffects(effects: Effect[], bpm = 120): void {
   // Delay
   if (delayEffect) {
     const p = delayEffect.params; const amount = p.amount ?? 0.3;
-    chain.delayNode.delayTime.setTargetAtTime(p.time ?? 0.25, now, ramp);
-    chain.delayFeedback.gain.setTargetAtTime(p.feedback ?? 0.4, now, ramp);
-    chain.delayHighCut.frequency.setTargetAtTime(p.tone ?? 8000, now, ramp);
-    chain.delayDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
-    chain.delayWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
+    let time = p.time ?? 0.25;
+    const feedback = p.feedback ?? 0.4; const tone = p.tone ?? 8000;
+    const mode = Math.round(p.mode ?? 0);
+    const sync = Math.round(p.sync ?? 0); const syncDiv = Math.round(p.syncDiv ?? 8);
+    if (sync === 1 && bpm > 0) {
+      const div = DELAY_SYNC_DIVS[Math.min(syncDiv, DELAY_SYNC_DIVS.length - 1)];
+      time = Math.min(2.0, (60 / bpm) * div.mult);
+    }
+    if (mode === 4) {
+      // PingPong: delay chain transparent, pp chain active
+      chain.delayDryGain.gain.setTargetAtTime(1, now, ramp);
+      chain.delayWetGain.gain.setTargetAtTime(0, now, ramp);
+      chain.ppDelay1.delayTime.setTargetAtTime(time, now, ramp);
+      chain.ppDelay2.delayTime.setTargetAtTime(time, now, ramp);
+      chain.ppFeedGain.gain.setTargetAtTime(feedback, now, ramp);
+      chain.ppHiCut.frequency.setTargetAtTime(tone, now, ramp);
+      chain.ppPanL.pan.setTargetAtTime(-1, now, ramp);
+      chain.ppPanR.pan.setTargetAtTime(1, now, ramp);
+      chain.ppDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
+      chain.ppWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
+    } else {
+      chain.delayNode.delayTime.setTargetAtTime(time, now, ramp);
+      chain.delayFeedback.gain.setTargetAtTime(feedback, now, ramp);
+      chain.delayHighCut.frequency.setTargetAtTime(tone, now, ramp);
+      chain.delayDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
+      chain.delayWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
+    }
   } else { chain.delayWetGain.gain.setTargetAtTime(0, now, ramp); chain.delayDryGain.gain.setTargetAtTime(1, now, ramp); }
 
   // BitCrusher
@@ -659,21 +680,14 @@ export function applyMasterEffects(effects: Effect[], bpm = 120): void {
     chain.tranceWetGain.gain.setTargetAtTime(0, now, ramp);
   }
 
-  // PingPong
-  if (pingpongEffect) {
-    const p = pingpongEffect.params; const amount = Math.max(0, Math.min(1, p.amount ?? 0.4));
-    chain.ppDelay1.delayTime.setTargetAtTime(Math.max(0.01, p.time ?? 0.25), now, ramp);
-    chain.ppDelay2.delayTime.setTargetAtTime(Math.max(0.01, p.time ?? 0.25), now, ramp);
-    chain.ppFeedGain.gain.setTargetAtTime(Math.max(0, Math.min(0.9, p.feedback ?? 0.45)), now, ramp);
-    chain.ppHiCut.frequency.setTargetAtTime(Math.max(200, p.tone ?? 8000), now, ramp);
-    chain.ppPanL.pan.setTargetAtTime(-(p.spread ?? 1), now, ramp);
-    chain.ppPanR.pan.setTargetAtTime(  p.spread ?? 1,  now, ramp);
-    chain.ppDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
-    chain.ppWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
-  } else {
-    chain.ppFeedGain.gain.setTargetAtTime(0, now, ramp);
-    chain.ppDryGain.gain.setTargetAtTime(1, now, ramp);
-    chain.ppWetGain.gain.setTargetAtTime(0, now, ramp);
+  // PingPong chain — controlled by delay mode=4
+  {
+    const delayHandlesPP = delayEffect && Math.round(delayEffect.params.mode ?? 0) === 4;
+    if (!delayHandlesPP) {
+      chain.ppFeedGain.gain.setTargetAtTime(0, now, ramp);
+      chain.ppDryGain.gain.setTargetAtTime(1, now, ramp);
+      chain.ppWetGain.gain.setTargetAtTime(0, now, ramp);
+    }
   }
 
   // Drum Buss
@@ -721,6 +735,11 @@ export function applyMasterEffects(effects: Effect[], bpm = 120): void {
     chain.limiterMakeup.gain.setTargetAtTime(1, now, ramp);
     chain.limiterDry.gain.setTargetAtTime(1, now, ramp); chain.limiterWet.gain.setTargetAtTime(0, now, ramp);
   }
+}
+
+export function applyMasterEffects(effects: Effect[], bpm = 120): void {
+  if (!masterChain) return;
+  applyEffectsToChain(masterChain, effects, bpm);
 }
 
 /** Get the master ParamEQ bands for the frequency response display. */

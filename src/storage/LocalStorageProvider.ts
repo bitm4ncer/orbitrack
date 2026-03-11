@@ -1,5 +1,5 @@
 import type { StorageProvider } from './StorageProvider';
-import type { SynthPreset, SetMeta, OrbeatSet, SampleMeta } from '../types/storage';
+import type { SynthPreset, EffectPreset, SetMeta, OrbeatSet, SampleMeta } from '../types/storage';
 import { getAll, get, put, del } from './idb';
 
 /**
@@ -23,6 +23,24 @@ export class LocalStorageProvider implements StorageProvider {
 
   async deletePreset(id: string): Promise<void> {
     return del('presets', id);
+  }
+
+  // ── Effect Presets ───────────────────────────────────────────────────────
+
+  async listEffectPresets(): Promise<EffectPreset[]> {
+    return getAll<EffectPreset>('effectPresets');
+  }
+
+  async getEffectPreset(id: string): Promise<EffectPreset | undefined> {
+    return get<EffectPreset>('effectPresets', id);
+  }
+
+  async saveEffectPreset(preset: EffectPreset): Promise<void> {
+    return put('effectPresets', preset);
+  }
+
+  async deleteEffectPreset(id: string): Promise<void> {
+    return del('effectPresets', id);
   }
 
   // ── Sets ──────────────────────────────────────────────────────────────────

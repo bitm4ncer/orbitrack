@@ -10,6 +10,7 @@ import { useStore, setOrbitCounter } from '../state/store';
 import { put, get } from './idb';
 import type { Instrument } from '../types/instrument';
 import type { Effect } from '../types/effects';
+import type { InstrumentGroup } from '../types/group';
 import { base64ToBlob } from './serializer';
 import { registerSampleForPlayback } from '../audio/engine';
 import { loadSample } from '../audio/sampler';
@@ -29,6 +30,9 @@ interface AutosaveData {
   gridGlide: Record<string, boolean[]>;
   gridLengths: Record<string, number[]>;
   instrumentEffects: Record<string, Effect[]>;
+  masterEffects?: Effect[];
+  groups?: InstrumentGroup[];
+  groupEffects?: Record<string, Effect[]>;
   gridResolution?: number;
   scaleRoot?: number;
   scaleType?: string;
@@ -92,6 +96,9 @@ async function saveSession(): Promise<void> {
     gridGlide: s.gridGlide,
     gridLengths: s.gridLengths,
     instrumentEffects: s.instrumentEffects,
+    masterEffects: s.masterEffects,
+    groups: s.groups,
+    groupEffects: s.groupEffects,
     gridResolution: s.gridResolution,
     scaleRoot: s.scaleRoot,
     scaleType: s.scaleType,
@@ -150,6 +157,9 @@ export async function restoreAutosave(): Promise<boolean> {
       gridGlide: data.gridGlide ?? {},
       gridLengths: data.gridLengths ?? {},
       instrumentEffects: data.instrumentEffects ?? {},
+      masterEffects: data.masterEffects ?? [],
+      groups: data.groups ?? [],
+      groupEffects: data.groupEffects ?? {},
       gridResolution: data.gridResolution ?? 1,
       scaleRoot: data.scaleRoot ?? 0,
       scaleType: data.scaleType ?? 'chromatic',
@@ -207,6 +217,9 @@ export function initSessionAutosave(): void {
         state.gridGlide !== prevState.gridGlide ||
         state.gridLengths !== prevState.gridLengths ||
         state.instrumentEffects !== prevState.instrumentEffects ||
+        state.masterEffects !== prevState.masterEffects ||
+        state.groups !== prevState.groups ||
+        state.groupEffects !== prevState.groupEffects ||
         state.customSamples !== prevState.customSamples ||
         state.currentSetName !== prevState.currentSetName ||
         state.gridResolution !== prevState.gridResolution ||

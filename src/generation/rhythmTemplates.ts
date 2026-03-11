@@ -1,4 +1,5 @@
 import type { RNG } from './rng';
+import { classifyInstrument } from './sampleClassifier';
 
 /**
  * Rhythm templates: 16-step probability arrays.
@@ -14,6 +15,11 @@ export const KICK_TEMPLATES: Record<string, number[]> = {
   breakbeat: [1, 0, 0, 0, 0, 0, 1, 0, 0, 0.5, 1, 0, 0, 0, 0, 0.3],
   hiphop:    [1, 0, 0, 0.3, 0, 0, 0.5, 0, 1, 0, 0, 0, 0, 0.4, 0, 0],
   dnb:       [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+  trap:      [1, 0, 0, 0.7, 0, 0, 0, 0, 1, 0, 0, 0, 0.8, 0, 0.5, 0],
+  jungle:    [1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0.7, 0],
+  garage:    [1, 0, 0, 0, 0, 0, 0.6, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+  afrobeat:  [1, 0, 0, 0, 0, 0.7, 0, 0, 0, 0.5, 0, 0, 1, 0, 0, 0],
+  ambient:   [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 0, 0, 0],
 };
 
 export const SNARE_TEMPLATES: Record<string, number[]> = {
@@ -22,6 +28,11 @@ export const SNARE_TEMPLATES: Record<string, number[]> = {
   breakbeat: [0, 0, 0, 0, 1, 0, 0, 0.3, 0, 0, 0, 0, 1, 0, 0, 0.5],
   hiphop:    [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
   dnb:       [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+  trap:      [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+  jungle:    [0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0.5],
+  garage:    [0, 0, 0, 0, 0, 0.5, 0, 0, 1, 0, 0, 0, 0, 0.5, 0, 0],
+  afrobeat:  [0, 0, 0, 0, 0.8, 0, 0, 0.3, 0, 0, 0.8, 0, 0, 0, 0.5, 0],
+  ambient:   [0, 0, 0, 0, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0],
 };
 
 export const HIHAT_TEMPLATES: Record<string, number[]> = {
@@ -30,6 +41,11 @@ export const HIHAT_TEMPLATES: Record<string, number[]> = {
   breakbeat: [1, 0.3, 1, 0, 1, 0.5, 1, 0.3, 1, 0.3, 1, 0, 1, 0.5, 1, 0.3],
   hiphop:    [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0.5],
   dnb:       [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0.3],
+  trap:      [1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1],
+  jungle:    [1, 0.5, 1, 0.5, 1, 0.5, 1, 0.5, 1, 0.5, 1, 0.5, 1, 0.5, 1, 0.5],
+  garage:    [1, 0, 1, 0.5, 1, 0, 1, 0.5, 1, 0, 1, 0.5, 1, 0, 1, 0.5],
+  afrobeat:  [1, 0, 0.7, 0, 1, 0, 0.7, 0, 1, 0, 0.7, 0, 1, 0, 0.7, 0],
+  ambient:   [0.3, 0, 0, 0, 0.3, 0, 0, 0, 0.3, 0, 0, 0, 0.3, 0, 0, 0],
 };
 
 export const CLAP_TEMPLATES: Record<string, number[]> = {
@@ -38,6 +54,11 @@ export const CLAP_TEMPLATES: Record<string, number[]> = {
   breakbeat: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0.3, 0, 0, 1, 0, 0, 0],
   hiphop:    [0, 0, 0, 0, 1, 0, 0, 0.2, 0, 0, 0, 0, 1, 0, 0.2, 0],
   dnb:       [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+  trap:      [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+  jungle:    [0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+  garage:    [0, 0, 0, 0, 0, 0.3, 0, 0, 1, 0, 0, 0, 0, 0.3, 0, 0],
+  afrobeat:  [0, 0, 0.5, 0, 0, 0, 1, 0, 0, 0.3, 0, 0, 0, 0, 0.8, 0],
+  ambient:   [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 };
 
 // ── Melody / Bass rhythm templates ──────────────────────────────────────
@@ -106,26 +127,35 @@ export function applyVariation(
 }
 
 /**
- * Pick a drum template based on genre and sample name heuristic.
+ * Pick a drum template based on genre and instrument role.
  */
 export function pickDrumTemplate(
   genre: string,
   sampleName: string,
+  displayName: string = '',
 ): number[] {
-  const name = sampleName.toLowerCase();
+  const role = classifyInstrument(sampleName, displayName);
   let bank: Record<string, number[]>;
 
-  if (name.includes('kick') || name.includes('bd')) {
-    bank = KICK_TEMPLATES;
-  } else if (name.includes('snare') || name.includes('sd')) {
-    bank = SNARE_TEMPLATES;
-  } else if (name.includes('hat') || name.includes('hh') || name.includes('oh') || name.includes('ch')) {
-    bank = HIHAT_TEMPLATES;
-  } else if (name.includes('clap') || name.includes('cp')) {
-    bank = CLAP_TEMPLATES;
-  } else {
-    // Default to hihat pattern for unknown samples
-    bank = HIHAT_TEMPLATES;
+  switch (role) {
+    case 'kick':
+      bank = KICK_TEMPLATES;
+      break;
+    case 'snare':
+      bank = SNARE_TEMPLATES;
+      break;
+    case 'hihat':
+    case 'openhat':
+      bank = HIHAT_TEMPLATES;
+      break;
+    case 'clap':
+    case 'percussion':
+      bank = CLAP_TEMPLATES;
+      break;
+    default:
+      // Default to hihat pattern for unknown samples
+      bank = HIHAT_TEMPLATES;
+      break;
   }
 
   return bank[genre] ?? bank['house'] ?? [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];

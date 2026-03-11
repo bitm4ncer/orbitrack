@@ -3,6 +3,8 @@ import { useStore } from '../../state/store';
 import { noteNameWithOctave, NOTE_NAMES, SCALES, SCALE_KEYS, isNoteInScale } from '../../utils/music';
 import { CHORD_PRESETS } from '../../utils/chordPresets';
 import { GenerateButton } from './GenerateButton';
+import { GenSidebar } from './GenSidebar';
+import { useResizable } from '../../hooks/useResizable';
 
 const ROW_H = 20;
 const RESIZE_HANDLE_W = 6;
@@ -96,6 +98,10 @@ export function GridSequencer() {
   const [selectedNotes, setSelectedNotes] = useState<Set<string>>(new Set());
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const selRectRef = useRef<SelectionRect | null>(null);
+
+  // GEN sidebar state
+  const [genOpen, setGenOpen] = useState(false);
+  const { size: genWidth, onMouseDown: onGenResize } = useResizable(200, 160, 'x', -1);
 
   const instrument = instruments.find((i) => i.id === selectedId);
 
@@ -728,13 +734,13 @@ export function GridSequencer() {
     return (
       <div
         ref={gridContainerRef}
-        className="grid-sequencer bg-bg-secondary flex-1 min-w-0 outline-none"
+        className="grid-sequencer bg-bg-secondary flex flex-col flex-1 min-w-0 outline-none"
         tabIndex={0}
         onKeyDown={handleKeyDown}
       >
         <div className="grid-toolbar flex items-center gap-2 px-4 py-1.5 border-b border-border">
           <span className="text-[10px] text-text-secondary">{instrument.name}</span>
-          <GenerateButton instrumentId={instrument.id} instrumentType="sampler" />
+          <GenerateButton genOpen={genOpen} onToggleGen={() => setGenOpen(!genOpen)} />
           {gridResButtons}
           {scaleSelector}
           <div className="ml-auto flex items-center gap-1">
@@ -743,16 +749,36 @@ export function GridSequencer() {
           </div>
         </div>
 
-        <div className="grid-body flex overflow-x-auto">
-          {noteLabels}
-          <div
-            ref={gridBodyRef}
-            className="grid-cells flex-1 relative"
-            onMouseDown={handleGridMouseDown}
-          >
-            {renderGridCells(false)}
-            {renderNoteBlocks(0)}
-            {selectionOverlay}
+        {/* Main content: optional gen sidebar + scrollable grid */}
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          {genOpen && (
+            <>
+              <GenSidebar
+                instrumentId={instrument.id}
+                instrumentType="sampler"
+                color={instrument.color}
+                width={genWidth}
+              />
+              <div
+                className="resize-handle cursor-ew-resize shrink-0 flex items-center justify-center group hover:bg-accent/10 transition-colors"
+                style={{ width: 4, borderRight: '1px solid rgba(255,255,255,0.1)' }}
+                onMouseDown={onGenResize}
+              >
+                <div className="h-10 w-0.5 rounded-full bg-border/60 group-hover:bg-accent/60 transition-colors" />
+              </div>
+            </>
+          )}
+          <div className="grid-body flex flex-1 overflow-x-auto">
+            {noteLabels}
+            <div
+              ref={gridBodyRef}
+              className="grid-cells flex-1 relative"
+              onMouseDown={handleGridMouseDown}
+            >
+              {renderGridCells(false)}
+              {renderNoteBlocks(0)}
+              {selectionOverlay}
+            </div>
           </div>
         </div>
       </div>
@@ -765,7 +791,7 @@ export function GridSequencer() {
   return (
     <div
       ref={gridContainerRef}
-      className="grid-sequencer bg-bg-secondary flex-1 min-w-0 outline-none"
+      className="grid-sequencer bg-bg-secondary flex flex-col flex-1 min-w-0 outline-none"
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
@@ -790,7 +816,7 @@ export function GridSequencer() {
           ))}
         </select>
 
-        <GenerateButton instrumentId={instrument.id} instrumentType="synth" />
+        <GenerateButton genOpen={genOpen} onToggleGen={() => setGenOpen(!genOpen)} />
 
         {gridResButtons}
         {scaleSelector}
@@ -801,33 +827,53 @@ export function GridSequencer() {
         </div>
       </div>
 
-      <div className="grid-body flex overflow-x-auto">
-        {/* Synth note labels need extra top padding for glide row */}
-        <div className="grid-note-labels shrink-0 w-10">
-          <div style={{ height: 14 }} />
-          {rows.map((midiNote) => {
-            const isBlackKey = [1, 3, 6, 8, 10].includes(midiNote % 12);
-            return (
-              <div
-                key={midiNote}
-                className={`flex items-center justify-end pr-1 text-[9px]
-                  ${isBlackKey ? 'text-text-secondary/50' : 'text-text-secondary'}`}
-                style={{ height: ROW_H }}
-              >
-                {noteNameWithOctave(midiNote)}
-              </div>
-            );
-          })}
-        </div>
+      {/* Main content: optional gen sidebar + scrollable grid */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {genOpen && (
+          <>
+            <GenSidebar
+              instrumentId={instrument.id}
+              instrumentType="synth"
+              color={instrument.color}
+              width={genWidth}
+            />
+            <div
+              className="resize-handle cursor-ew-resize shrink-0 flex items-center justify-center group hover:bg-accent/10 transition-colors"
+              style={{ width: 4, borderRight: '1px solid rgba(255,255,255,0.1)' }}
+              onMouseDown={onGenResize}
+            >
+              <div className="h-10 w-0.5 rounded-full bg-border/60 group-hover:bg-accent/60 transition-colors" />
+            </div>
+          </>
+        )}
+        <div className="grid-body flex flex-1 overflow-x-auto">
+          {/* Synth note labels need extra top padding for glide row */}
+          <div className="grid-note-labels shrink-0 w-10">
+            <div style={{ height: 14 }} />
+            {rows.map((midiNote) => {
+              const isBlackKey = [1, 3, 6, 8, 10].includes(midiNote % 12);
+              return (
+                <div
+                  key={midiNote}
+                  className={`flex items-center justify-end pr-1 text-[9px]
+                    ${isBlackKey ? 'text-text-secondary/50' : 'text-text-secondary'}`}
+                  style={{ height: ROW_H }}
+                >
+                  {noteNameWithOctave(midiNote)}
+                </div>
+              );
+            })}
+          </div>
 
-        <div
-          ref={gridBodyRef}
-          className="grid-cells flex-1 relative"
-          onMouseDown={handleGridMouseDown}
-        >
-          {renderGridCells(true)}
-          {renderNoteBlocks(14)}
-          {selectionOverlay}
+          <div
+            ref={gridBodyRef}
+            className="grid-cells flex-1 relative"
+            onMouseDown={handleGridMouseDown}
+          >
+            {renderGridCells(true)}
+            {renderNoteBlocks(14)}
+            {selectionOverlay}
+          </div>
         </div>
       </div>
     </div>

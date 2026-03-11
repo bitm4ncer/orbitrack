@@ -16,7 +16,6 @@ const EFFECT_OPTIONS: { type: EffectType; label: string; icon: string }[] = [
   { type: 'tremolo',    label: 'Tremolo',     icon: '∿' },
   { type: 'ringmod',    label: 'Ring Mod',    icon: '⊗' },
   { type: 'trancegate', label: 'Orb Gate',    icon: '◉' },
-  { type: 'pingpong',   label: 'Ping Pong',   icon: '⇄' },
   { type: 'limiter',     label: 'Limiter',      icon: '⊔' },
   { type: 'drumbuss',    label: 'Drum Buss',    icon: '⊚' },
   { type: 'stereoimage', label: 'Stereo Image', icon: '↔' },

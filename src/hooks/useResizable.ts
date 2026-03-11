@@ -1,18 +1,21 @@
 import { useState, useCallback, useRef } from 'react';
 
-export function useResizable(defaultHeight: number, min = 80) {
-  const [height, setHeight] = useState(defaultHeight);
-  const drag = useRef<{ startY: number; startH: number } | null>(null);
+export function useResizable(defaultSize: number, min = 80, axis: 'x' | 'y' = 'y', direction: 1 | -1 = 1) {
+  const [size, setSize] = useState(defaultSize);
+  const drag = useRef<{ startPos: number; startSize: number } | null>(null);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    drag.current = { startY: e.clientY, startH: height };
+    drag.current = { startPos: axis === 'x' ? e.clientX : e.clientY, startSize: size };
 
     const onMove = (e: MouseEvent) => {
       if (!drag.current) return;
-      const delta = drag.current.startY - e.clientY; // up = positive = taller
-      const max = window.innerHeight * 0.85;
-      setHeight(Math.max(min, Math.min(max, drag.current.startH + delta)));
+      const pos = axis === 'x' ? e.clientX : e.clientY;
+      // direction=1:  drag LEFT  = positive delta = wider (right-side panels)
+      // direction=-1: drag RIGHT = positive delta = wider (left-side panels)
+      const delta = direction * (drag.current.startPos - pos);
+      const max = axis === 'x' ? window.innerWidth * 0.65 : window.innerHeight * 0.85;
+      setSize(Math.max(min, Math.min(max, drag.current.startSize + delta)));
     };
 
     const onUp = () => {
@@ -23,7 +26,8 @@ export function useResizable(defaultHeight: number, min = 80) {
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, [height, min]);
+  }, [size, min, axis, direction]);
 
-  return { height, onMouseDown };
+  // Backwards compat: return both height and size
+  return { height: size, size, onMouseDown };
 }

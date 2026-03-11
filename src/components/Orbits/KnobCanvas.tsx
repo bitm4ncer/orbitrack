@@ -70,8 +70,8 @@ function EffectPill({ effect, instrumentId }: { effect: Effect; instrumentId: st
         }}
         title={`${effect.label} — click to ${effect.enabled ? 'disable' : 'enable'}`}
       >
-        <span className="select-none leading-none font-bold" style={{
-          fontSize: 9, color: 'rgba(0,0,0,0.6)',
+        <span className="select-none font-bold flex items-center justify-center" style={{
+          fontSize: 9, color: 'rgba(0,0,0,0.6)', width: 18, height: 18, lineHeight: 1,
         }}>{icon}</span>
       </button>
 
@@ -148,6 +148,22 @@ function EffectStrip({ instrumentId }: { instrumentId: string }) {
   );
 }
 
+// ── GroupBadge ───────────────────────────────────────────────────────────────
+
+function GroupBadge({ instrumentId }: { instrumentId: string }) {
+  const group = useStore((s) => s.groups.find((g) => g.instrumentIds.includes(instrumentId)));
+  if (!group) return null;
+  return (
+    <span
+      className="text-[7px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-full select-none cursor-pointer"
+      style={{ color: group.color, background: `${group.color}18`, border: `1px solid ${group.color}33` }}
+      onClick={(e) => { e.stopPropagation(); useStore.getState().selectGroup(group.id); }}
+    >
+      {group.name}
+    </span>
+  );
+}
+
 // ── KnobCanvas ───────────────────────────────────────────────────────────────
 
 interface Props {
@@ -173,6 +189,13 @@ export function KnobCanvas({ instrumentId }: Props) {
   const previewDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSelected = useStore((s) => s.selectedInstrumentId === instrumentId);
+  const isMultiSelected = useStore((s) => s.selectedInstrumentIds.includes(instrumentId));
+  const groupColor = useStore((s) => {
+    for (const g of s.groups) {
+      if (g.instrumentIds.includes(instrumentId)) return g.color;
+    }
+    return null;
+  });
   const inst = useStore((s) => s.instruments.find((i) => i.id === instrumentId));
 
   useEffect(() => {
@@ -271,7 +294,11 @@ export function KnobCanvas({ instrumentId }: Props) {
     isDragging.current = true;
     hasDragged.current = false;
     dragHitIndex.current = renderer.getHitAt(x, y);
-    useStore.getState().selectInstrument(instrumentId);
+    if (e.shiftKey) {
+      useStore.getState().toggleSelectInstrument(instrumentId);
+    } else {
+      useStore.getState().selectInstrument(instrumentId);
+    }
   }, [instrumentId]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -377,10 +404,25 @@ export function KnobCanvas({ instrumentId }: Props) {
     <div
       ref={cellRef}
       onClick={(e) => e.stopPropagation()}
-      className={`knob-cell relative flex flex-col items-center gap-1 p-2 rounded-lg select-none
-                  ${isSelected ? 'ring-1 ring-white/20 bg-white/5' : 'hover:bg-white/[0.02]'}`}
-      style={{ border: `1px solid ${inst.color}22` }}
+      className={`knob-cell group/card relative flex flex-col items-center gap-1 p-2 rounded-lg select-none
+                  ${isSelected ? 'ring-1 ring-white/20 bg-white/5' : isMultiSelected ? 'ring-1 ring-white/10 bg-white/[0.03]' : 'hover:bg-white/[0.02]'}`}
+      style={{
+        border: `1px solid ${inst.color}22`,
+        '--inst-color': inst.color,
+      } as React.CSSProperties}
     >
+      {/* Group color indicator — 1px line at bottom, inset to respect rounded corners */}
+      {groupColor && (
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            bottom: 1, left: 6, right: 6, height: 1,
+            borderRadius: 0.5,
+            background: groupColor,
+          }}
+        />
+      )}
+
       {/* Per-orbit level indicator — 2px bar centered on right border */}
       <div
         className="absolute top-0 overflow-hidden pointer-events-none"
@@ -395,6 +437,19 @@ export function KnobCanvas({ instrumentId }: Props) {
           }}
         />
       </div>
+
+      {/* Card name — above the orbit; click to mute/unmute */}
+      <span
+        className="card-name text-[11px] truncate max-w-full px-1 font-medium transition-colors duration-150 cursor-pointer"
+        style={{
+          color: isSelected ? inst.color : `rgba(255,255,255,0.25)`,
+          opacity: inst.muted ? 0.4 : 1,
+        }}
+        title={`${inst.name} — click to ${inst.muted ? 'unmute' : 'mute'}`}
+        onClick={(e) => { e.stopPropagation(); useStore.getState().toggleMute(instrumentId); }}
+      >
+        {inst.name}
+      </span>
 
       {/* Solo (top-left) */}
       <button
@@ -438,7 +493,7 @@ export function KnobCanvas({ instrumentId }: Props) {
       </button>
       <canvas
         ref={canvasRef}
-        className="w-full aspect-square cursor-pointer"
+        className="w-full aspect-square cursor-pointer my-1"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -446,19 +501,35 @@ export function KnobCanvas({ instrumentId }: Props) {
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
       />
+      {/* Sample selector — bordered, analogue synth style */}
       <span
         ref={nameSpanRef}
-        className="text-[9px] text-text-secondary truncate max-w-full px-1 cursor-pointer hover:text-text-primary transition-colors"
+        className="text-[8px] text-text-secondary truncate max-w-full px-2 py-0.5 rounded cursor-pointer hover:text-text-primary transition-colors mt-1"
+        style={{
+          border: '1px solid rgba(255,255,255,0.10)',
+          background: 'rgba(0,0,0,0.2)',
+          letterSpacing: '0.02em',
+        }}
         title="Click to pick sample · Scroll to browse"
         onClick={handleNameClick}
         onMouseEnter={handleNameMouseEnter}
         onMouseLeave={handleNameMouseLeave}
         onWheel={handleNameWheelPassthrough}
       >
-        {inst.name}
+        {inst.samplePath
+          ? inst.samplePath.split('/').pop()?.replace(/\.[^.]+$/, '') ?? inst.name
+          : inst.name}
       </span>
+      {/* Group badge */}
+      {groupColor && (
+        <div className="mt-1">
+          <GroupBadge instrumentId={instrumentId} />
+        </div>
+      )}
       {/* Effect quick-access strip */}
-      <EffectStrip instrumentId={instrumentId} />
+      <div className="mt-1 w-full">
+        <EffectStrip instrumentId={instrumentId} />
+      </div>
       {popupOpen && popupAnchor && tree.length > 0 && (
         <SamplePickerPopup
           instrumentId={instrumentId}

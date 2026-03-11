@@ -1,3 +1,4 @@
+import { useState, useRef } from 'react';
 import { useStore } from '../../state/store';
 import type { Effect } from '../../types/effects';
 import { EFFECT_PARAM_DEFS } from '../../audio/effectParams';
@@ -8,7 +9,9 @@ import { ParamEQDisplay, ParamEQTypeRow } from './ParamEQDisplay';
 import type { BandParam } from './ParamEQDisplay';
 import { CompressorDisplay } from './CompressorDisplay';
 import { TranceGateDisplay } from './TranceGateDisplay';
-import { PingPongDisplay } from './PingPongDisplay';
+import { DelayDisplay } from './DelayDisplay';
+import { DELAY_SYNC_DIVS, DELAY_MODE_LABELS } from '../../audio/effectParams';
+import { EffectPresetDropdown } from './EffectPresetDropdown';
 
 export const EFFECT_COLORS: Record<string, string> = {
   eq3:         '#BAF2FF',
@@ -24,7 +27,6 @@ export const EFFECT_COLORS: Record<string, string> = {
   tremolo:     '#FFE0BA',
   ringmod:     '#BAFFF0',
   trancegate:  '#FF9EBA',
-  pingpong:    '#BAF0FF',
   limiter:     '#FFB3B3',
   drumbuss:    '#FFD4A3',
   stereoimage: '#B3D4FF',
@@ -34,7 +36,7 @@ export const EFFECT_ICONS: Record<string, string> = {
   eq3: '≡', parame: '≋', compressor: '⊓', reverb: '~', delay: '◷',
   chorus: '≈', phaser: '⊕', distortion: '⋀', filter: '◡',
   bitcrusher: '⊞', tremolo: '∿', ringmod: '⊗',
-  trancegate: '◉', pingpong: '⇄',
+  trancegate: '◉',
   limiter: '⊔', drumbuss: '⊚', stereoimage: '↔',
 };
 
@@ -164,14 +166,92 @@ function ReverbBody({ effect, color, onChange }: BodyProps) {
 
 // ── Delay ──────────────────────────────────────────────────────────────────
 
-function DelayBody({ effect, color, onChange }: BodyProps) {
+// Compact subdivision buttons for delay sync
+const SYNC_BUTTON_INDICES = [2, 5, 7, 8, 11, 14]; // 1/16, 1/8, 1/8D, 1/4, 1/2, 1/1
+
+function DelayBody({ effect, color, onChange, instrumentId }: BodyProps) {
+  const bpm = useStore((s) => s.bpm);
+  const orbitIndex = useStore((s) => s.instruments.find((i) => i.id === instrumentId)?.orbitIndex ?? -1);
+  const p = effect.params;
+  const mode    = Math.round(p.mode    ?? 0);
+  const sync    = Math.round(p.sync    ?? 0);
+  const syncDiv = Math.round(p.syncDiv ?? 8);
+
+  // Compute display time (sync overrides free time)
+  let displayTime = p.time ?? 0.25;
+  if (sync === 1 && bpm > 0) {
+    const beatSec = 60 / bpm;
+    const div = DELAY_SYNC_DIVS[Math.min(syncDiv, DELAY_SYNC_DIVS.length - 1)];
+    displayTime = Math.min(2.0, beatSec * div.mult);
+  }
+
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex justify-around">
-        {knobFor(effect, 'time',   color, onChange, 'lg')}
-        {knobFor(effect, 'amount', color, onChange, 'md')}
+      {/* Echo visualization */}
+      <DelayDisplay
+        time={displayTime}
+        feedback={p.feedback ?? 0.4}
+        mode={mode}
+        sync={sync}
+        syncDiv={syncDiv}
+        bpm={bpm}
+        orbitIndex={orbitIndex}
+        color={color}
+      />
+
+      {/* Mode selector */}
+      <div className="flex items-center gap-1">
+        <TypeButtons
+          labels={DELAY_MODE_LABELS}
+          value={mode}
+          color={color}
+          onChange={(i) => onChange('mode', i)}
+        />
       </div>
+
+      {/* Sync toggle + time control */}
+      <div className="flex items-center gap-2" style={{ minHeight: 76 }}>
+        <button
+          onClick={() => onChange('sync', sync === 1 ? 0 : 1)}
+          className="fx-stages-btn shrink-0"
+          style={{
+            background: sync === 1 ? `${color}28` : 'transparent',
+            border: `1px solid ${sync === 1 ? color : '#2a2a3a'}`,
+            color: sync === 1 ? color : '#8888a0',
+            fontWeight: sync === 1 ? 600 : 400,
+          }}
+        >
+          Sync
+        </button>
+        {sync === 1 ? (
+          <div className="flex items-center gap-1 flex-1 flex-wrap">
+            {SYNC_BUTTON_INDICES.map((idx) => (
+              <button
+                key={idx}
+                onClick={() => onChange('syncDiv', idx)}
+                className="fx-stages-btn"
+                style={{
+                  background: syncDiv === idx ? `${color}28` : 'transparent',
+                  border: `1px solid ${syncDiv === idx ? color : '#2a2a3a'}`,
+                  color: syncDiv === idx ? color : '#8888a0',
+                  fontSize: 8,
+                  padding: '1px 4px',
+                }}
+              >
+                {DELAY_SYNC_DIVS[idx].label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex-1">
+            {knobFor(effect, 'time', color, onChange, 'md')}
+          </div>
+        )}
+      </div>
+
+      {/* Core knobs */}
       <div className="flex justify-around">
+        {knobFor(effect, 'amount',   color, onChange, 'lg')}
         {knobFor(effect, 'feedback', color, onChange, 'md')}
         {knobFor(effect, 'tone',     color, onChange, 'md')}
       </div>
@@ -465,29 +545,6 @@ function TranceGateBody({ effect, color, instrumentId, onChange }: BodyProps) {
   );
 }
 
-// ── Ping Pong Delay ─────────────────────────────────────────────────────────
-
-function PingPongBody({ effect, color, onChange }: BodyProps) {
-  return (
-    <div className="flex flex-col gap-2">
-      <PingPongDisplay
-        time={effect.params.time ?? 0.25}
-        feedback={effect.params.feedback ?? 0.45}
-        color={color}
-      />
-      <div className="flex justify-around">
-        {knobFor(effect, 'time',     color, onChange, 'lg')}
-        {knobFor(effect, 'amount',   color, onChange, 'md')}
-      </div>
-      <div className="flex justify-around">
-        {knobFor(effect, 'feedback', color, onChange, 'md')}
-        {knobFor(effect, 'tone',     color, onChange, 'sm')}
-        {knobFor(effect, 'spread',   color, onChange, 'sm')}
-      </div>
-    </div>
-  );
-}
-
 // ── Limiter ─────────────────────────────────────────────────────────────────
 
 function LimiterBody({ effect, color, onChange }: BodyProps) {
@@ -640,7 +697,6 @@ const BODY_MAP: Record<string, React.ComponentType<BodyProps>> = {
   tremolo:    TremoloBody,
   ringmod:    RingModBody,
   trancegate: TranceGateBody,
-  pingpong:    PingPongBody,
   limiter:     LimiterBody,
   drumbuss:    DrumBussBody,
   stereoimage: StereoImageBody,
@@ -667,6 +723,8 @@ export function EffectBlock({
   const toggleEffectCollapsed = useStore((s) => s.toggleEffectCollapsed);
   const setEffectParam        = useStore((s) => s.setEffectParam);
   const removeEffect          = useStore((s) => s.removeEffect);
+  const [presetOpen, setPresetOpen] = useState(false);
+  const presetBtnRef = useRef<HTMLButtonElement>(null);
 
   const color    = EFFECT_COLORS[effect.type] ?? '#94a3b8';
   const onChange = (key: string, val: number) =>
@@ -717,6 +775,15 @@ export function EffectBlock({
           {effect.label}
         </span>
         <button
+          ref={presetBtnRef}
+          onClick={() => setPresetOpen(!presetOpen)}
+          className="fx-block-btn text-white/20 hover:text-white/50"
+          title="Presets"
+          style={{ fontSize: 11 }}
+        >
+          ☰
+        </button>
+        <button
           onClick={() => toggleEffectCollapsed(instrumentId, effect.id)}
           className="fx-block-btn text-white/20 hover:text-white/50"
         >
@@ -736,6 +803,22 @@ export function EffectBlock({
           color={color}
           instrumentId={instrumentId}
           onChange={onChange}
+        />
+      )}
+
+      {presetOpen && presetBtnRef.current && (
+        <EffectPresetDropdown
+          effectType={effect.type}
+          params={effect.params}
+          color={color}
+          anchorRect={presetBtnRef.current.getBoundingClientRect()}
+          onApply={(params) => {
+            for (const [key, val] of Object.entries(params)) {
+              setEffectParam(instrumentId, effect.id, key, val);
+            }
+            setPresetOpen(false);
+          }}
+          onClose={() => setPresetOpen(false)}
         />
       )}
     </div>

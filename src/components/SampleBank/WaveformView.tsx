@@ -5,17 +5,24 @@ interface WaveformViewProps {
   sampleUrl: string;
   begin: number;
   end: number;
+  attack?: number;
+  release?: number;
   color?: string;
   onRegionChange?: (begin: number, end: number) => void;
 }
 
 type DragTarget = 'begin' | 'end' | null;
 
-export function WaveformView({ sampleUrl, begin, end, color = '#7dd3fc', onRegionChange }: WaveformViewProps) {
+export function WaveformView({ sampleUrl, begin, end, attack = 0, release = 0, color = '#7dd3fc', onRegionChange }: WaveformViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
   const [loading, setLoading] = useState(false);
+  const [duration, setDuration] = useState<number>(0);
+  const [localBegin, setLocalBegin] = useState(begin);
+  const [localEnd, setLocalEnd] = useState(end);
   const dragTarget = useRef<DragTarget>(null);
+  const localBeginRef = useRef(begin);
+  const localEndRef = useRef(end);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Decode audio and extract peak data
@@ -54,10 +61,24 @@ export function WaveformView({ sampleUrl, begin, end, color = '#7dd3fc', onRegio
           result[b] = peak;
         }
         setPeaks(result);
+        setDuration(decoded.duration);
       })
-      .catch(() => setPeaks(null))
+      .catch(() => {
+        setPeaks(null);
+        setDuration(0);
+      })
       .finally(() => setLoading(false));
   }, [sampleUrl]);
+
+  // Sync local begin/end when props change and not dragging
+  useEffect(() => {
+    if (!dragTarget.current) {
+      setLocalBegin(begin);
+      setLocalEnd(end);
+      localBeginRef.current = begin;
+      localEndRef.current = end;
+    }
+  }, [begin, end]);
 
   // Draw waveform to canvas
   const draw = useCallback(() => {
@@ -83,8 +104,8 @@ export function WaveformView({ sampleUrl, begin, end, color = '#7dd3fc', onRegio
     }
 
     const mid = height / 2;
-    const beginX = begin * width;
-    const endX = end * width;
+    const beginX = localBegin * width;
+    const endX = localEnd * width;
 
     // Region tint
     ctx.fillStyle = `${color}18`;
@@ -99,6 +120,18 @@ export function WaveformView({ sampleUrl, begin, end, color = '#7dd3fc', onRegio
       ctx.fillStyle = inRegion ? color : 'rgba(255,255,255,0.2)';
       ctx.fillRect(x, mid - amp, barW, amp * 2 || 1);
     }
+
+    // Attack envelope (left gradient) — relative to region duration
+    if (attack > 0 && duration > 0) {
+      const regionDurationSec = (localEnd - localBegin) * duration;
+      const attackWidthPx = Math.max(1, (attack / regionDurationSec) * (endX - beginX));
+      const grad = ctx.createLinearGradient(beginX, 0, beginX + attackWidthPx, 0);
+      grad.addColorStop(0, `${color}00`);
+      grad.addColorStop(1, `${color}66`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(beginX, 0, attackWidthPx, height);
+    }
+
 
     // Center line
     ctx.strokeStyle = 'rgba(255,255,255,0.08)';
@@ -129,7 +162,7 @@ export function WaveformView({ sampleUrl, begin, end, color = '#7dd3fc', onRegio
 
     drawMarker(beginX, 'B');
     drawMarker(endX, 'E');
-  }, [peaks, begin, end, color, loading]);
+  }, [peaks, localBegin, localEnd, color, loading, attack, duration]);
 
   useEffect(() => {
     draw();
@@ -160,8 +193,8 @@ export function WaveformView({ sampleUrl, begin, end, color = '#7dd3fc', onRegio
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!onRegionChange) return;
     const norm = xToNorm(e.clientX);
-    const beginX = begin * (containerRef.current?.offsetWidth ?? 1);
-    const endX = end * (containerRef.current?.offsetWidth ?? 1);
+    const beginX = localBegin * (containerRef.current?.offsetWidth ?? 1);
+    const endX = localEnd * (containerRef.current?.offsetWidth ?? 1);
     const x = norm * (containerRef.current?.offsetWidth ?? 1);
 
     const hitRadius = 8;
@@ -174,15 +207,24 @@ export function WaveformView({ sampleUrl, begin, end, color = '#7dd3fc', onRegio
 
   useEffect(() => {
     const handleMove = (e: MouseEvent) => {
-      if (!dragTarget.current || !onRegionChange) return;
+      if (!dragTarget.current) return;
       const norm = xToNorm(e.clientX);
       if (dragTarget.current === 'begin') {
-        onRegionChange(Math.min(norm, end - 0.01), end);
+        const newBegin = Math.min(norm, localEnd - 0.01);
+        setLocalBegin(newBegin);
+        localBeginRef.current = newBegin;
       } else {
-        onRegionChange(begin, Math.max(norm, begin + 0.01));
+        const newEnd = Math.max(norm, localBegin + 0.01);
+        setLocalEnd(newEnd);
+        localEndRef.current = newEnd;
       }
     };
-    const handleUp = () => { dragTarget.current = null; };
+    const handleUp = () => {
+      if (dragTarget.current && onRegionChange) {
+        onRegionChange(localBeginRef.current, localEndRef.current);
+      }
+      dragTarget.current = null;
+    };
 
     window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleUp);
@@ -190,7 +232,7 @@ export function WaveformView({ sampleUrl, begin, end, color = '#7dd3fc', onRegio
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
     };
-  }, [begin, end, onRegionChange]);
+  }, [localBegin, localEnd, onRegionChange]);
 
   return (
     <div ref={containerRef} className="relative w-full" style={{ height: 72 }}>

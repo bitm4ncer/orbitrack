@@ -9,7 +9,6 @@ export interface LooperParams {
   pitchSemitones: number; // -24 to +24, pitch offset in semitones
   reverse: boolean;       // reverse playback
   startOffset: number;    // 0-1 normalized, shifts loop start point
-  degrade: number;        // 0-1, creative degradation (bitcrush + sample rate reduction)
 }
 
 export const DEFAULT_LOOPER_PARAMS: LooperParams = {
@@ -23,7 +22,6 @@ export const DEFAULT_LOOPER_PARAMS: LooperParams = {
   pitchSemitones: 0,
   reverse: false,
   startOffset: 0,
-  degrade: 0,
 };
 
 export interface LooperEditorState {

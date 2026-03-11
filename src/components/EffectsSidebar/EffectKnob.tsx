@@ -37,16 +37,17 @@ interface EffectKnobProps {
   min: number;
   max: number;
   step: number;
-  defaultValue: number;
+  defaultValue?: number;
   label: string;
   color: string;
   unit?: string;
+  format?: (v: number) => string;
   size?: 'sm' | 'md' | 'lg';
   onChange: (v: number) => void;
 }
 
 export function EffectKnob({
-  value, min, max, step, defaultValue, label, color, unit,
+  value, min, max, step, defaultValue, label, color, unit, format,
   size = 'md', onChange,
 }: EffectKnobProps) {
   const px = SIZE_MAP[size];
@@ -90,8 +91,8 @@ export function EffectKnob({
   }, []);
 
   const handleDoubleClick = useCallback(() => {
-    onChange(defaultValue);
-  }, [defaultValue, onChange]);
+    onChange(defaultValue ?? min);
+  }, [defaultValue, min, onChange]);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
@@ -100,7 +101,7 @@ export function EffectKnob({
     onChange(snapToStep(value + dir * step * mult, step, min, max));
   }, [value, min, max, step, onChange]);
 
-  const displayVal = formatValue(value, step, unit);
+  const displayVal = format ? format(value) : formatValue(value, step, unit);
   const dimColor = `${color}40`; // 25% opacity for track
   const activeColor = color;
 

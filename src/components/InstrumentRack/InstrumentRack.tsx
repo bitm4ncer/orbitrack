@@ -1,8 +1,61 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useStore } from '../../state/store';
 import { PASTEL_COLORS } from '../../canvas/colors';
 import { getOrbitAnalyser } from '../../audio/orbitEffects';
 import type { Instrument } from '../../types/instrument';
+import { GroupHeader } from './GroupHeader';
+
+// ── EditableName ─────────────────────────────────────────────────────────────
+
+function EditableName({ id, name, isRenaming, className, style }: {
+  id: string; name: string; isRenaming: boolean;
+  className?: string; style?: React.CSSProperties;
+}) {
+  const [val, setVal] = useState(name);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isRenaming) {
+      setVal(name);
+      // defer focus so input is mounted
+      requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.select(); });
+    }
+  }, [isRenaming]);
+
+  const commit = useCallback(() => {
+    const trimmed = val.trim();
+    if (trimmed && trimmed !== name) {
+      useStore.getState().updateInstrument(id, { name: trimmed });
+    }
+    useStore.getState().setRenamingId(null);
+  }, [id, name, val]);
+
+  if (isRenaming) {
+    return (
+      <input
+        ref={inputRef}
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') useStore.getState().setRenamingId(null); }}
+        onClick={(e) => e.stopPropagation()}
+        className="flex-1 text-[11px] bg-bg-tertiary border border-border rounded px-1 py-0 text-text-primary outline-none"
+        style={{ minWidth: 0 }}
+      />
+    );
+  }
+
+  return (
+    <span
+      className={className}
+      style={style}
+      onDoubleClick={(e) => { e.stopPropagation(); useStore.getState().setRenamingId(id); }}
+      title="Double-click to rename"
+    >
+      {name}
+    </span>
+  );
+}
 
 // ── Knob28 ──────────────────────────────────────────────────────────────────
 
@@ -80,8 +133,9 @@ const VU_GRID_DB = [0, -6, -12, -18, -24, -36, -48];
 
 function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef({ level: 0, peak: 0, peakHold: 0 });
+  const stateRef = useRef({ level: 0, peak: 0, peakHold: 0, currentDb: DB_FLOOR });
   const rafRef = useRef<number>(0);
+  const [tooltipDb, setTooltipDb] = useState(DB_FLOOR);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -118,12 +172,15 @@ function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }
         for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
         const rms = Math.sqrt(sum / buf.length);
         const db = rms > 0 ? Math.max(DB_FLOOR, 20 * Math.log10(rms)) : DB_FLOOR;
+        s.currentDb = db;
         const lvl = (db - DB_FLOOR) / -DB_FLOOR;
         if (lvl > s.level) s.level = lvl;
         else s.level = Math.max(0, s.level - 0.02);
         if (lvl > s.peak) { s.peak = lvl; s.peakHold = 120; }
         else if (s.peakHold > 0) s.peakHold--;
         else s.peak = Math.max(0, s.peak - 0.003);
+        // Update tooltip
+        if (s.peakHold > 0) setTooltipDb(Math.round(db * 10) / 10);
       }
 
       // dB grid lines
@@ -171,10 +228,29 @@ function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }
   }, [orbitIndex, color]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{ width: '100%', height: '100%', display: 'block' }}
-    />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <canvas
+        ref={canvasRef}
+        style={{ width: '100%', height: '100%', display: 'block' }}
+      />
+      {/* dB tooltip centered above peak line */}
+      <div style={{
+        position: 'absolute',
+        top: '0',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        fontSize: '8px',
+        fontFamily: 'monospace',
+        color: color,
+        fontWeight: 'bold',
+        textShadow: '0 0 2px rgba(0,0,0,0.8)',
+        pointerEvents: 'none',
+        opacity: stateRef.current.peakHold > 0 ? 1 : 0,
+        transition: 'opacity 0.15s',
+      }}>
+        {tooltipDb === 0 ? '0 dB' : `${tooltipDb > 0 ? '+' : ''}${tooltipDb.toFixed(1)} dB`}
+      </div>
+    </div>
   );
 }
 
@@ -183,12 +259,13 @@ function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }
 const FADER_MIN = -20;
 const FADER_MAX = 20;
 
-function VerticalFader({ value, color, onChange }: {
-  value: number; color: string; onChange: (v: number) => void;
+function VerticalFader({ value, color, onChange, showTooltip = true }: {
+  value: number; color: string; onChange: (v: number) => void; showTooltip?: boolean;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const norm = (value - FADER_MIN) / (FADER_MAX - FADER_MIN); // 0=bottom, 1=top
   const handleTop = `calc(${(1 - norm) * 100}% - 7px)`;
+  const dbLabel = value === 0 ? '0 dB' : `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`;
 
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -199,7 +276,8 @@ function VerticalFader({ value, color, onChange }: {
     const onMove = (ev: MouseEvent) => {
       const relY = ev.clientY - rect.top;
       const n = Math.max(0, Math.min(1, 1 - relY / rect.height));
-      onChange(Math.max(FADER_MIN, Math.min(FADER_MAX, Math.round(FADER_MIN + n * (FADER_MAX - FADER_MIN)))));
+      // Smooth continuous value (no rounding)
+      onChange(Math.max(FADER_MIN, Math.min(FADER_MAX, FADER_MIN + n * (FADER_MAX - FADER_MIN))));
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
@@ -209,42 +287,142 @@ function VerticalFader({ value, color, onChange }: {
     window.addEventListener('mouseup', onUp);
   };
 
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      // Scroll up = increase volume, scroll down = decrease (deltaY is positive when scrolling down)
+      const step = 0.5; // 0.5 dB per scroll step
+      const delta = -e.deltaY > 0 ? step : -step;
+      onChange(Math.max(FADER_MIN, Math.min(FADER_MAX, value + delta)));
+    };
+
+    track.addEventListener('wheel', handleWheel, { passive: false });
+    return () => track.removeEventListener('wheel', handleWheel);
+  }, [value, onChange]);
+
   return (
     <div
       ref={trackRef}
       className="relative w-full h-full select-none cursor-ns-resize"
       onMouseDown={startDrag}
     >
-      {/* Track groove */}
-      <div className="absolute rounded-full" style={{
-        left: '50%', transform: 'translateX(-50%)',
-        width: 3, top: 6, bottom: 6,
-        background: 'rgba(255,255,255,0.06)',
-        boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)',
-      }} />
-      {/* Fill: from bottom to handle */}
-      <div className="absolute rounded-full" style={{
-        left: '50%', transform: 'translateX(-50%)',
-        width: 3,
-        top: `calc(${(1 - norm) * 100}%)`,
-        bottom: 6,
-        background: `${color}45`,
-      }} />
-      {/* 0 dB notch */}
+      {/* 0 dB notch — key reference line */}
       <div className="absolute" style={{
         left: '22%', right: '22%', height: 1,
         top: '50%', transform: 'translateY(-50%)',
-        background: 'rgba(255,255,255,0.28)',
+        background: 'rgba(255,255,255,0.35)',
       }} />
-      {/* Handle */}
+      {/* Handle — overlays meter column with strong visual contrast */}
       <div className="absolute rounded" style={{
         left: '12%', right: '12%',
         height: 14,
         top: handleTop,
-        background: `linear-gradient(160deg, ${color}f0 0%, ${color}88 100%)`,
-        boxShadow: `0 2px 10px ${color}55, 0 1px 3px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.18)`,
-        border: '1px solid rgba(255,255,255,0.12)',
-      }} />
+        background: `linear-gradient(160deg, ${color}ee 0%, ${color}99 100%)`,
+        boxShadow: `0 0 8px ${color}70, 0 2px 5px rgba(0,0,0,0.85)`,
+        border: '1px solid rgba(255,255,255,0.35)',
+      }}>
+        {/* dB tooltip above handle */}
+        {showTooltip && (
+          <div style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            marginBottom: '4px',
+            whiteSpace: 'nowrap',
+            fontSize: '9px',
+            fontFamily: 'monospace',
+            color: color,
+            fontWeight: 'bold',
+            textShadow: '0 0 2px rgba(0,0,0,0.8)',
+            pointerEvents: 'none',
+          }}>
+            {dbLabel}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── MasterFader ──────────────────────────────────────────────────────────────
+
+function MasterFader({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const norm = (value - FADER_MIN) / (FADER_MAX - FADER_MIN);
+  const handleTop = `calc(${(1 - norm) * 100}% - 7px)`;
+  const dbLabel = value === 0 ? '0 dB' : `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`;
+  const masterColor = '#888';
+
+  const startDrag = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const track = trackRef.current;
+    if (!track) return;
+    const rect = track.getBoundingClientRect();
+    const onMove = (ev: MouseEvent) => {
+      const relY = ev.clientY - rect.top;
+      const n = Math.max(0, Math.min(1, 1 - relY / rect.height));
+      onChange(Math.max(FADER_MIN, Math.min(FADER_MAX, FADER_MIN + n * (FADER_MAX - FADER_MIN))));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const step = 0.5;
+      const delta = -e.deltaY > 0 ? step : -step;
+      onChange(Math.max(FADER_MIN, Math.min(FADER_MAX, value + delta)));
+    };
+    track.addEventListener('wheel', handleWheel, { passive: false });
+    return () => track.removeEventListener('wheel', handleWheel);
+  }, [value, onChange]);
+
+  return (
+    <div className="flex flex-col shrink-0 cursor-pointer" style={{ width: 58, borderLeft: '1px solid rgba(255,255,255,0.045)', background: 'rgba(100,100,100,0.05)' }}>
+      {/* Master label */}
+      <div className="px-1 pt-2 pb-1 flex items-center justify-center">
+        <span className="text-[8px] font-medium text-center text-white/50 uppercase tracking-wider">Master</span>
+      </div>
+
+      {/* Fader */}
+      <div className="relative flex-1 min-h-0 px-1.5 pb-0.5">
+        <div className="absolute inset-0 rounded-sm overflow-hidden" style={{ background: 'rgba(0,0,0,0.35)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)' }} />
+        <div className="absolute inset-0" ref={trackRef} className="relative w-full h-full select-none cursor-ns-resize" onMouseDown={startDrag}>
+          {/* 0 dB notch */}
+          <div className="absolute" style={{ left: '22%', right: '22%', height: 1, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.35)' }} />
+          {/* Handle */}
+          <div className="absolute rounded" style={{
+            left: '12%', right: '12%', height: 14, top: handleTop,
+            background: `linear-gradient(160deg, ${masterColor}ee 0%, ${masterColor}99 100%)`,
+            boxShadow: `0 0 8px ${masterColor}70, 0 2px 5px rgba(0,0,0,0.85)`,
+            border: '1px solid rgba(255,255,255,0.35)',
+          }}>
+            <div style={{ position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '4px', whiteSpace: 'nowrap', fontSize: '9px', fontFamily: 'monospace', color: masterColor, fontWeight: 'bold', textShadow: '0 0 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
+              {dbLabel}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Gain value */}
+      <div className="text-center py-0.5" style={{ pointerEvents: 'none' }}>
+        <span className="text-[8px] font-mono tabular-nums" style={{ color: value === 0 ? 'rgba(255,255,255,0.22)' : 'rgba(136,136,136,0.8)' }}>
+          {dbLabel}
+        </span>
+      </div>
+
+      <div style={{ paddingBottom: 10 }} />
     </div>
   );
 }
@@ -254,7 +432,7 @@ function VerticalFader({ value, color, onChange }: {
 function ChannelStrip({ inst, selectedId }: { inst: Instrument; selectedId: string | null }) {
   const isSelected = inst.id === selectedId;
   const v = inst.volume;
-  const volLabel = v === 0 ? '0 dB' : `${v > 0 ? '+' : ''}${v} dB`;
+  const volLabel = v === 0 ? '0 dB' : `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`;
 
   return (
     <div
@@ -278,17 +456,17 @@ function ChannelStrip({ inst, selectedId }: { inst: Instrument; selectedId: stri
         </span>
       </div>
 
-      {/* VU + Fader (fills available height) */}
-      <div className="flex flex-row flex-1 min-h-0 gap-0.5 px-1.5 pb-0.5">
-        {/* VU meter */}
+      {/* VU + Fader (fader overlaid on meter) */}
+      <div className="relative flex-1 min-h-0 px-1.5 pb-0.5">
+        {/* VU meter — fills entire area, background layer */}
         <div
-          className="flex-1 min-w-0 rounded-sm overflow-hidden"
+          className="absolute inset-0 rounded-sm overflow-hidden"
           style={{ background: 'rgba(0,0,0,0.35)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)' }}
         >
           <VerticalVU orbitIndex={inst.orbitIndex} color={inst.color} />
         </div>
-        {/* Fader */}
-        <div className="shrink-0" style={{ width: 18 }}>
+        {/* Fader — transparent overlay, handle floats on top of meter */}
+        <div className="absolute inset-0">
           <VerticalFader
             value={inst.volume}
             color={inst.color}
@@ -351,10 +529,26 @@ function createId(): string {
 export function InstrumentRack() {
   const instruments = useStore((s) => s.instruments);
   const selectedId = useStore((s) => s.selectedInstrumentId);
+  const selectedIds = useStore((s) => s.selectedInstrumentIds);
+  const groups = useStore((s) => s.groups);
+  const renamingId = useStore((s) => s.renamingId);
   const dragIdx = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [levelMode, setLevelMode] = useState(false);
   const [activeAddType, setActiveAddType] = useState<'synth' | 'sampler' | 'looper'>('synth');
+
+  // Build grouped instrument ID set and a map of instrumentId → group
+  const groupedIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const g of groups) for (const id of g.instrumentIds) set.add(id);
+    return set;
+  }, [groups]);
+
+  const instGroupMap = useMemo(() => {
+    const map = new Map<string, typeof groups[0]>();
+    for (const g of groups) for (const id of g.instrumentIds) map.set(id, g);
+    return map;
+  }, [groups]);
 
   const addSampler = () => {
     const store = useStore.getState();
@@ -437,11 +631,11 @@ export function InstrumentRack() {
 
   return (
     <div
-      className="layers-sidebar bg-bg-secondary border-l border-border flex flex-col shrink-0 h-full"
-      style={{ padding: 20, width: 300 }}
+      className="layers-sidebar bg-bg-secondary border-l border-border flex flex-col shrink-0 h-full w-full"
+      style={{ padding: 10 }}
     >
       {/* Header */}
-      <div className="layers-header px-4 py-3 border-b border-border/50 flex items-center" style={{ margin: '0 -20px 20px' }}>
+      <div className="layers-header px-4 py-3 border-b border-border/50 flex items-center" style={{ margin: '0 -10px 10px' }}>
         <span className="text-[10px] text-text-secondary uppercase tracking-wider font-medium flex-1 pl-1">Orb Rack</span>
         <div className="flex items-center gap-0.5 pr-1">
           {/* Card view toggle */}
@@ -485,16 +679,76 @@ export function InstrumentRack() {
       {levelMode ? (
         <div
           className="flex-1 flex flex-row overflow-x-auto overflow-y-hidden min-h-0"
-          style={{ margin: '0 -20px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+          style={{ margin: '0 -10px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}
         >
           {instruments.map((inst) => (
             <ChannelStrip key={inst.id} inst={inst} selectedId={selectedId} />
           ))}
+          {/* Master Fader on the right */}
+          <MasterFader
+            value={useStore((s) => s.masterVolume * 20 - 10)}
+            onChange={(v) => useStore.getState().setMasterVolume((v + 10) / 20)}
+          />
         </div>
       ) : (
         /* ── Card Mode ── */
         <div className="layers-list flex-1 flex flex-col overflow-y-auto pb-3">
-          {instruments.map((inst, index) => (
+          {/* Render groups first, then ungrouped instruments */}
+          {(() => {
+            const rendered = new Set<string>();
+            const elements: React.ReactNode[] = [];
+
+            // Grouped instruments with headers — nested inside group container
+            for (const group of groups) {
+              const memberCards: React.ReactNode[] = [];
+              for (const instId of group.instrumentIds) {
+                const idx = instruments.findIndex((i) => i.id === instId);
+                const inst = instruments[idx];
+                if (!inst) continue;
+                rendered.add(instId);
+                memberCards.push(renderCard(inst, idx));
+              }
+              elements.push(
+                <div
+                  key={`group-${group.id}`}
+                  className="mx-3 mt-3 mb-1 rounded-lg"
+                  style={{
+                    border: `1px solid ${group.color}44`,
+                    background: `${group.color}08`,
+                  }}
+                >
+                  <GroupHeader key={`gh-${group.id}`} group={group} />
+                  <div
+                    className="transition-[grid-template-rows,opacity] duration-200 ease-in-out"
+                    style={{
+                      display: 'grid',
+                      gridTemplateRows: group.collapsed ? '0fr' : '1fr',
+                      opacity: group.collapsed ? 0 : 1,
+                    }}
+                  >
+                    <div className="overflow-hidden">
+                      <div className="px-1 pb-2">
+                        {memberCards}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // Ungrouped instruments
+            for (let idx = 0; idx < instruments.length; idx++) {
+              const inst = instruments[idx];
+              if (rendered.has(inst.id)) continue;
+              elements.push(renderCard(inst, idx));
+            }
+
+            return elements;
+
+            function renderCard(inst: Instrument, index: number) {
+              const isMultiSelected = selectedIds.includes(inst.id);
+              const isPrimary = selectedId === inst.id;
+              return (
             <div
               key={inst.id}
               onDragOver={(e) => { e.preventDefault(); setDragOverIdx(index); }}
@@ -510,11 +764,22 @@ export function InstrumentRack() {
                 setDragOverIdx(null);
               }}
               onDragEnd={() => { dragIdx.current = null; setDragOverIdx(null); }}
-              onClick={() => useStore.getState().selectInstrument(inst.id)}
+              onClick={(e) => {
+                if (e.shiftKey) {
+                  useStore.getState().toggleSelectInstrument(inst.id);
+                } else {
+                  useStore.getState().selectInstrument(inst.id);
+                }
+              }}
               className={`layer-card layer-${inst.type} flex flex-col gap-2 mx-3 mt-3 rounded cursor-pointer transition-colors relative
-                          ${selectedId === inst.id ? 'layer-selected bg-white/5' : 'hover:bg-white/[0.03]'}
+                          ${isPrimary ? 'layer-selected bg-white/5' : isMultiSelected ? 'bg-white/[0.03]' : 'hover:bg-white/[0.03]'}
                           ${dragOverIdx === index ? 'opacity-50' : ''}`}
-              style={{ border: `1px solid ${inst.color}`, padding: 22, marginBottom: 10 }}
+              style={{
+                border: `1px solid ${inst.color}`,
+                padding: 22,
+                marginBottom: 10,
+                ...(isMultiSelected && !isPrimary ? { boxShadow: `inset 0 0 0 1px rgba(255,255,255,0.15)` } : {}),
+              }}
             >
               {/* Top-right: remove + drag handle */}
               <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5">
@@ -552,7 +817,12 @@ export function InstrumentRack() {
                   style={{ backgroundColor: inst.muted ? '#555' : inst.color }}
                   title={inst.muted ? 'Unmute' : 'Mute'}
                 />
-                <span className="layer-name text-[11px] text-text-primary truncate flex-1">{inst.name}</span>
+                <EditableName
+                  id={inst.id}
+                  name={inst.name}
+                  isRenaming={renamingId === inst.id}
+                  className="layer-name text-[11px] text-text-primary truncate flex-1"
+                />
                 <span className="layer-type text-[9px] text-text-secondary shrink-0">{inst.type}</span>
                 <button
                   onClick={(e) => { e.stopPropagation(); useStore.getState().toggleSolo(inst.id); }}
@@ -590,12 +860,14 @@ export function InstrumentRack() {
               </div>
 
             </div>
-          ))}
+              );
+            }
+          })()}
         </div>
       )}
 
       {/* Add buttons */}
-      <div className="layers-add-bar flex items-center gap-1.5 px-3 py-2.5 border-t border-border/50" style={{ margin: '0 -20px' }}>
+      <div className="layers-add-bar flex items-center gap-1.5 px-3 py-2.5 border-t border-border/50" style={{ margin: '0 -10px' }}>
         {([
           { type: 'synth',   label: 'Synth',   fn: addSynth   },
           { type: 'sampler', label: 'Sampler',  fn: addSampler },

@@ -20,6 +20,7 @@
 import { getAudioContext, getSuperdoughAudioController } from 'superdough';
 import type { Effect } from '../types/effects';
 import { isAudioReady } from './engine';
+import { DELAY_SYNC_DIVS } from './effectParams';
 
 const MAX_PHASER_STAGES = 12;
 
@@ -190,6 +191,16 @@ interface OrbitEffectChain {
   delayDryGain: GainNode;
   delayWetGain: GainNode;
   delayMix: GainNode;
+  // Delay — Tape wow/flutter LFO
+  delayModLFO: OscillatorNode;
+  delayModLFOGain: GainNode;
+  // Delay — Lo-Fi saturation in feedback path
+  delaySaturation: WaveShaperNode;
+  // Delay — Multi-Tap
+  delayTap2: DelayNode;
+  delayTap3: DelayNode;
+  delayTap2Gain: GainNode;
+  delayTap3Gain: GainNode;
   // BitCrusher — AudioWorkletNode (SR) + WaveShaperNode (bit depth)
   bcSR: AudioWorkletNode | GainNode;   // GainNode fallback if worklet not loaded
   bcBits: WaveShaperNode;
@@ -610,9 +621,36 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   const delayFeedback = ac.createGain();
   delayFeedback.gain.value = 0.4;
 
+  // Lo-Fi saturation in feedback path (identity curve by default)
+  const delaySaturation = ac.createWaveShaper();
+  delaySaturation.oversample = '2x';
+  delaySaturation.curve = new Float32Array([-1, 1]); // linear identity
+
+  // Feedback loop: delayNode → hiCut → saturation → feedback → delayNode
   delayNode.connect(delayHighCut);
-  delayHighCut.connect(delayFeedback);
+  delayHighCut.connect(delaySaturation);
+  delaySaturation.connect(delayFeedback);
   delayFeedback.connect(delayNode);
+
+  // Tape wow/flutter LFO modulating delay time
+  const delayModLFO = ac.createOscillator();
+  delayModLFO.type = 'sine';
+  delayModLFO.frequency.value = 0.5;
+  const delayModLFOGain = ac.createGain();
+  delayModLFOGain.gain.value = 0; // disabled by default
+  delayModLFO.connect(delayModLFOGain);
+  delayModLFOGain.connect(delayNode.delayTime);
+  delayModLFO.start();
+
+  // Multi-Tap: additional taps at fractional time offsets
+  const delayTap2 = ac.createDelay(2);
+  delayTap2.delayTime.value = 0.1875;
+  const delayTap3 = ac.createDelay(2);
+  delayTap3.delayTime.value = 0.125;
+  const delayTap2Gain = ac.createGain();
+  delayTap2Gain.gain.value = 0; // disabled by default
+  const delayTap3Gain = ac.createGain();
+  delayTap3Gain.gain.value = 0;
 
   const delayDryGain = ac.createGain();
   delayDryGain.gain.value = 1;
@@ -628,6 +666,14 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   reverbMix.connect(delayNode);
   delayNode.connect(delayWetGain);
   delayWetGain.connect(delayMix);
+
+  // Multi-tap routing: input → tap delay → tap gain → wet mix
+  reverbMix.connect(delayTap2);
+  delayTap2.connect(delayTap2Gain);
+  delayTap2Gain.connect(delayWetGain);
+  reverbMix.connect(delayTap3);
+  delayTap3.connect(delayTap3Gain);
+  delayTap3Gain.connect(delayWetGain);
 
   // ─── BitCrusher — AudioWorkletNode (SR) + WaveShaperNode (bit depth) ─────
   // SR reduction via AudioWorklet (sample-and-hold); bit depth via WaveShaper
@@ -868,6 +914,8 @@ function createChain(ac: AudioContext): OrbitEffectChain {
     reverbDryGain, reverbWetGain, reverbMix,
     delayNode, delayFeedback, delayHighCut,
     delayDryGain, delayWetGain, delayMix,
+    delayModLFO, delayModLFOGain, delaySaturation,
+    delayTap2, delayTap3, delayTap2Gain, delayTap3Gain,
     bcSR, bcBits, bcDryGain, bcWetGain, bcMix,
     eqBands, eqBandsDryGain, eqBandsWetGain, eqBandsMix,
     tremoloLFO, tremoloLFOGain, tremoloAmpGain,
@@ -942,7 +990,6 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm
   const ringmodEffect     = em['ringmod'];
   const compressorEffect  = em['compressor'];
   const tranceEffect      = em['trancegate'];
-  const pingpongEffect    = em['pingpong'];
   const drumbussEffect    = em['drumbuss'];
   const stereoimageEffect = em['stereoimage'];
   const limiterEffect     = em['limiter'];
@@ -950,7 +997,7 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm
   const hasAny = eq3Effect || chorusEffect || phaserEffect || filterEffect
     || distortEffect || reverbEffect || delayEffect || bcEffect
     || parameEffect || tremoloEffect || ringmodEffect || compressorEffect
-    || tranceEffect || pingpongEffect || drumbussEffect || stereoimageEffect || limiterEffect;
+    || tranceEffect || drumbussEffect || stereoimageEffect || limiterEffect;
 
   if (!hasAny) {
     const chain = ensureIntercepted(orbitIndex);
@@ -971,6 +1018,9 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm
     chain.reverbDryGain.gain.value  = 1;
     chain.delayWetGain.gain.value   = 0;
     chain.delayDryGain.gain.value   = 1;
+    chain.delayModLFOGain.gain.value = 0;
+    chain.delayTap2Gain.gain.value  = 0;
+    chain.delayTap3Gain.gain.value  = 0;
     chain.bcWetGain.gain.value      = 0;
     chain.bcDryGain.gain.value      = 1;
     chain.eqBandsWetGain.gain.value = 0;
@@ -1146,18 +1196,90 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm
   if (delayEffect) {
     const p        = delayEffect.params;
     const amount   = p.amount   ?? 0.3;
-    const time     = p.time     ?? 0.25;
+    let   time     = p.time     ?? 0.25;
     const feedback = p.feedback ?? 0.4;
     const tone     = p.tone     ?? 8000;
+    const mode     = Math.round(p.mode    ?? 0);
+    const sync     = Math.round(p.sync    ?? 0);
+    const syncDiv  = Math.round(p.syncDiv ?? 8);
 
+    // BPM sync: override time with musical subdivision
+    if (sync === 1 && bpm > 0) {
+      const beatSec = 60 / bpm;
+      const div = DELAY_SYNC_DIVS[Math.min(syncDiv, DELAY_SYNC_DIVS.length - 1)];
+      time = Math.min(2.0, beatSec * div.mult);
+    }
+
+    // Base delay time + feedback
     chain.delayNode.delayTime.setTargetAtTime(time,     now, ramp);
     chain.delayFeedback.gain.setTargetAtTime(feedback,  now, ramp);
-    chain.delayHighCut.frequency.setTargetAtTime(tone,  now, ramp);
-    chain.delayDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
-    chain.delayWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
+
+    // Mode-specific behavior
+    if (mode === 1) {
+      // Tape: wow/flutter LFO, mild saturation, reduced hi-cut
+      chain.delayModLFOGain.gain.setTargetAtTime(0.0005 + feedback * 0.0003, now, ramp);
+      chain.delayModLFO.frequency.setTargetAtTime(0.5, now, ramp);
+      chain.delaySaturation.curve = makeDistortionCurve(0, 0.2) as Float32Array<ArrayBuffer>;
+      chain.delayHighCut.frequency.setTargetAtTime(Math.min(tone, 12000), now, ramp);
+      chain.delayTap2Gain.gain.setTargetAtTime(0, now, ramp);
+      chain.delayTap3Gain.gain.setTargetAtTime(0, now, ramp);
+    } else if (mode === 2) {
+      // Lo-Fi: heavier saturation, lower hi-cut
+      chain.delayModLFOGain.gain.setTargetAtTime(0, now, ramp);
+      chain.delaySaturation.curve = makeDistortionCurve(0, 0.6) as Float32Array<ArrayBuffer>;
+      chain.delayHighCut.frequency.setTargetAtTime(Math.min(tone, 4000), now, ramp);
+      chain.delayTap2Gain.gain.setTargetAtTime(0, now, ramp);
+      chain.delayTap3Gain.gain.setTargetAtTime(0, now, ramp);
+    } else if (mode === 3) {
+      // Multi-Tap: taps at 0.75× and 0.5× time
+      chain.delayModLFOGain.gain.setTargetAtTime(0, now, ramp);
+      chain.delaySaturation.curve = new Float32Array([-1, 1]);
+      chain.delayHighCut.frequency.setTargetAtTime(tone, now, ramp);
+      chain.delayTap2.delayTime.setTargetAtTime(time * 0.75, now, ramp);
+      chain.delayTap3.delayTime.setTargetAtTime(time * 0.5,  now, ramp);
+      chain.delayTap2Gain.gain.setTargetAtTime(0.7, now, ramp);
+      chain.delayTap3Gain.gain.setTargetAtTime(0.5, now, ramp);
+    } else if (mode === 4) {
+      // PingPong: make delay chain transparent, route through pp chain
+      chain.delayModLFOGain.gain.setTargetAtTime(0, now, ramp);
+      chain.delaySaturation.curve = new Float32Array([-1, 1]);
+      chain.delayHighCut.frequency.setTargetAtTime(tone, now, ramp);
+      chain.delayTap2Gain.gain.setTargetAtTime(0, now, ramp);
+      chain.delayTap3Gain.gain.setTargetAtTime(0, now, ramp);
+
+      // Delay chain transparent — ping-pong chain handles audio
+      chain.delayDryGain.gain.setTargetAtTime(1, now, ramp);
+      chain.delayWetGain.gain.setTargetAtTime(0, now, ramp);
+
+      // Activate pp chain with delay params
+      chain.ppDelay1.delayTime.setTargetAtTime(time, now, ramp);
+      chain.ppDelay2.delayTime.setTargetAtTime(time, now, ramp);
+      chain.ppFeedGain.gain.setTargetAtTime(feedback, now, ramp);
+      chain.ppHiCut.frequency.setTargetAtTime(tone, now, ramp);
+      chain.ppPanL.pan.setTargetAtTime(-1, now, ramp);
+      chain.ppPanR.pan.setTargetAtTime(1, now, ramp);
+      chain.ppDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
+      chain.ppWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
+    } else {
+      // Normal: disable all extras
+      chain.delayModLFOGain.gain.setTargetAtTime(0, now, ramp);
+      chain.delaySaturation.curve = new Float32Array([-1, 1]);
+      chain.delayHighCut.frequency.setTargetAtTime(tone, now, ramp);
+      chain.delayTap2Gain.gain.setTargetAtTime(0, now, ramp);
+      chain.delayTap3Gain.gain.setTargetAtTime(0, now, ramp);
+    }
+
+    // Wet/dry crossfade (equal-power) — skip for PingPong (handled above)
+    if (mode !== 4) {
+      chain.delayDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
+      chain.delayWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
+    }
   } else {
     chain.delayWetGain.gain.setTargetAtTime(0, now, ramp);
     chain.delayDryGain.gain.setTargetAtTime(1, now, ramp);
+    chain.delayModLFOGain.gain.setTargetAtTime(0, now, ramp);
+    chain.delayTap2Gain.gain.setTargetAtTime(0, now, ramp);
+    chain.delayTap3Gain.gain.setTargetAtTime(0, now, ramp);
   }
 
   // ─── BitCrusher ──────────────────────────────────────────────────────────
@@ -1278,26 +1400,14 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm
     tranceGatePhaseRef.delete(orbitIndex);
   }
 
-  // ─── Ping Pong Delay ─────────────────────────────────────────────────────
-  if (pingpongEffect) {
-    const p        = pingpongEffect.params;
-    const amount   = Math.max(0, Math.min(1, p.amount   ?? 0.4));
-    const time     = Math.max(0.01, p.time     ?? 0.25);
-    const feedback = Math.max(0, Math.min(0.9, p.feedback ?? 0.45));
-    const tone     = Math.max(200, p.tone     ?? 8000);
-    const spread   = Math.max(0, Math.min(1,   p.spread   ?? 1));
-    chain.ppDelay1.delayTime.setTargetAtTime(time, now, ramp);
-    chain.ppDelay2.delayTime.setTargetAtTime(time, now, ramp);
-    chain.ppFeedGain.gain.setTargetAtTime(feedback, now, ramp);
-    chain.ppHiCut.frequency.setTargetAtTime(tone, now, ramp);
-    chain.ppPanL.pan.setTargetAtTime(-spread, now, ramp);
-    chain.ppPanR.pan.setTargetAtTime(spread, now, ramp);
-    chain.ppDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
-    chain.ppWetGain.gain.setTargetAtTime(Math.sin(amount * Math.PI / 2), now, ramp);
-  } else {
-    chain.ppFeedGain.gain.setTargetAtTime(0, now, ramp);
-    chain.ppDryGain.gain.setTargetAtTime(1, now, ramp);
-    chain.ppWetGain.gain.setTargetAtTime(0, now, ramp);
+  // ─── Ping Pong chain — controlled by delay mode=4 ────────────────────────
+  {
+    const delayHandlesPP = delayEffect && Math.round(delayEffect.params.mode ?? 0) === 4;
+    if (!delayHandlesPP) {
+      chain.ppFeedGain.gain.setTargetAtTime(0, now, ramp);
+      chain.ppDryGain.gain.setTargetAtTime(1, now, ramp);
+      chain.ppWetGain.gain.setTargetAtTime(0, now, ramp);
+    }
   }
 
   // ─── Drum Buss ───────────────────────────────────────────────────────────
@@ -1382,4 +1492,18 @@ export function getSynthOrbitInput(orbitIndex: number): GainNode | null {
 
 export function getCompressorNode(orbitIndex: number): DynamicsCompressorNode | null {
   return chains.get(orbitIndex)?.compressor ?? null;
+}
+
+/** Returns the chain tail (limiterMix) and the orbit's output node for group bus routing. */
+export function getOrbitChainTail(orbitIndex: number): { limiterMix: GainNode; outputNode: AudioNode } | null {
+  const chain = chains.get(orbitIndex);
+  if (!chain || !chain.intercepted) return null;
+  try {
+    const controller = getSuperdoughAudioController();
+    const orbit = controller.getOrbit(orbitIndex);
+    const outputNode = orbit.output as unknown as AudioNode;
+    return { limiterMix: chain.limiterMix, outputNode };
+  } catch {
+    return null;
+  }
 }

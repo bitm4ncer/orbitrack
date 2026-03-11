@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'orbeat-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let cachedDB: IDBDatabase | null = null;
 
@@ -38,6 +38,12 @@ export function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('recordingFolders')) {
         db.createObjectStore('recordingFolders', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('effectPresets')) {
+        const ep = db.createObjectStore('effectPresets', { keyPath: 'id' });
+        ep.createIndex('effectType', 'effectType', { unique: false });
+        ep.createIndex('folder', 'folder', { unique: false });
+        ep.createIndex('source', 'source', { unique: false });
       }
     };
 

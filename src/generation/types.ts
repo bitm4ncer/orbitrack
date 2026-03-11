@@ -10,7 +10,32 @@ export interface GeneratedEvent {
   glide?: boolean;     // portamento to next note
 }
 
-export type GenerationMode = 'random' | 'scaleBased' | 'chordBased' | 'bassline' | 'drumPattern';
+// ── Instrument classification ────────────────────────────────────────────────
+
+export type InstrumentRole =
+  | 'kick'
+  | 'snare'
+  | 'hihat'      // closed and open hi-hats
+  | 'openhat'
+  | 'clap'
+  | 'percussion' // toms, rim, cowbell, misc perc
+  | 'bass'
+  | 'lead'
+  | 'pad'
+  | 'chord'
+  | 'arp'
+  | 'vocal'
+  | 'fx'
+  | 'unknown';
+
+// ── Octave controls ─────────────────────────────────────────────────────────
+
+export interface OctaveOverride {
+  base: number;  // 0–8
+  span: number;  // 1–4
+}
+
+export type GenerationMode = 'random' | 'scaleBased' | 'chordBased' | 'bassline' | 'drumPattern' | 'prompt';
 
 /** Shared context all generators receive */
 export interface GenerationContext {
@@ -20,6 +45,9 @@ export interface GenerationContext {
   gridResolution: number;    // 1, 2, 4, 8
   instrumentType: 'synth' | 'sampler';
   octaveRange: [number, number]; // MIDI [low, high]
+  instrumentRole: InstrumentRole; // role-based smart decisions
+  octaveBase: number;        // MIDI base octave (0–8)
+  octaveSpan: number;        // how many octaves (1–4)
 }
 
 // ── Per-mode parameter interfaces ────────────────────────────────────────
@@ -53,9 +81,17 @@ export interface BasslineParams {
 }
 
 export interface DrumPatternParams {
-  genre: 'house' | 'techno' | 'breakbeat' | 'hiphop' | 'dnb' | 'random';
+  genre: 'house' | 'techno' | 'breakbeat' | 'hiphop' | 'dnb'
+       | 'trap' | 'jungle' | 'garage' | 'afrobeat' | 'ambient'
+       | 'random';
   density: number;          // 0-1
   variation: number;        // 0-1
+}
+
+export interface PromptParams {
+  text: string;
+  temperature: number;   // 0–1
+  maxRetries: number;    // 1–3, for fallback re-attempts
 }
 
 export type GenerationParams =
@@ -63,7 +99,8 @@ export type GenerationParams =
   | { mode: 'scaleBased'; params: ScaleBasedParams }
   | { mode: 'chordBased'; params: ChordBasedParams }
   | { mode: 'bassline'; params: BasslineParams }
-  | { mode: 'drumPattern'; params: DrumPatternParams };
+  | { mode: 'drumPattern'; params: DrumPatternParams }
+  | { mode: 'prompt'; params: PromptParams };
 
 // ── Default parameter presets ────────────────────────────────────────────
 
@@ -99,4 +136,10 @@ export const DEFAULT_DRUM_PARAMS: DrumPatternParams = {
   genre: 'house',
   density: 0.5,
   variation: 0.2,
+};
+
+export const DEFAULT_PROMPT_PARAMS: PromptParams = {
+  text: '',
+  temperature: 0.8,
+  maxRetries: 2,
 };

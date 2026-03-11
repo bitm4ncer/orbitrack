@@ -130,8 +130,7 @@ export function SynthPanel() {
 
   return (
     <div
-      className="synth-panel bg-bg-secondary border-l border-border overflow-y-auto shrink-0 flex flex-col"
-      style={{ width: 300 }}
+      className="synth-panel bg-bg-secondary border-l border-border overflow-y-auto shrink-0 flex flex-col w-full"
     >
       {/* ─── Visualizer ─────────────────────────────────────────────── */}
       <div className="shrink-0" style={{ borderBottom: `1px solid ${color}20` }}>
