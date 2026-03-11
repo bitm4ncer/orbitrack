@@ -7,6 +7,7 @@ import { SampleBank } from './components/SampleBank/SampleBank';
 import { LooperEditor } from './components/LooperPanel/LooperEditor';
 import { LoopBrowser } from './components/LooperPanel/LoopBrowser';
 import { EffectsSidebar } from './components/EffectsSidebar/EffectsSidebar';
+import { TrackTimeline } from './components/TrackMode/TrackTimeline';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useResizable } from './hooks/useResizable';
 import { useStore } from './state/store';
@@ -18,6 +19,7 @@ import { seedEffectFactory } from './storage/seedEffectFactory';
 import { initRecordingSync } from './storage/recordingSync';
 import { restoreAutosave, initSessionAutosave } from './storage/sessionAutosave';
 import { initUndoHistory } from './state/undoHistory';
+import { parseShareHash, decodeSetFromUrl } from './storage/urlShare';
 
 function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
   const result: SampleEntry[] = [];
@@ -30,6 +32,7 @@ function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
 
 function App() {
   useKeyboardShortcuts();
+  const trackMode = useStore((s) => s.trackMode);
   const selectedId = useStore((s) => s.selectedInstrumentId);
   const instruments = useStore((s) => s.instruments);
   const selectedInstrument = instruments.find((i) => i.id === selectedId);
@@ -76,8 +79,26 @@ function App() {
     initDone.current = true;
 
     (async () => {
-      // Restore session from IDB (instruments, effects, BPM, grid, etc.)
-      const restored = await restoreAutosave();
+      // Check for shared URL hash first
+      const sharedHash = parseShareHash();
+      let restored = false;
+
+      if (sharedHash) {
+        try {
+          const set = await decodeSetFromUrl(sharedHash);
+          useStore.getState().loadSet(set);
+          restored = true;
+          // Clear hash without adding to browser history
+          history.replaceState(null, '', window.location.pathname + window.location.search);
+        } catch (e) {
+          console.error('[App] Failed to load shared URL:', e);
+          // Fall through to autosave restore
+          restored = await restoreAutosave();
+        }
+      } else {
+        // Restore session from IDB (instruments, effects, BPM, grid, etc.)
+        restored = await restoreAutosave();
+      }
 
       // Seed factory presets & hydrate recordings
       seedFactory();
@@ -225,6 +246,13 @@ function App() {
             </div>
           )}
         </div>
+      </div>
+
+      <div
+        className="overflow-hidden shrink-0 transition-[height] duration-300"
+        style={{ height: trackMode ? 200 : 0 }}
+      >
+        {trackMode && <TrackTimeline />}
       </div>
 
       <TransportBar />

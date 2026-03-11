@@ -12,6 +12,7 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "fflate": "^0.8.2",
     "lamejs": "^1.2.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
