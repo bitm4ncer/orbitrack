@@ -9,6 +9,8 @@ interface SceneBlockProps {
   scene: InstrumentScene;
   isSelected: boolean;
   isPlaying: boolean;
+  occurrenceIndex: number;
+  totalOccurrences: number;
   onSelect: () => void;
   onDelete: () => void;
   onResize: (newBars: number) => void;
@@ -20,6 +22,8 @@ function SceneBlock({
   scene,
   isSelected,
   isPlaying,
+  occurrenceIndex,
+  totalOccurrences,
   onSelect,
   onDelete,
   onResize,
@@ -79,8 +83,10 @@ function SceneBlock({
         borderColor: 'rgba(255, 255, 255, 0.2)',
       }}
     >
-      {/* Scene name */}
-      <span className="text-sm font-semibold truncate flex-1">{scene.name}</span>
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Scene name */}
+        <span className="text-sm font-semibold truncate">{scene.name}</span>
+      </div>
 
       {/* Bar count badge */}
       <span className="text-xs font-mono bg-black/30 px-1.5 py-0.5 rounded whitespace-nowrap">
@@ -109,6 +115,21 @@ function SceneBlock({
         className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:w-1.5 bg-white/30 hover:bg-white/60 transition-all"
         title="Drag to resize"
       />
+
+      {/* Multi-scene occurrence indicators */}
+      {totalOccurrences > 1 && (
+        <div className="absolute bottom-0 left-0 right-0 flex gap-0.5 justify-center px-1 py-1">
+          {Array.from({ length: totalOccurrences }).map((_, idx) => (
+            <div
+              key={idx}
+              className={`h-1 rounded-full transition-all ${
+                idx === occurrenceIndex ? 'w-2 bg-white' : 'w-1 bg-white/40'
+              }`}
+              title={`Occurrence ${idx + 1} of ${totalOccurrences}`}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -224,9 +245,8 @@ export function TrackTimeline() {
       ? arrangement.slice(0, trackPosition).reduce((sum, step) => sum + step.bars * BAR_PX, 0)
       : 0;
 
-  const availableScenes = scenes.filter(
-    (s) => !arrangement.some((a) => a.sceneId === s.id) || true, // Allow adding same scene multiple times
-  );
+  // Show all scenes - they can be added multiple times to the arrangement
+  const availableScenes = scenes;
 
   return (
     <div className="flex flex-col h-[200px] bg-background border-t border-border">
@@ -267,7 +287,9 @@ export function TrackTimeline() {
                   </button>
                 ))
               ) : (
-                <div className="px-3 py-2 text-xs text-muted-foreground">No scenes available</div>
+                <div className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                  Create scenes in Instrument Rack first
+                </div>
               )}
             </div>
           )}
@@ -311,6 +333,10 @@ export function TrackTimeline() {
               const scene = scenes.find((s) => s.id === step.sceneId);
               if (!scene) return null;
 
+              // Count occurrences of this scene in the arrangement
+              const occurrenceIndex = arrangement.slice(0, idx).filter((s) => s.sceneId === step.sceneId).length;
+              const totalOccurrences = arrangement.filter((s) => s.sceneId === step.sceneId).length;
+
               return (
                 <div
                   key={step.id}
@@ -324,6 +350,8 @@ export function TrackTimeline() {
                     scene={scene}
                     isSelected={selectedStepId === step.id}
                     isPlaying={trackPosition === idx}
+                    occurrenceIndex={occurrenceIndex}
+                    totalOccurrences={totalOccurrences}
                     onSelect={() => setSelectedStepId(step.id)}
                     onDelete={() => handleDelete(step.id)}
                     onResize={(newBars) => setArrangementStepBars(step.id, newBars)}

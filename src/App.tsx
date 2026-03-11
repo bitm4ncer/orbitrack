@@ -9,6 +9,7 @@ import { LoopBrowser } from './components/LooperPanel/LoopBrowser';
 import { EffectsSidebar } from './components/EffectsSidebar/EffectsSidebar';
 import { TrackTimeline } from './components/TrackMode/TrackTimeline';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { usePianoKeyboard } from './hooks/usePianoKeyboard';
 import { useResizable } from './hooks/useResizable';
 import { useStore } from './state/store';
 import { fetchSampleTree, type SampleEntry } from './audio/sampleApi';
@@ -32,6 +33,7 @@ function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
 
 function App() {
   useKeyboardShortcuts();
+  usePianoKeyboard();
   const trackMode = useStore((s) => s.trackMode);
   const selectedId = useStore((s) => s.selectedInstrumentId);
   const instruments = useStore((s) => s.instruments);

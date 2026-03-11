@@ -32,15 +32,17 @@ function InfoPopup({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="bg-bg-secondary border border-border rounded-lg shadow-2xl"
-        style={{ width: 300, padding: 20 }}
+        className="bg-bg-secondary border border-border rounded-lg shadow-2xl overflow-y-auto"
+        style={{ width: 340, maxHeight: 600, padding: 20 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4">
           <img src={orbeatLogo} alt="ORBEAT" className="h-5" />
           <div className="text-[10px] text-text-secondary uppercase tracking-widest mt-0.5">Polyrhythmic Web Sequencer</div>
         </div>
-        <table className="w-full border-collapse">
+
+        {/* General Shortcuts */}
+        <table className="w-full border-collapse mb-6">
           <tbody>
             {SHORTCUTS.map(({ key, action }) => (
               <tr key={key} className="border-t border-border/30">
@@ -50,6 +52,93 @@ function InfoPopup({ onClose }: { onClose: () => void }) {
             ))}
           </tbody>
         </table>
+
+        {/* Piano Keyboard Section */}
+        <div className="border-t border-border/30 pt-4">
+          <div className="text-[9px] text-accent/80 font-mono uppercase mb-2 tracking-wider">Piano Keys (Synth selected)</div>
+
+          {/* Visual Keyboard */}
+          <div className="mb-3 space-y-1">
+            {/* Top row - black keys */}
+            <div className="flex gap-0.5 justify-start text-[8px]">
+              <div className="text-center">
+                <div className="bg-accent/20 border border-accent/40 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">W</div>
+                <div className="text-text-secondary/60 mt-0.5">C#</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-accent/20 border border-accent/40 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">E</div>
+                <div className="text-text-secondary/60 mt-0.5">D#</div>
+              </div>
+              <div className="w-2" />
+              <div className="text-center">
+                <div className="bg-accent/20 border border-accent/40 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">T</div>
+                <div className="text-text-secondary/60 mt-0.5">F#</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-accent/20 border border-accent/40 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">Y</div>
+                <div className="text-text-secondary/60 mt-0.5">G#</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-accent/20 border border-accent/40 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">U</div>
+                <div className="text-text-secondary/60 mt-0.5">A#</div>
+              </div>
+            </div>
+
+            {/* Home row - white keys */}
+            <div className="flex gap-0.5 justify-start text-[8px]">
+              <div className="text-center">
+                <div className="bg-accent/10 border border-accent/30 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">A</div>
+                <div className="text-text-secondary/60 mt-0.5">C</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-accent/10 border border-accent/30 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">S</div>
+                <div className="text-text-secondary/60 mt-0.5">D</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-accent/10 border border-accent/30 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">D</div>
+                <div className="text-text-secondary/60 mt-0.5">E</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-accent/10 border border-accent/30 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">F</div>
+                <div className="text-text-secondary/60 mt-0.5">F</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-accent/10 border border-accent/30 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">G</div>
+                <div className="text-text-secondary/60 mt-0.5">G</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-accent/10 border border-accent/30 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">H</div>
+                <div className="text-text-secondary/60 mt-0.5">A</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-accent/10 border border-accent/30 rounded px-1.5 py-0.5 text-accent/80 font-mono whitespace-nowrap">J</div>
+                <div className="text-text-secondary/60 mt-0.5">B</div>
+              </div>
+            </div>
+
+            {/* Octave & velocity controls */}
+            <div className="flex gap-0.5 justify-start text-[8px] pt-1">
+              <div className="text-center">
+                <div className="bg-blue-500/20 border border-blue-500/40 rounded px-1 py-0.5 text-blue-400/80 font-mono text-xs">Z</div>
+                <div className="text-text-secondary/60 mt-0.5">Oct▼</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-blue-500/20 border border-blue-500/40 rounded px-1 py-0.5 text-blue-400/80 font-mono text-xs">X</div>
+                <div className="text-text-secondary/60 mt-0.5">Oct▲</div>
+              </div>
+              <div className="w-2" />
+              <div className="text-center">
+                <div className="bg-red-500/20 border border-red-500/40 rounded px-1 py-0.5 text-red-400/80 font-mono text-xs">C</div>
+                <div className="text-text-secondary/60 mt-0.5">Vel▼</div>
+              </div>
+              <div className="text-center">
+                <div className="bg-red-500/20 border border-red-500/40 rounded px-1 py-0.5 text-red-400/80 font-mono text-xs">V</div>
+                <div className="text-text-secondary/60 mt-0.5">Vel▲</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <button
           onClick={onClose}
           className="mt-4 w-full text-[9px] text-text-secondary/50 hover:text-text-secondary transition-colors"
