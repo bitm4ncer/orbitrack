@@ -148,18 +148,18 @@ function EffectStrip({ instrumentId }: { instrumentId: string }) {
   );
 }
 
-// ── GroupBadge ───────────────────────────────────────────────────────────────
+// ── SceneBadge ───────────────────────────────────────────────────────────────
 
-function GroupBadge({ instrumentId }: { instrumentId: string }) {
-  const group = useStore((s) => s.groups.find((g) => g.instrumentIds.includes(instrumentId)));
-  if (!group) return null;
+function SceneBadge({ instrumentId }: { instrumentId: string }) {
+  const scene = useStore((s) => s.scenes.find((g) => g.instrumentIds.includes(instrumentId)));
+  if (!scene) return null;
   return (
     <span
       className="text-[7px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-full select-none cursor-pointer"
-      style={{ color: group.color, background: `${group.color}18`, border: `1px solid ${group.color}33` }}
-      onClick={(e) => { e.stopPropagation(); useStore.getState().selectGroup(group.id); }}
+      style={{ color: scene.color, background: `${scene.color}18`, border: `1px solid ${scene.color}33` }}
+      onClick={(e) => { e.stopPropagation(); useStore.getState().selectScene(scene.id); }}
     >
-      {group.name}
+      {scene.name}
     </span>
   );
 }
@@ -192,8 +192,8 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
 
   const isSelected = useStore((s) => s.selectedInstrumentId === instrumentId);
   const isMultiSelected = useStore((s) => s.selectedInstrumentIds.includes(instrumentId));
-  const groupColor = useStore((s) => {
-    for (const g of s.groups) {
+  const sceneColor = useStore((s) => {
+    for (const g of s.scenes) {
       if (g.instrumentIds.includes(instrumentId)) return g.color;
     }
     return null;
@@ -426,21 +426,21 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
     <div
       ref={cellRef}
       onClick={(e) => e.stopPropagation()}
-      className={`knob-cell group/card relative flex flex-col items-center gap-1 p-2 rounded-lg select-none
+      className={`knob-cell scene/card relative flex flex-col items-center gap-1 p-2 rounded-lg select-none
                   ${isSelected ? 'ring-1 ring-white/20 bg-white/5' : isMultiSelected ? 'ring-1 ring-white/10 bg-white/[0.03]' : 'hover:bg-white/[0.02]'}`}
       style={{
         border: `1px solid ${inst.color}22`,
         '--inst-color': inst.color,
       } as React.CSSProperties}
     >
-      {/* Group color indicator — 1px line at bottom, inset to respect rounded corners */}
-      {groupColor && (
+      {/* Scene color indicator — 1px line at bottom, inset to respect rounded corners */}
+      {sceneColor && (
         <div
           className="absolute pointer-events-none"
           style={{
             bottom: 1, left: 6, right: 6, height: 1,
             borderRadius: 0.5,
-            background: groupColor,
+            background: sceneColor,
           }}
         />
       )}
@@ -542,10 +542,10 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
           ? inst.samplePath.split('/').pop()?.replace(/\.[^.]+$/, '') ?? inst.name
           : inst.name}
       </span>
-      {/* Group badge */}
-      {groupColor && (
+      {/* Scene badge */}
+      {sceneColor && (
         <div className="mt-1">
-          <GroupBadge instrumentId={instrumentId} />
+          <SceneBadge instrumentId={instrumentId} />
         </div>
       )}
       {/* Effect quick-access strip */}

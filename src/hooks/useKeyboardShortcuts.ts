@@ -41,25 +41,25 @@ export function useKeyboardShortcuts(): void {
         return;
       }
 
-      // Group: Ctrl+G / Cmd+G
+      // Scene: Ctrl+G / Cmd+G
       if (isMod && e.code === 'KeyG' && !e.shiftKey) {
         e.preventDefault();
-        useStore.getState().groupSelected();
+        useStore.getState().sceneSelected();
         return;
       }
 
-      // Ungroup: Ctrl+Shift+G / Cmd+Shift+G
+      // Unscene: Ctrl+Shift+G / Cmd+Shift+G
       if (isMod && e.code === 'KeyG' && e.shiftKey) {
         e.preventDefault();
-        useStore.getState().ungroupSelected();
+        useStore.getState().unsceneSelected();
         return;
       }
 
-      // Rename: Enter — start renaming selected instrument or group
+      // Rename: Enter — start renaming selected instrument or scene
       if (e.code === 'Enter' && !isMod && !e.shiftKey) {
         const s = useStore.getState();
         if (s.renamingId) return; // already renaming — let the input handle Enter
-        const targetId = s.selectedGroupId ?? s.selectedInstrumentId;
+        const targetId = s.selectedSceneId ?? s.selectedInstrumentId;
         if (targetId) {
           e.preventDefault();
           s.setRenamingId(targetId);

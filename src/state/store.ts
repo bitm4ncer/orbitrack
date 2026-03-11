@@ -3,8 +3,9 @@ import * as Tone from 'tone';
 import { PASTEL_COLORS } from '../canvas/colors';
 import type { Instrument } from '../types/instrument';
 import type { Effect, EffectType } from '../types/effects';
-import type { InstrumentGroup } from '../types/group';
-import { GROUP_COLORS } from '../types/group';
+import type { InstrumentScene } from '../types/scene';
+import { SCENE_COLORS } from '../types/scene';
+import type { ArrangementStep as __ArrangementStep__ } from '../types/arrangement';
 import type { SuperdoughSynthParams, SuperdoughSamplerParams } from '../types/superdough';
 import type { SynthParams } from '../audio/synth/types';
 import { DEFAULT_SYNTH_PARAMS, DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
@@ -28,7 +29,7 @@ import {
   type StoredRecording,
 } from '../storage/recordingStore';
 import { postSync } from '../storage/recordingSync';
-import { createGroupBus, routeOrbitToGroup, unrouteOrbitFromGroup, destroyGroupBus, destroyAllGroupBuses, initGroupBusesFromState } from '../audio/groupBus';
+import { createSceneBus, routeOrbitToScene, unrouteOrbitFromScene, destroySceneBus, destroyAllSceneBuses, initSceneBusesFromState } from '../audio/sceneBus';
 import { fetchSampleTree, type SampleEntry } from '../audio/sampleApi';
 
 // LLM Generation settings types
@@ -161,12 +162,12 @@ export interface StoreState {
   instruments: Instrument[];
   selectedInstrumentId: string | null;
   selectedInstrumentIds: string[];
-  selectedGroupId: string | null;
+  selectedSceneId: string | null;
   renamingId: string | null;          // ID of instrument or group currently being renamed
 
   // Groups
-  groups: InstrumentGroup[];
-  groupEffects: Record<string, Effect[]>;
+  scenes: InstrumentScene[];
+  sceneEffects: Record<string, Effect[]>;
 
   // Transport actions
   setBpm: (bpm: number) => void;
@@ -276,21 +277,21 @@ export interface StoreState {
   setMasterVolume: (vol: number) => void;
 
   // Group actions
-  groupSelected: () => void;
-  ungroupSelected: () => void;
-  selectGroup: (groupId: string | null) => void;
-  toggleGroupMute: (groupId: string) => void;
-  toggleGroupSolo: (groupId: string) => void;
-  setGroupVolume: (groupId: string, volume: number) => void;
-  toggleGroupCollapsed: (groupId: string) => void;
-  renameGroup: (groupId: string, name: string) => void;
+  sceneSelected: () => void;
+  unsceneSelected: () => void;
+  selectScene: (groupId: string | null) => void;
+  toggleSceneMute: (groupId: string) => void;
+  toggleSceneSolo: (groupId: string) => void;
+  setSceneVolume: (groupId: string, volume: number) => void;
+  toggleSceneCollapsed: (groupId: string) => void;
+  renameScene: (groupId: string, name: string) => void;
   setRenamingId: (id: string | null) => void;
-  addGroupEffect: (groupId: string, type: EffectType) => void;
-  removeGroupEffect: (groupId: string, effectId: string) => void;
-  setGroupEffectParam: (groupId: string, effectId: string, key: string, value: number) => void;
-  toggleGroupEffectEnabled: (groupId: string, effectId: string) => void;
-  toggleGroupEffectCollapsed: (groupId: string, effectId: string) => void;
-  reorderGroupEffects: (groupId: string, fromIdx: number, toIdx: number) => void;
+  addSceneEffect: (groupId: string, type: EffectType) => void;
+  removeSceneEffect: (groupId: string, effectId: string) => void;
+  setSceneEffectParam: (groupId: string, effectId: string, key: string, value: number) => void;
+  toggleSceneEffectEnabled: (groupId: string, effectId: string) => void;
+  toggleSceneEffectCollapsed: (groupId: string, effectId: string) => void;
+  reorderSceneEffects: (groupId: string, fromIdx: number, toIdx: number) => void;
 
   // Recording
   isRecording: boolean;
@@ -349,8 +350,8 @@ export interface StoreState {
     gridLengths: Record<string, number[]>;
     instrumentEffects: Record<string, Effect[]>;
     masterEffects: Effect[];
-    groups: InstrumentGroup[];
-    groupEffects: Record<string, Effect[]>;
+    scenes: InstrumentScene[];
+    sceneEffects: Record<string, Effect[]>;
     customSamples: { key: string; url: string; name: string }[];
   };
   loadSet: (set: OrbeatSet) => void;
@@ -368,12 +369,12 @@ export const useStore = create<StoreState>((set, get) => ({
   instruments: defaultInstruments,
   selectedInstrumentId: null,
   selectedInstrumentIds: [],
-  selectedGroupId: null,
+  selectedSceneId: null,
   renamingId: null,
 
   // Groups
-  groups: [],
-  groupEffects: {},
+  scenes: [],
+  sceneEffects: {},
 
   // Grid sequencer — pre-populate C4 (MIDI 60) for all default instrument hits
   gridNotes: (() => {
@@ -570,7 +571,7 @@ export const useStore = create<StoreState>((set, get) => ({
   selectInstrument: (id) => set({
     selectedInstrumentId: id,
     selectedInstrumentIds: id ? [id] : [],
-    selectedGroupId: null,
+    selectedSceneId: null,
   }),
 
   toggleSelectInstrument: (id) =>
@@ -581,7 +582,7 @@ export const useStore = create<StoreState>((set, get) => ({
       return {
         selectedInstrumentIds: ids,
         selectedInstrumentId: ids[ids.length - 1] ?? null,
-        selectedGroupId: null,
+        selectedSceneId: null,
       };
     }),
 
@@ -603,35 +604,35 @@ export const useStore = create<StoreState>((set, get) => ({
     const s = get();
     const inst = s.instruments.find((i) => i.id === id);
     // Unroute from group bus if grouped
-    if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+    if (inst) unrouteOrbitFromScene(inst.orbitIndex);
     const instruments = s.instruments.filter((i) => i.id !== id);
     const { [id]: _gn, ...gridNotes } = s.gridNotes;
     const { [id]: _gg, ...gridGlide } = s.gridGlide;
     const { [id]: _gl, ...gridLengths } = s.gridLengths;
     const { [id]: _fx, ...instrumentEffects } = s.instrumentEffects;
     const { [id]: _le, ...looperEditors } = s.looperEditors;
-    // Remove from any group; dissolve groups with <2 members
-    let groups = s.groups.map((g) =>
+    // Remove from any scene; dissolve scenes with <2 members
+    let scenes = s.scenes.map((g) =>
       g.instrumentIds.includes(id)
         ? { ...g, instrumentIds: g.instrumentIds.filter((x) => x !== id) }
         : g
     );
-    const dissolvedIds = groups.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
-    groups = groups.filter((g) => g.instrumentIds.length >= 2);
-    const groupEffects = { ...s.groupEffects };
+    const dissolvedIds = scenes.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
+    scenes = scenes.filter((g) => g.instrumentIds.length >= 2);
+    const sceneEffects = { ...s.sceneEffects };
     for (const did of dissolvedIds) {
       // Unroute remaining members and destroy dissolved bus
-      const oldGroup = s.groups.find((g) => g.id === did);
+      const oldGroup = s.scenes.find((g) => g.id === did);
       if (oldGroup) {
         for (const instId of oldGroup.instrumentIds) {
           if (instId !== id) {
             const member = s.instruments.find((i) => i.id === instId);
-            if (member) unrouteOrbitFromGroup(member.orbitIndex);
+            if (member) unrouteOrbitFromScene(member.orbitIndex);
           }
         }
       }
-      destroyGroupBus(did);
-      delete groupEffects[did];
+      destroySceneBus(did);
+      delete sceneEffects[did];
     }
     set({
       instruments,
@@ -640,11 +641,11 @@ export const useStore = create<StoreState>((set, get) => ({
       gridLengths,
       instrumentEffects,
       looperEditors,
-      groups,
-      groupEffects,
+      scenes,
+      sceneEffects,
       selectedInstrumentId: s.selectedInstrumentId === id ? null : s.selectedInstrumentId,
       selectedInstrumentIds: s.selectedInstrumentIds.filter((x) => x !== id),
-      selectedGroupId: dissolvedIds.includes(s.selectedGroupId ?? '') ? null : s.selectedGroupId,
+      selectedSceneId: dissolvedIds.includes(s.selectedSceneId ?? '') ? null : s.selectedSceneId,
     });
   },
 
@@ -985,10 +986,10 @@ export const useStore = create<StoreState>((set, get) => ({
         params: DEFAULT_EFFECT_PARAMS(type),
         collapsed: false,
       };
-      if (instrumentId.startsWith('__group_')) {
+      if (instrumentId.startsWith('__scene_')) {
         const gid = instrumentId.slice(8, -2);
-        const prev = s.groupEffects[gid] ?? [];
-        return { groupEffects: { ...s.groupEffects, [gid]: [...prev, effect] } };
+        const prev = s.sceneEffects[gid] ?? [];
+        return { sceneEffects: { ...s.sceneEffects, [gid]: [...prev, effect] } };
       }
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return { instrumentEffects: { ...s.instrumentEffects, [instrumentId]: [...prev, effect] } };
@@ -1017,10 +1018,10 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       if (instrumentId === '__master__')
         return { masterEffects: s.masterEffects.filter((e) => e.id !== effectId) };
-      if (instrumentId.startsWith('__group_')) {
+      if (instrumentId.startsWith('__scene_')) {
         const gid = instrumentId.slice(8, -2);
-        const prev = s.groupEffects[gid] ?? [];
-        return { groupEffects: { ...s.groupEffects, [gid]: prev.filter((e) => e.id !== effectId) } };
+        const prev = s.sceneEffects[gid] ?? [];
+        return { sceneEffects: { ...s.sceneEffects, [gid]: prev.filter((e) => e.id !== effectId) } };
       }
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
@@ -1035,10 +1036,10 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       if (instrumentId === '__master__')
         return { masterEffects: s.masterEffects.map((e) => e.id === effectId ? { ...e, params: { ...e.params, [key]: value } } : e) };
-      if (instrumentId.startsWith('__group_')) {
+      if (instrumentId.startsWith('__scene_')) {
         const gid = instrumentId.slice(8, -2);
-        const prev = s.groupEffects[gid] ?? [];
-        return { groupEffects: { ...s.groupEffects, [gid]: prev.map((e) => e.id === effectId ? { ...e, params: { ...e.params, [key]: value } } : e) } };
+        const prev = s.sceneEffects[gid] ?? [];
+        return { sceneEffects: { ...s.sceneEffects, [gid]: prev.map((e) => e.id === effectId ? { ...e, params: { ...e.params, [key]: value } } : e) } };
       }
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
@@ -1055,10 +1056,10 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       if (instrumentId === '__master__')
         return { masterEffects: s.masterEffects.map((e) => e.id === effectId ? { ...e, enabled: !e.enabled } : e) };
-      if (instrumentId.startsWith('__group_')) {
+      if (instrumentId.startsWith('__scene_')) {
         const gid = instrumentId.slice(8, -2);
-        const prev = s.groupEffects[gid] ?? [];
-        return { groupEffects: { ...s.groupEffects, [gid]: prev.map((e) => e.id === effectId ? { ...e, enabled: !e.enabled } : e) } };
+        const prev = s.sceneEffects[gid] ?? [];
+        return { sceneEffects: { ...s.sceneEffects, [gid]: prev.map((e) => e.id === effectId ? { ...e, enabled: !e.enabled } : e) } };
       }
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
@@ -1073,10 +1074,10 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => {
       if (instrumentId === '__master__')
         return { masterEffects: s.masterEffects.map((e) => e.id === effectId ? { ...e, collapsed: !e.collapsed } : e) };
-      if (instrumentId.startsWith('__group_')) {
+      if (instrumentId.startsWith('__scene_')) {
         const gid = instrumentId.slice(8, -2);
-        const prev = s.groupEffects[gid] ?? [];
-        return { groupEffects: { ...s.groupEffects, [gid]: prev.map((e) => e.id === effectId ? { ...e, collapsed: !e.collapsed } : e) } };
+        const prev = s.sceneEffects[gid] ?? [];
+        return { sceneEffects: { ...s.sceneEffects, [gid]: prev.map((e) => e.id === effectId ? { ...e, collapsed: !e.collapsed } : e) } };
       }
       const prev = s.instrumentEffects[instrumentId] ?? [];
       return {
@@ -1095,12 +1096,12 @@ export const useStore = create<StoreState>((set, get) => ({
         effects.splice(toIdx, 0, item);
         return { masterEffects: effects };
       }
-      if (instrumentId.startsWith('__group_')) {
+      if (instrumentId.startsWith('__scene_')) {
         const gid = instrumentId.slice(8, -2);
-        const effects = [...(s.groupEffects[gid] ?? [])];
+        const effects = [...(s.sceneEffects[gid] ?? [])];
         const [item] = effects.splice(fromIdx, 1);
         effects.splice(toIdx, 0, item);
-        return { groupEffects: { ...s.groupEffects, [gid]: effects } };
+        return { sceneEffects: { ...s.sceneEffects, [gid]: effects } };
       }
       const effects = [...(s.instrumentEffects[instrumentId] ?? [])];
       const [item] = effects.splice(fromIdx, 1);
@@ -1116,17 +1117,17 @@ export const useStore = create<StoreState>((set, get) => ({
 
   // ── Group actions ──────────────────────────────────────────────────────────
 
-  groupSelected: () => {
+  sceneSelected: () => {
     const s = get();
     const ids = s.selectedInstrumentIds;
     if (ids.length < 2) return;
     // Remove selected instruments from any existing groups — unroute from old buses
-    const oldGroups = s.groups;
+    const oldGroups = s.scenes;
     for (const g of oldGroups) {
       for (const instId of g.instrumentIds) {
         if (ids.includes(instId)) {
           const inst = s.instruments.find((i) => i.id === instId);
-          if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+          if (inst) unrouteOrbitFromScene(inst.orbitIndex);
         }
       }
     }
@@ -1137,28 +1138,28 @@ export const useStore = create<StoreState>((set, get) => ({
     // Dissolve groups that became too small
     const dissolvedIds = groups.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
     groups = groups.filter((g) => g.instrumentIds.length >= 2);
-    const groupEffects = { ...s.groupEffects };
+    const sceneEffects = { ...s.sceneEffects };
     for (const did of dissolvedIds) {
-      delete groupEffects[did];
+      delete sceneEffects[did];
       // Unroute remaining members of dissolved groups
       const oldGroup = oldGroups.find((g) => g.id === did);
       if (oldGroup) {
         for (const instId of oldGroup.instrumentIds) {
           if (!ids.includes(instId)) {
             const inst = s.instruments.find((i) => i.id === instId);
-            if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+            if (inst) unrouteOrbitFromScene(inst.orbitIndex);
           }
         }
       }
-      destroyGroupBus(did);
+      destroySceneBus(did);
     }
-    // Create new group
+    // Create new scene
     const groupId = createId();
-    const usedColors = groups.map((g) => g.color);
-    const color = GROUP_COLORS.find((c) => !usedColors.includes(c)) ?? GROUP_COLORS[groups.length % GROUP_COLORS.length];
-    const newGroup: InstrumentGroup = {
+    const usedColors = s.scenes.map((g) => g.color);
+    const color = SCENE_COLORS.find((c) => !usedColors.includes(c)) ?? SCENE_COLORS[s.scenes.length % SCENE_COLORS.length];
+    const newScene: InstrumentScene = {
       id: groupId,
-      name: `Group ${groups.length + 1}`,
+      name: `Scene ${s.scenes.length + 1}`,
       color,
       instrumentIds: [...ids],
       muted: false,
@@ -1166,8 +1167,8 @@ export const useStore = create<StoreState>((set, get) => ({
       volume: 0,
       collapsed: false,
     };
-    groups = [...groups, newGroup];
-    groupEffects[groupId] = [];
+    const scenes = [...s.scenes, newScene];
+    sceneEffects[groupId] = [];
     // Reorder instruments so grouped instruments are adjacent
     const instruments = [...s.instruments];
     const grouped = ids.map((id) => instruments.find((i) => i.id === id)!).filter(Boolean);
@@ -1180,34 +1181,34 @@ export const useStore = create<StoreState>((set, get) => ({
     const after = rest.filter((i) => !before.includes(i));
     set({
       instruments: [...before, ...grouped, ...after],
-      groups,
-      groupEffects,
-      selectedGroupId: groupId,
+      scenes,
+      sceneEffects,
+      selectedSceneId: groupId,
     });
     // Wire audio: create group bus and route orbits
-    createGroupBus(groupId);
+    createSceneBus(groupId);
     for (const instId of ids) {
       const inst = s.instruments.find((i) => i.id === instId);
-      if (inst) routeOrbitToGroup(inst.orbitIndex, groupId);
+      if (inst) routeOrbitToScene(inst.orbitIndex, groupId);
     }
   },
 
-  ungroupSelected: () => {
+  unsceneSelected: () => {
     const s = get();
-    const groupEffects = { ...s.groupEffects };
+    const sceneEffects = { ...s.sceneEffects };
     // If a group is selected, dissolve it entirely
-    if (s.selectedGroupId) {
-      const group = s.groups.find((g) => g.id === s.selectedGroupId);
+    if (s.selectedSceneId) {
+      const group = s.scenes.find((g) => g.id === s.selectedSceneId);
       if (group) {
         for (const instId of group.instrumentIds) {
           const inst = s.instruments.find((i) => i.id === instId);
-          if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+          if (inst) unrouteOrbitFromScene(inst.orbitIndex);
         }
-        destroyGroupBus(s.selectedGroupId);
+        destroySceneBus(s.selectedSceneId);
       }
-      const groups = s.groups.filter((g) => g.id !== s.selectedGroupId);
-      delete groupEffects[s.selectedGroupId];
-      set({ groups, groupEffects, selectedGroupId: null });
+      const scenes = s.scenes.filter((g) => g.id !== s.selectedSceneId);
+      delete sceneEffects[s.selectedSceneId];
+      set({ scenes, sceneEffects, selectedSceneId: null });
       return;
     }
     // Otherwise, remove selected instruments from their groups
@@ -1216,75 +1217,75 @@ export const useStore = create<StoreState>((set, get) => ({
     // Unroute selected instruments
     for (const instId of ids) {
       const inst = s.instruments.find((i) => i.id === instId);
-      if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+      if (inst) unrouteOrbitFromScene(inst.orbitIndex);
     }
-    let groups = s.groups.map((g) => ({
+    let scenes = s.scenes.map((g) => ({
       ...g,
       instrumentIds: g.instrumentIds.filter((x) => !ids.includes(x)),
     }));
-    const dissolvedIds = groups.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
-    groups = groups.filter((g) => g.instrumentIds.length >= 2);
+    const dissolvedIds = scenes.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
+    scenes = scenes.filter((g) => g.instrumentIds.length >= 2);
     for (const did of dissolvedIds) {
-      delete groupEffects[did];
+      delete sceneEffects[did];
       // Unroute remaining members and destroy dissolved bus
-      const oldGroup = s.groups.find((g) => g.id === did);
+      const oldGroup = s.scenes.find((g) => g.id === did);
       if (oldGroup) {
         for (const instId of oldGroup.instrumentIds) {
           if (!ids.includes(instId)) {
             const inst = s.instruments.find((i) => i.id === instId);
-            if (inst) unrouteOrbitFromGroup(inst.orbitIndex);
+            if (inst) unrouteOrbitFromScene(inst.orbitIndex);
           }
         }
       }
-      destroyGroupBus(did);
+      destroySceneBus(did);
     }
     set({
-      groups,
-      groupEffects,
-      selectedGroupId: dissolvedIds.includes(s.selectedGroupId ?? '') ? null : s.selectedGroupId,
+      scenes,
+      sceneEffects,
+      selectedSceneId: dissolvedIds.includes(s.selectedSceneId ?? '') ? null : s.selectedSceneId,
     });
   },
 
-  selectGroup: (groupId) =>
+  selectScene: (groupId) =>
     set((s) => {
-      if (!groupId) return { selectedGroupId: null };
-      const group = s.groups.find((g) => g.id === groupId);
-      if (!group) return { selectedGroupId: null };
+      if (!groupId) return { selectedSceneId: null };
+      const group = s.scenes.find((g) => g.id === groupId);
+      if (!group) return { selectedSceneId: null };
       return {
-        selectedGroupId: groupId,
+        selectedSceneId: groupId,
         selectedInstrumentIds: [...group.instrumentIds],
         selectedInstrumentId: group.instrumentIds[0] ?? null,
       };
     }),
 
-  toggleGroupMute: (groupId) =>
+  toggleSceneMute: (groupId) =>
     set((s) => ({
-      groups: s.groups.map((g) => g.id === groupId ? { ...g, muted: !g.muted } : g),
+      scenes: s.scenes.map((g) => g.id === groupId ? { ...g, muted: !g.muted } : g),
     })),
 
-  toggleGroupSolo: (groupId) =>
+  toggleSceneSolo: (groupId) =>
     set((s) => ({
-      groups: s.groups.map((g) => g.id === groupId ? { ...g, solo: !g.solo } : g),
+      scenes: s.scenes.map((g) => g.id === groupId ? { ...g, solo: !g.solo } : g),
     })),
 
-  setGroupVolume: (groupId, volume) =>
+  setSceneVolume: (groupId, volume) =>
     set((s) => ({
-      groups: s.groups.map((g) => g.id === groupId ? { ...g, volume } : g),
+      scenes: s.scenes.map((g) => g.id === groupId ? { ...g, volume } : g),
     })),
 
-  toggleGroupCollapsed: (groupId) =>
+  toggleSceneCollapsed: (groupId) =>
     set((s) => ({
-      groups: s.groups.map((g) => g.id === groupId ? { ...g, collapsed: !g.collapsed } : g),
+      scenes: s.scenes.map((g) => g.id === groupId ? { ...g, collapsed: !g.collapsed } : g),
     })),
 
-  renameGroup: (groupId, name) =>
+  renameScene: (groupId, name) =>
     set((s) => ({
-      groups: s.groups.map((g) => g.id === groupId ? { ...g, name } : g),
+      scenes: s.scenes.map((g) => g.id === groupId ? { ...g, name } : g),
     })),
 
   setRenamingId: (id) => set({ renamingId: id }),
 
-  addGroupEffect: (groupId, type) =>
+  addSceneEffect: (groupId, type) =>
     set((s) => {
       const EFFECT_LABELS: Partial<Record<EffectType, string>> = {
         eq3: 'EQ 3-Band', reverb: 'Reverb', delay: 'Delay', compressor: 'Compressor',
@@ -1301,55 +1302,55 @@ export const useStore = create<StoreState>((set, get) => ({
         params: DEFAULT_EFFECT_PARAMS(type),
         collapsed: false,
       };
-      const prev = s.groupEffects[groupId] ?? [];
-      return { groupEffects: { ...s.groupEffects, [groupId]: [...prev, effect] } };
+      const prev = s.sceneEffects[groupId] ?? [];
+      return { sceneEffects: { ...s.sceneEffects, [groupId]: [...prev, effect] } };
     }),
 
-  removeGroupEffect: (groupId, effectId) =>
+  removeSceneEffect: (groupId, effectId) =>
     set((s) => {
-      const prev = s.groupEffects[groupId] ?? [];
-      return { groupEffects: { ...s.groupEffects, [groupId]: prev.filter((e) => e.id !== effectId) } };
+      const prev = s.sceneEffects[groupId] ?? [];
+      return { sceneEffects: { ...s.sceneEffects, [groupId]: prev.filter((e) => e.id !== effectId) } };
     }),
 
-  setGroupEffectParam: (groupId, effectId, key, value) =>
+  setSceneEffectParam: (groupId, effectId, key, value) =>
     set((s) => {
-      const prev = s.groupEffects[groupId] ?? [];
+      const prev = s.sceneEffects[groupId] ?? [];
       return {
-        groupEffects: {
-          ...s.groupEffects,
+        sceneEffects: {
+          ...s.sceneEffects,
           [groupId]: prev.map((e) => e.id === effectId ? { ...e, params: { ...e.params, [key]: value } } : e),
         },
       };
     }),
 
-  toggleGroupEffectEnabled: (groupId, effectId) =>
+  toggleSceneEffectEnabled: (groupId, effectId) =>
     set((s) => {
-      const prev = s.groupEffects[groupId] ?? [];
+      const prev = s.sceneEffects[groupId] ?? [];
       return {
-        groupEffects: {
-          ...s.groupEffects,
+        sceneEffects: {
+          ...s.sceneEffects,
           [groupId]: prev.map((e) => e.id === effectId ? { ...e, enabled: !e.enabled } : e),
         },
       };
     }),
 
-  toggleGroupEffectCollapsed: (groupId, effectId) =>
+  toggleSceneEffectCollapsed: (groupId, effectId) =>
     set((s) => {
-      const prev = s.groupEffects[groupId] ?? [];
+      const prev = s.sceneEffects[groupId] ?? [];
       return {
-        groupEffects: {
-          ...s.groupEffects,
+        sceneEffects: {
+          ...s.sceneEffects,
           [groupId]: prev.map((e) => e.id === effectId ? { ...e, collapsed: !e.collapsed } : e),
         },
       };
     }),
 
-  reorderGroupEffects: (groupId, fromIdx, toIdx) =>
+  reorderSceneEffects: (groupId, fromIdx, toIdx) =>
     set((s) => {
-      const effects = [...(s.groupEffects[groupId] ?? [])];
+      const effects = [...(s.sceneEffects[groupId] ?? [])];
       const [item] = effects.splice(fromIdx, 1);
       effects.splice(toIdx, 0, item);
-      return { groupEffects: { ...s.groupEffects, [groupId]: effects } };
+      return { sceneEffects: { ...s.sceneEffects, [groupId]: effects } };
     }),
 
   // Recording
@@ -2021,15 +2022,15 @@ export const useStore = create<StoreState>((set, get) => ({
       gridLengths: s.gridLengths,
       instrumentEffects: s.instrumentEffects,
       masterEffects: s.masterEffects,
-      groups: s.groups,
-      groupEffects: s.groupEffects,
+      scenes: s.scenes,
+      sceneEffects: s.sceneEffects,
       customSamples: s.customSamples,
     };
   },
 
   loadSet: (orbeatSet: OrbeatSet) => {
     // Tear down existing group buses before loading new state
-    destroyAllGroupBuses();
+    destroyAllSceneBuses();
 
     // Re-register custom samples from embedded data and pre-decode into superdough's buffer cache
     const customSamples: { key: string; url: string; name: string }[] = [];
@@ -2065,14 +2066,14 @@ export const useStore = create<StoreState>((set, get) => ({
       gridLengths: orbeatSet.gridLengths,
       instrumentEffects: orbeatSet.instrumentEffects,
       masterEffects: orbeatSet.masterEffects ?? [],
-      groups: orbeatSet.groups ?? [],
-      groupEffects: orbeatSet.groupEffects ?? {},
+      scenes: orbeatSet.scenes ?? [],
+      sceneEffects: orbeatSet.sceneEffects ?? {},
       customSamples,
       currentSetId: orbeatSet.meta.id,
       currentSetName: orbeatSet.meta.name,
       selectedInstrumentId: orbeatSet.instruments[0]?.id ?? null,
       selectedInstrumentIds: orbeatSet.instruments[0] ? [orbeatSet.instruments[0].id] : [],
-      selectedGroupId: null,
+      selectedSceneId: null,
     });
 
     // Re-init looper editors — async decode + BPM detection
@@ -2102,13 +2103,13 @@ export const useStore = create<StoreState>((set, get) => ({
     import('./undoHistory').then((m) => m.clearHistory());
 
     // Re-initialize group buses from loaded state
-    if (orbeatSet.groups && orbeatSet.groups.length > 0) {
-      initGroupBusesFromState(orbeatSet.groups, orbeatSet.instruments);
+    if (orbeatSet.scenes && orbeatSet.scenes.length > 0) {
+      initSceneBusesFromState(orbeatSet.scenes, orbeatSet.instruments);
     }
   },
 
   newSet: () => {
-    destroyAllGroupBuses();
+    destroyAllSceneBuses();
     orbitCounter = 0;
     const instruments = defaultInstruments.map((inst) => ({
       ...inst,
@@ -2129,14 +2130,14 @@ export const useStore = create<StoreState>((set, get) => ({
       gridLengths: {},
       instrumentEffects: {},
       masterEffects: [],
-      groups: [],
-      groupEffects: {},
+      scenes: [],
+      sceneEffects: {},
       customSamples: [],
       currentSetId: null,
       currentSetName: generateName(),
       selectedInstrumentId: null,
       selectedInstrumentIds: [],
-      selectedGroupId: null,
+      selectedSceneId: null,
       isPlaying: false,
       currentStep: -1,
       transportProgress: 0,

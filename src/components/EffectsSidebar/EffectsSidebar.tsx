@@ -556,22 +556,22 @@ function AddMasterEffectMenu() {
 
 export function EffectsSidebar() {
   const selectedId      = useStore((s) => s.selectedInstrumentId);
-  const selectedGroupId = useStore((s) => s.selectedGroupId);
+  const selectedSceneId = useStore((s) => s.selectedSceneId);
   const instruments     = useStore((s) => s.instruments);
   const instrumentEffects = useStore((s) => s.instrumentEffects);
-  const groups          = useStore((s) => s.groups);
-  const groupEffectsMap = useStore((s) => s.groupEffects);
+  const scenes          = useStore((s) => s.scenes);
+  const sceneEffectsMap = useStore((s) => s.sceneEffects);
   const masterVolume    = useStore((s) => s.masterVolume);
   const setMasterVolume = useStore((s) => s.setMasterVolume);
   const reorderEffects  = useStore((s) => s.reorderEffects);
-  const reorderGroupEffects = useStore((s) => s.reorderGroupEffects);
+  const reorderSceneEffects = useStore((s) => s.reorderSceneEffects);
   const masterEffects   = useStore((s) => s.masterEffects);
   const isRecording     = useStore((s) => s.isRecording);
 
-  // 'master' | 'instrument' | 'group'
-  const [fxView, setFxView] = useState<'master' | 'instrument' | 'group'>('master');
+  // 'master' | 'instrument' | 'scene'
+  const [fxView, setFxView] = useState<'master' | 'instrument' | 'scene'>('master');
   const prevSelectedId = useRef<string | null>(null);
-  const prevGroupId = useRef<string | null>(null);
+  const prevSceneId = useRef<string | null>(null);
 
   // Auto-switch to instrument view when a (new) instrument is selected
   useEffect(() => {
@@ -579,38 +579,38 @@ export function EffectsSidebar() {
     prevSelectedId.current = selectedId;
   }, [selectedId]);
 
-  // Auto-switch to group view when a group is selected
+  // Auto-switch to scene view when a scene is selected
   useEffect(() => {
-    if (selectedGroupId && selectedGroupId !== prevGroupId.current) setFxView('group');
-    prevGroupId.current = selectedGroupId;
-  }, [selectedGroupId]);
+    if (selectedSceneId && selectedSceneId !== prevSceneId.current) setFxView('scene');
+    prevSceneId.current = selectedSceneId;
+  }, [selectedSceneId]);
 
-  const showMaster = fxView === 'master' || (!selectedId && !selectedGroupId);
-  const showGroup = fxView === 'group' && selectedGroupId;
+  const showMaster = fxView === 'master' || (!selectedId && !selectedSceneId);
+  const showScene = fxView === 'scene' && selectedSceneId;
   const selectedInstrument = instruments.find((i) => i.id === selectedId);
-  const selectedGroup = groups.find((g) => g.id === selectedGroupId);
+  const selectedScene = scenes.find((g) => g.id === selectedSceneId);
   const instEffects = selectedId ? (instrumentEffects[selectedId] ?? []) : [];
-  const grpEffects = selectedGroupId ? (groupEffectsMap[selectedGroupId] ?? []) : [];
+  const grpEffects = selectedSceneId ? (sceneEffectsMap[selectedSceneId] ?? []) : [];
 
   const dragIndex = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const masterDragIdx = useRef<number | null>(null);
   const [masterDragOver, setMasterDragOver] = useState<number | null>(null);
-  const groupDragIdx = useRef<number | null>(null);
-  const [groupDragOver, setGroupDragOver] = useState<number | null>(null);
+  const sceneDragIdx = useRef<number | null>(null);
+  const [sceneDragOver, setSceneDragOver] = useState<number | null>(null);
 
   return (
     <div className="flex flex-col h-full w-full bg-bg-secondary border-l border-border shrink-0 select-none">
 
       {/* Header — shows which view is active */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0 min-w-0">
-        {showGroup && selectedGroup ? (
-          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selectedGroup.color }} />
+        {showScene && selectedScene ? (
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selectedScene.color }} />
         ) : !showMaster && selectedInstrument ? (
           <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selectedInstrument.color }} />
         ) : null}
         <span className="fx-header-text text-text-secondary truncate">
-          {showGroup && selectedGroup ? `${selectedGroup.name} FX` : showMaster ? 'Master FX' : (selectedInstrument ? `${selectedInstrument.name} FX` : 'FX Chain')}
+          {showScene && selectedScene ? `${selectedScene.name} FX` : showMaster ? 'Master FX' : (selectedInstrument ? `${selectedInstrument.name} FX` : 'FX Chain')}
         </span>
       </div>
 
@@ -641,28 +641,28 @@ export function EffectsSidebar() {
               />
             ))
           )
-        ) : showGroup && selectedGroupId ? (
+        ) : showScene && selectedSceneId ? (
           grpEffects.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full gap-2 text-center px-4">
               <span className="text-[28px] opacity-20">⊞</span>
-              <span className="fx-empty-text text-text-secondary/60">No group effects yet.</span>
+              <span className="fx-empty-text text-text-secondary/60">No scene effects yet.</span>
             </div>
           ) : (
             grpEffects.map((effect, i) => (
               <EffectBlock
                 key={effect.id}
                 effect={effect}
-                instrumentId={`__group_${selectedGroupId}__`}
+                instrumentId={`__scene_${selectedSceneId}__`}
                 index={i}
-                isDragOver={groupDragOver === i}
-                onDragStart={() => { groupDragIdx.current = i; }}
-                onDragOver={(e) => { e.preventDefault(); setGroupDragOver(i); }}
+                isDragOver={sceneDragOver === i}
+                onDragStart={() => { sceneDragIdx.current = i; }}
+                onDragOver={(e) => { e.preventDefault(); setSceneDragOver(i); }}
                 onDrop={() => {
-                  if (groupDragIdx.current !== null && groupDragIdx.current !== i)
-                    reorderGroupEffects(selectedGroupId, groupDragIdx.current, i);
-                  setGroupDragOver(null);
+                  if (sceneDragIdx.current !== null && sceneDragIdx.current !== i)
+                    reorderSceneEffects(selectedSceneId, sceneDragIdx.current, i);
+                  setSceneDragOver(null);
                 }}
-                onDragEnd={() => { groupDragIdx.current = null; setGroupDragOver(null); }}
+                onDragEnd={() => { sceneDragIdx.current = null; setSceneDragOver(null); }}
               />
             ))
           )
@@ -701,8 +701,8 @@ export function EffectsSidebar() {
       <div className="px-3 py-2 border-t border-border/30">
         {showMaster
           ? <AddMasterEffectMenu />
-          : showGroup && selectedGroupId
-            ? <AddEffectMenu instrumentId={`__group_${selectedGroupId}__`} />
+          : showScene && selectedSceneId
+            ? <AddEffectMenu instrumentId={`__scene_${selectedSceneId}__`} />
             : selectedId && <AddEffectMenu instrumentId={selectedId} />
         }
       </div>

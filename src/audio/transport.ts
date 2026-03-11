@@ -2,7 +2,7 @@ import * as Tone from 'tone';
 import { useStore } from '../state/store';
 import { triggerSuperdough, triggerLooperSlice } from './superdoughAdapter';
 import { applyOrbitToneEffects } from './orbitEffects';
-import { applyGroupEffects, setGroupBusVolume, setGroupBusMuted } from './groupBus';
+import { applySceneEffects, setSceneBusVolume, setSceneBusMuted } from './sceneBus';
 
 let schedulerId: number | null = null;
 let effectSyncId: ReturnType<typeof setInterval> | null = null;
@@ -18,8 +18,8 @@ let _lastFired: Map<string, Map<number, number>> = new Map();
 // Effect sync change detection — skip applyOrbitToneEffects when nothing changed.
 // Zustand always creates a new array reference on write, so reference equality is valid.
 const _lastApplied = new Map<string, { ref: unknown; bpm: number }>();
-const _lastGroupApplied = new Map<string, { ref: unknown; bpm: number }>();
-const _lastGroupState = new Map<string, { muted: boolean; volume: number }>();
+const _lastSceneApplied = new Map<string, { ref: unknown; bpm: number }>();
+const _lastSceneState = new Map<string, { muted: boolean; volume: number }>();
 
 // Tick-level caches — recomputed only when instruments array reference changes.
 let _instrRef: unknown = null;
@@ -96,22 +96,22 @@ function startEffectSync(): void {
       }
 
       // Group effects sync
-      for (const group of state.groups) {
-        const effects = state.groupEffects[group.id] ?? [];
-        const prev = _lastGroupApplied.get(group.id);
+      for (const group of state.scenes) {
+        const effects = state.sceneEffects[group.id] ?? [];
+        const prev = _lastSceneApplied.get(group.id);
         if (prev?.ref === effects && prev?.bpm === state.bpm) continue;
-        _lastGroupApplied.set(group.id, { ref: effects, bpm: state.bpm });
-        applyGroupEffects(group.id, effects, state.bpm);
+        _lastSceneApplied.set(group.id, { ref: effects, bpm: state.bpm });
+        applySceneEffects(group.id, effects, state.bpm);
 
         // Sync group mute/volume state
-        const lastState = _lastGroupState.get(group.id);
+        const lastState = _lastSceneState.get(group.id);
         if (!lastState || lastState.muted !== group.muted) {
-          setGroupBusMuted(group.id, group.muted);
+          setSceneBusMuted(group.id, group.muted);
         }
         if (!lastState || lastState.volume !== group.volume) {
-          setGroupBusVolume(group.id, group.volume);
+          setSceneBusVolume(group.id, group.volume);
         }
-        _lastGroupState.set(group.id, { muted: group.muted, volume: group.volume });
+        _lastSceneState.set(group.id, { muted: group.muted, volume: group.volume });
       }
     } catch { /* safe to ignore */ }
   }, 40);
@@ -133,8 +133,8 @@ export function stopTransport(): void {
   _globalStep = 0;
   _lastFired.clear();
   _lastApplied.clear();
-  _lastGroupApplied.clear();
-  _lastGroupState.clear();
+  _lastSceneApplied.clear();
+  _lastSceneState.clear();
   _instrRef = null;
 
   if (schedulerId !== null) {

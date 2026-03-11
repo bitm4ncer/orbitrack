@@ -1,11 +1,11 @@
 /**
- * Group audio bus — sums orbit outputs for group-level effects processing.
+ * Scene audio bus — sums orbit outputs for scene-level effects processing.
  *
  * Signal flow for grouped orbits:
  *   orbit chain tail (limiterMix) --X→ orbit.output   (disconnected)
- *   orbit chain tail (limiterMix) ───→ groupVolumeGain → groupChain.masterInput
- *                                        → [Group Effects Chain]
- *                                        → groupChain.masterOutput → destinationGain
+ *   orbit chain tail (limiterMix) ───→ sceneVolumeGain → sceneChain.masterInput
+ *                                        → [Scene Effects Chain]
+ *                                        → sceneChain.masterOutput → destinationGain
  *
  * Ungrouped orbits are unaffected:
  *   orbit chain tail (limiterMix) → orbit.output → [superdough merge] → destinationGain
@@ -17,15 +17,15 @@ import { createMasterChain, applyEffectsToChain, type MasterChain } from './mast
 import type { Effect } from '../types/effects';
 import { isAudioReady } from './engine';
 
-interface GroupBus {
+interface SceneBus {
   id: string;
-  volumeGain: GainNode;        // group volume control
+  volumeGain: GainNode;        // scene volume control
   chain: MasterChain;          // full effects chain
-  analyser: AnalyserNode;      // for group VU metering
+  analyser: AnalyserNode;      // for scene VU metering
   connectedOrbits: Set<number>;
 }
 
-const groupBuses = new Map<string, GroupBus>();
+const sceneBuses = new Map<string, SceneBus>();
 
 function getDestinationGain(): GainNode | null {
   try {
@@ -33,9 +33,9 @@ function getDestinationGain(): GainNode | null {
   } catch { return null; }
 }
 
-/** Create a group bus and wire its output to destinationGain. */
-export function createGroupBus(groupId: string): void {
-  if (groupBuses.has(groupId)) return;
+/** Create a scene bus and wire its output to destinationGain. */
+export function createSceneBus(sceneId: string): void {
+  if (sceneBuses.has(sceneId)) return;
   if (!isAudioReady()) return;
 
   const ac = getAudioContext() as AudioContext;
@@ -57,8 +57,8 @@ export function createGroupBus(groupId: string): void {
   analyser.smoothingTimeConstant = 0.3;
   chain.masterOutput.connect(analyser);
 
-  groupBuses.set(groupId, {
-    id: groupId,
+  sceneBuses.set(sceneId, {
+    id: sceneId,
     volumeGain,
     chain,
     analyser,
@@ -66,9 +66,9 @@ export function createGroupBus(groupId: string): void {
   });
 }
 
-/** Route an orbit's chain tail into a group bus (disconnects from orbit.output). */
-export function routeOrbitToGroup(orbitIndex: number, groupId: string): void {
-  const bus = groupBuses.get(groupId);
+/** Route an orbit's chain tail into a scene bus (disconnects from orbit.output). */
+export function routeOrbitToScene(orbitIndex: number, sceneId: string): void {
+  const bus = sceneBuses.get(sceneId);
   if (!bus) return;
 
   const tail = getOrbitChainTail(orbitIndex);
@@ -83,9 +83,9 @@ export function routeOrbitToGroup(orbitIndex: number, groupId: string): void {
 }
 
 /** Restore an orbit back to default routing (reconnects to orbit.output). */
-export function unrouteOrbitFromGroup(orbitIndex: number): void {
+export function unrouteOrbitFromScene(orbitIndex: number): void {
   // Find which bus this orbit is in
-  for (const bus of groupBuses.values()) {
+  for (const bus of sceneBuses.values()) {
     if (!bus.connectedOrbits.has(orbitIndex)) continue;
 
     const tail = getOrbitChainTail(orbitIndex);
@@ -100,38 +100,38 @@ export function unrouteOrbitFromGroup(orbitIndex: number): void {
   }
 }
 
-/** Apply effects to a group bus. */
-export function applyGroupEffects(groupId: string, effects: Effect[], bpm: number): void {
-  const bus = groupBuses.get(groupId);
+/** Apply effects to a scene bus. */
+export function applySceneEffects(sceneId: string, effects: Effect[], bpm: number): void {
+  const bus = sceneBuses.get(sceneId);
   if (!bus) return;
   applyEffectsToChain(bus.chain, effects, bpm);
 }
 
-/** Set group bus volume (dB to linear conversion). */
-export function setGroupBusVolume(groupId: string, volumeDb: number): void {
-  const bus = groupBuses.get(groupId);
+/** Set scene bus volume (dB to linear conversion). */
+export function setSceneBusVolume(sceneId: string, volumeDb: number): void {
+  const bus = sceneBuses.get(sceneId);
   if (!bus) return;
   const linear = Math.pow(10, volumeDb / 20);
   const now = bus.volumeGain.context.currentTime;
   bus.volumeGain.gain.setTargetAtTime(linear, now, 0.02);
 }
 
-/** Mute/unmute a group bus. */
-export function setGroupBusMuted(groupId: string, muted: boolean): void {
-  const bus = groupBuses.get(groupId);
+/** Mute/unmute a scene bus. */
+export function setSceneBusMuted(sceneId: string, muted: boolean): void {
+  const bus = sceneBuses.get(sceneId);
   if (!bus) return;
   const now = bus.volumeGain.context.currentTime;
   bus.volumeGain.gain.setTargetAtTime(muted ? 0 : 1, now, 0.02);
 }
 
-/** Get the analyser node for group VU metering. */
-export function getGroupAnalyser(groupId: string): AnalyserNode | null {
-  return groupBuses.get(groupId)?.analyser ?? null;
+/** Get the analyser node for scene VU metering. */
+export function getSceneAnalyser(sceneId: string): AnalyserNode | null {
+  return sceneBuses.get(sceneId)?.analyser ?? null;
 }
 
-/** Tear down a group bus — disconnects all orbits and removes the bus. */
-export function destroyGroupBus(groupId: string): void {
-  const bus = groupBuses.get(groupId);
+/** Tear down a scene bus — disconnects all orbits and removes the bus. */
+export function destroySceneBus(sceneId: string): void {
+  const bus = sceneBuses.get(sceneId);
   if (!bus) return;
 
   // Restore all orbits to default routing
@@ -147,29 +147,29 @@ export function destroyGroupBus(groupId: string): void {
   try { bus.volumeGain.disconnect(); } catch {}
   try { bus.chain.masterOutput.disconnect(); } catch {}
 
-  groupBuses.delete(groupId);
+  sceneBuses.delete(sceneId);
 }
 
-/** Destroy all group buses (used on newSet / loadSet). */
-export function destroyAllGroupBuses(): void {
-  for (const groupId of [...groupBuses.keys()]) {
-    destroyGroupBus(groupId);
+/** Destroy all scene buses (used on newSet / loadSet). */
+export function destroyAllSceneBuses(): void {
+  for (const sceneId of [...sceneBuses.keys()]) {
+    destroySceneBus(sceneId);
   }
 }
 
-/** Re-initialize group buses from store state (used after loadSet). */
-export function initGroupBusesFromState(
-  groups: { id: string; muted: boolean; volume: number; instrumentIds: string[] }[],
+/** Re-initialize scene buses from store state (used after loadSet). */
+export function initSceneBusesFromState(
+  scenes: { id: string; muted: boolean; volume: number; instrumentIds: string[] }[],
   instruments: { id: string; orbitIndex: number }[],
 ): void {
-  destroyAllGroupBuses();
-  for (const group of groups) {
-    createGroupBus(group.id);
-    for (const instId of group.instrumentIds) {
+  destroyAllSceneBuses();
+  for (const scene of scenes) {
+    createSceneBus(scene.id);
+    for (const instId of scene.instrumentIds) {
       const inst = instruments.find((i) => i.id === instId);
-      if (inst) routeOrbitToGroup(inst.orbitIndex, group.id);
+      if (inst) routeOrbitToScene(inst.orbitIndex, scene.id);
     }
-    if (group.muted) setGroupBusMuted(group.id, true);
-    if (group.volume !== 0) setGroupBusVolume(group.id, group.volume);
+    if (scene.muted) setSceneBusMuted(scene.id, true);
+    if (scene.volume !== 0) setSceneBusVolume(scene.id, scene.volume);
   }
 }

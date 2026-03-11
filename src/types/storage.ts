@@ -1,7 +1,7 @@
 import type { SynthParams } from '../audio/synth/types';
 import type { Instrument } from './instrument';
 import type { Effect } from './effects';
-import type { InstrumentGroup } from './group';
+import type { InstrumentScene } from './scene';
 
 // ── Synth Presets ─────────────────────────────────────────────────────────────
 
@@ -53,8 +53,10 @@ export interface OrbeatSet {
   gridLengths: Record<string, number[]>;
   instrumentEffects: Record<string, Effect[]>;
   masterEffects?: Effect[];
-  groups?: InstrumentGroup[];
-  groupEffects?: Record<string, Effect[]>;
+  groups?: InstrumentScene[];  // legacy: for backward compat on load
+  scenes?: InstrumentScene[];
+  groupEffects?: Record<string, Effect[]>;  // legacy: for backward compat on load
+  sceneEffects?: Record<string, Effect[]>;
   customSamples?: EmbeddedSample[];
 }
 

@@ -17,6 +17,9 @@ const SHORTCUTS = [
   { key: 'Shift + Scroll', action: 'Zoom grid view' },
   { key: 'S button', action: 'Solo instrument' },
   { key: 'M button', action: 'Mute instrument' },
+  { key: 'Shift + Click', action: 'Select multiple Orbs' },
+  { key: 'Ctrl + G', action: 'Group selected Orbs to Scene' },
+  { key: 'Shift + Ctrl + G', action: 'Ungroup' },
 ];
 
 function InfoPopup({ onClose }: { onClose: () => void }) {

@@ -1,17 +1,17 @@
 import * as Tone from 'tone';
 import { samples, loadBuffer, getAudioContext as getSdAudioContext, setAudioContext, loadWorklets } from 'superdough';
 import { initRoutingEngine } from './routingEngine';
-import { initGroupBusesFromState } from './groupBus';
+import { initSceneBusesFromState } from './sceneBus';
 
 let initialized = false;
 
-/** Re-initialize group buses from current store state (called after audio init). */
-async function initGroupBusesFromStore(): Promise<void> {
+/** Re-initialize scene buses from current store state (called after audio init). */
+async function initSceneBusesFromStore(): Promise<void> {
   try {
     const { useStore } = await import('../state/store');
     const s = useStore.getState();
-    if (s.groups && s.groups.length > 0) {
-      initGroupBusesFromState(s.groups, s.instruments);
+    if (s.scenes && s.scenes.length > 0) {
+      initSceneBusesFromState(s.scenes, s.instruments);
     }
   } catch { /* store not ready yet — safe to skip */ }
 }
@@ -92,8 +92,8 @@ export async function initAudio(): Promise<void> {
 
   initialized = true;
 
-  // Re-initialize group buses if groups exist in store (e.g. from autosave restore)
-  initGroupBusesFromStore();
+  // Re-initialize scene buses if scenes exist in store (e.g. from autosave restore)
+  initSceneBusesFromStore();
 }
 
 export function isAudioReady(): boolean {

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useStore } from '../../state/store';
-import type { InstrumentGroup } from '../../types/group';
+import type { InstrumentScene } from '../../types/scene';
 
 // Reuse Knob28 inline (same pattern as InstrumentRack)
 function Knob28({ value, min, max, step = 1, color, format, onChange }: {
@@ -42,46 +42,46 @@ function Knob28({ value, min, max, step = 1, color, format, onChange }: {
   );
 }
 
-export function GroupHeader({ group }: { group: InstrumentGroup }) {
-  const selectedGroupId = useStore((s) => s.selectedGroupId);
+export function SceneHeader({ scene }: { scene: InstrumentScene }) {
+  const selectedSceneId = useStore((s) => s.selectedSceneId);
   const renamingId = useStore((s) => s.renamingId);
-  const isSelected = selectedGroupId === group.id;
-  const isRenaming = renamingId === group.id;
-  const [nameVal, setNameVal] = useState(group.name);
+  const isSelected = selectedSceneId === scene.id;
+  const isRenaming = renamingId === scene.id;
+  const [nameVal, setNameVal] = useState(scene.name);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isRenaming) {
-      setNameVal(group.name);
+      setNameVal(scene.name);
       requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.select(); });
     }
   }, [isRenaming]);
 
   const commitName = () => {
     const trimmed = nameVal.trim();
-    if (trimmed && trimmed !== group.name) useStore.getState().renameGroup(group.id, trimmed);
+    if (trimmed && trimmed !== scene.name) useStore.getState().renameScene(scene.id, trimmed);
     useStore.getState().setRenamingId(null);
   };
 
   return (
     <div
-      onClick={() => useStore.getState().selectGroup(group.id)}
+      onClick={() => useStore.getState().selectScene(scene.id)}
       className={`flex items-center gap-2 px-3 py-2 rounded-t-lg cursor-pointer transition-colors
                   ${isSelected ? 'bg-white/[0.07]' : 'hover:bg-white/[0.03]'}`}
       style={{
-        background: isSelected ? `${group.color}12` : undefined,
+        background: isSelected ? `${scene.color}12` : undefined,
       }}
     >
       {/* Collapse toggle */}
       <button
-        onClick={(e) => { e.stopPropagation(); useStore.getState().toggleGroupCollapsed(group.id); }}
+        onClick={(e) => { e.stopPropagation(); useStore.getState().toggleSceneCollapsed(scene.id); }}
         className="p-0.5 rounded hover:bg-white/10 transition-colors cursor-pointer"
-        title={group.collapsed ? 'Expand' : 'Collapse'}
+        title={scene.collapsed ? 'Expand' : 'Collapse'}
       >
         <svg
           width="10" height="10" viewBox="0 0 10 10" fill="currentColor"
           className="text-white/40 transition-transform"
-          style={{ transform: group.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+          style={{ transform: scene.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
         >
           <path d="M2 3 L5 7 L8 3" />
         </svg>
@@ -89,16 +89,16 @@ export function GroupHeader({ group }: { group: InstrumentGroup }) {
 
       {/* Mute dot */}
       <button
-        onClick={(e) => { e.stopPropagation(); useStore.getState().toggleGroupMute(group.id); }}
-        className={`w-[10px] h-[10px] rounded-full shrink-0 transition-all hover:scale-125 cursor-pointer ${group.muted ? '' : 'hover:opacity-70'}`}
+        onClick={(e) => { e.stopPropagation(); useStore.getState().toggleSceneMute(scene.id); }}
+        className={`w-[10px] h-[10px] rounded-full shrink-0 transition-all hover:scale-125 cursor-pointer ${scene.muted ? '' : 'hover:opacity-70'}`}
         style={{
-          backgroundColor: group.muted ? '#555' : group.color,
-          border: `1px solid ${group.muted ? '#666' : group.color}`,
+          backgroundColor: scene.muted ? '#555' : scene.color,
+          border: `1px solid ${scene.muted ? '#666' : scene.color}`,
         }}
-        title={group.muted ? 'Unmute group' : 'Mute group'}
+        title={scene.muted ? 'Unmute scene' : 'Mute scene'}
       />
 
-      {/* Group name */}
+      {/* Scene name */}
       {isRenaming ? (
         <input
           ref={inputRef}
@@ -111,29 +111,29 @@ export function GroupHeader({ group }: { group: InstrumentGroup }) {
           }}
           onClick={(e) => e.stopPropagation()}
           className="flex-1 text-[10px] font-medium bg-bg-tertiary border border-border rounded px-1 py-0.5 text-text-primary outline-none"
-          style={{ color: group.color, minWidth: 0 }}
+          style={{ color: scene.color, minWidth: 0 }}
         />
       ) : (
         <span
           className="flex-1 text-[10px] font-medium truncate"
-          style={{ color: group.color }}
-          onDoubleClick={(e) => { e.stopPropagation(); useStore.getState().setRenamingId(group.id); }}
+          style={{ color: scene.color }}
+          onDoubleClick={(e) => { e.stopPropagation(); useStore.getState().setRenamingId(scene.id); }}
           title="Double-click to rename"
         >
-          {group.name}
+          {scene.name}
         </span>
       )}
 
       {/* Solo dot */}
       <button
-        onClick={(e) => { e.stopPropagation(); useStore.getState().toggleGroupSolo(group.id); }}
+        onClick={(e) => { e.stopPropagation(); useStore.getState().toggleSceneSolo(scene.id); }}
         className="w-[12px] h-[12px] rounded-full border border-white/20 flex items-center justify-center shrink-0 transition-all hover:opacity-90 cursor-pointer"
         style={{
-          background: group.solo ? '#ffd700' : group.color,
-          opacity: group.solo ? 1 : 0.3,
-          boxShadow: group.solo ? '0 0 6px #ffd70070' : 'none',
+          background: scene.solo ? '#ffd700' : scene.color,
+          opacity: scene.solo ? 1 : 0.3,
+          boxShadow: scene.solo ? '0 0 6px #ffd70070' : 'none',
         }}
-        title={group.solo ? 'Unsolo group' : 'Solo group'}
+        title={scene.solo ? 'Unsolo scene' : 'Solo scene'}
       >
         <span className="text-[7px] font-bold text-black/70 leading-none select-none">S</span>
       </button>
@@ -141,12 +141,12 @@ export function GroupHeader({ group }: { group: InstrumentGroup }) {
       {/* Gain knob */}
       <Knob28
         label=""
-        value={group.volume}
+        value={scene.volume}
         min={-20}
         max={20}
-        color={group.color}
+        color={scene.color}
         format={(v) => `${v > 0 ? '+' : ''}${v}`}
-        onChange={(v) => useStore.getState().setGroupVolume(group.id, v)}
+        onChange={(v) => useStore.getState().setSceneVolume(scene.id, v)}
       />
     </div>
   );

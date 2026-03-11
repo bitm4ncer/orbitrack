@@ -1,20 +1,20 @@
-export interface InstrumentGroup {
+export interface InstrumentScene {
   id: string;
   name: string;
-  color: string;                 // from GROUP_COLORS palette
+  color: string;                 // from SCENE_COLORS palette
   instrumentIds: string[];       // ordered member instrument IDs
   muted: boolean;
   solo: boolean;
-  volume: number;                // dB, group bus gain
+  volume: number;                // dB, scene bus gain
   collapsed: boolean;            // layers panel collapse state
   // Future arrangement view fields:
   barLength?: number;
   outputs?: { id: string; bars: number }[];
-  inputGroupId?: string | null;
+  inputSceneId?: string | null;
 }
 
-// Dedicated group color palette (distinct from instrument PASTEL_COLORS)
-export const GROUP_COLORS = [
+// Dedicated scene color palette (distinct from instrument PASTEL_COLORS)
+export const SCENE_COLORS = [
   '#FF6B6B', // red
   '#4ECDC4', // teal
   '#FFE66D', // yellow

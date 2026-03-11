@@ -4,7 +4,7 @@ import { PASTEL_COLORS } from '../../canvas/colors';
 import { getOrbitAnalyser } from '../../audio/orbitEffects';
 import { getMasterAnalyser } from '../../audio/routingEngine';
 import type { Instrument } from '../../types/instrument';
-import { GroupHeader } from './GroupHeader';
+import { SceneHeader } from './SceneHeader';
 
 // ── EditableName ─────────────────────────────────────────────────────────────
 
@@ -631,7 +631,7 @@ export function InstrumentRack() {
   const instruments = useStore((s) => s.instruments);
   const selectedId = useStore((s) => s.selectedInstrumentId);
   const selectedIds = useStore((s) => s.selectedInstrumentIds);
-  const groups = useStore((s) => s.groups);
+  const scenes = useStore((s) => s.scenes);
   const renamingId = useStore((s) => s.renamingId);
   const masterVolume = useStore((s) => s.masterVolume);
   const dragIdx = useRef<number | null>(null);
@@ -783,15 +783,15 @@ export function InstrumentRack() {
       ) : (
         /* ── Card Mode ── */
         <div className="layers-list flex-1 flex flex-col overflow-y-auto pb-3">
-          {/* Render groups first, then ungrouped instruments */}
+          {/* Render scenes first, then unsceneed instruments */}
           {(() => {
             const rendered = new Set<string>();
             const elements: React.ReactNode[] = [];
 
-            // Grouped instruments with headers — nested inside group container
-            for (const group of groups) {
+            // Sceneed instruments with headers — nested inside scene container
+            for (const scene of scenes) {
               const memberCards: React.ReactNode[] = [];
-              for (const instId of group.instrumentIds) {
+              for (const instId of scene.instrumentIds) {
                 const idx = instruments.findIndex((i) => i.id === instId);
                 const inst = instruments[idx];
                 if (!inst) continue;
@@ -800,20 +800,20 @@ export function InstrumentRack() {
               }
               elements.push(
                 <div
-                  key={`group-${group.id}`}
+                  key={`scene-${scene.id}`}
                   className="mx-3 mt-3 mb-1 rounded-lg"
                   style={{
-                    border: `1px solid ${group.color}44`,
-                    background: `${group.color}08`,
+                    border: `1px solid ${scene.color}44`,
+                    background: `${scene.color}08`,
                   }}
                 >
-                  <GroupHeader key={`gh-${group.id}`} group={group} />
+                  <SceneHeader key={`gh-${scene.id}`} scene={scene} />
                   <div
                     className="transition-[grid-template-rows,opacity] duration-200 ease-in-out"
                     style={{
                       display: 'grid',
-                      gridTemplateRows: group.collapsed ? '0fr' : '1fr',
-                      opacity: group.collapsed ? 0 : 1,
+                      gridTemplateRows: scene.collapsed ? '0fr' : '1fr',
+                      opacity: scene.collapsed ? 0 : 1,
                     }}
                   >
                     <div className="overflow-hidden">
@@ -826,7 +826,7 @@ export function InstrumentRack() {
               );
             }
 
-            // Ungrouped instruments
+            // Unsceneed instruments
             for (let idx = 0; idx < instruments.length; idx++) {
               const inst = instruments[idx];
               if (rendered.has(inst.id)) continue;
