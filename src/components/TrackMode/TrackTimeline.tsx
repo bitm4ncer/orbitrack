@@ -172,6 +172,7 @@ function SceneBlock({
         backgroundColor: scene.color + '99',
         borderColor: isSelected ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.2)',
         borderWidth: isSelected ? '2px' : '1px',
+        boxShadow: 'none',
       }}
     >
       {/* Header row */}
