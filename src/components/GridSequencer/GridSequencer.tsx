@@ -623,11 +623,9 @@ export function GridSequencer() {
     const colPercent = 100 / totalSteps;
     return (
       <div className="flex shrink-0 border-t border-border" style={{ height: 64 }}>
-        {/* Spacer to align with noteLabels above */}
         <div className="w-10 shrink-0 flex items-center justify-center">
           <span className="text-[8px] text-white/30 uppercase tracking-wider">vel</span>
         </div>
-        {/* Velocity bars container — will scroll horizontally with grid-cells */}
         <div className="flex-1 relative">
           {Array.from(stepToHit.entries()).map(([stepIndex, hitIdx]) => {
             const vel = gridVelocities[instrument.id]?.[hitIdx] ?? 100;

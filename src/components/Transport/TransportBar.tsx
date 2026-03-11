@@ -6,7 +6,6 @@ import { initAudio } from '../../audio/engine';
 import { loadSamples } from '../../audio/sampler';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { FilesMenu } from './FilesMenu';
-import { SettingsPopup } from './SettingsPopup';
 import { encodeSetToUrl, buildShareUrl, exportSamplesZip, importSamplesZip } from '../../storage/urlShare';
 const orbeatLogo = `${import.meta.env.BASE_URL}ORBEAT_Logo.svg`;
 
@@ -301,7 +300,6 @@ export function TransportBar() {
   const trackMode = useStore((s) => s.trackMode);
   const toggleTrackMode = useStore((s) => s.toggleTrackMode);
   const [infoOpen, setInfoOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const filesRef = useRef<HTMLButtonElement>(null);
@@ -389,15 +387,8 @@ export function TransportBar() {
           className="transport-bpm-input w-16 bg-bg-tertiary border border-border rounded px-2 py-0.5 text-sm text-text-primary font-mono text-center focus:outline-none focus:border-white/30"
         />
         <button
-          onClick={() => setSettingsOpen(true)}
-          className="w-5 h-5 rounded-full border border-border text-text-secondary hover:border-white/30 hover:text-text-primary transition-colors flex items-center justify-center text-[10px] font-bold leading-none cursor-pointer"
-          title="Settings"
-        >
-          ⚙
-        </button>
-        <button
           onClick={() => setInfoOpen((o) => !o)}
-          className="w-5 h-5 rounded-full border border-border text-text-secondary hover:border-white/30 hover:text-text-primary transition-colors flex items-center justify-center text-[10px] font-bold leading-none cursor-pointer"
+          className="w-5 h-5 rounded-full border border-border text-text-secondary hover:border-white/30 hover:text-text-primary transition-colors flex items-center justify-center text-[10px] font-bold leading-none"
           title="About Orbeat"
         >
           i
@@ -405,7 +396,6 @@ export function TransportBar() {
       </div>
 
       {infoOpen && <InfoPopup onClose={() => setInfoOpen(false)} />}
-      {settingsOpen && <SettingsPopup onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

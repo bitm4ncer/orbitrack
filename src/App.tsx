@@ -11,8 +11,6 @@ import { TrackTimeline } from './components/TrackMode/TrackTimeline';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { usePianoKeyboard } from './hooks/usePianoKeyboard';
 import { useResizable } from './hooks/useResizable';
-import { useMidiSetup } from './hooks/useMidiSetup';
-import { useMidiClock } from './hooks/useMidiClock';
 import { useStore } from './state/store';
 import { fetchSampleTree, type SampleEntry } from './audio/sampleApi';
 import { useEffect, useRef, useState } from 'react';
@@ -36,8 +34,6 @@ function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
 function App() {
   useKeyboardShortcuts();
   usePianoKeyboard();
-  useMidiSetup();
-  useMidiClock();
   const trackMode = useStore((s) => s.trackMode);
   const selectedId = useStore((s) => s.selectedInstrumentId);
   const instruments = useStore((s) => s.instruments);

@@ -92,7 +92,7 @@ export class OrbitRenderer {
     const h = rect.height;
     if (w <= 0 || h <= 0) return;
     const state = useStore.getState();
-    const { instruments, isPlaying, spinMode, bpm, stepsPerBeat } = state;
+    const { instruments, isPlaying, spinMode, bpm } = state;
 
     // Sort by loopSize ascending — memoized; only re-sort when instruments array changes.
     if (instruments !== this._lastInstrRef) {
@@ -113,9 +113,8 @@ export class OrbitRenderer {
 
     // Compute real-time transport position (smooth 60fps, not discrete ticks)
     const toneTransport = Tone.getTransport();
-    const stepsPerBeatGlobal = stepsPerBeat ?? 8;
-    const secondsPerStep = 60 / bpm / stepsPerBeatGlobal;
-    const totalSteps = isPlaying ? toneTransport.seconds / secondsPerStep : 0;
+    const secondsPer32nd = 60 / bpm / 8;
+    const totalSteps = isPlaying ? toneTransport.seconds / secondsPer32nd : 0;
 
     // Indicator line: 1 rotation = maxLoopSize steps
     const maxLoopSize = ordered.reduce((m, i) => Math.max(m, i.loopSize), 1);
@@ -178,13 +177,12 @@ export class OrbitRenderer {
 
       // Draw grid ticks based on instrument's loopSize — show all steps
       const gridDiv = inst.loopSize;
-      const spb = Math.round(gridDiv / 4);   // steps per beat for this instrument
       for (let g = 0; g < gridDiv; g++) {
         const tickAngle = (g / gridDiv) * TWO_PI + TRIGGER_ANGLE - dotRotation;
         const cos = Math.cos(tickAngle);
         const sin = Math.sin(tickAngle);
-        const isBeat = g % spb === 0;
-        const is16th = g % Math.round(spb / 2) === 0 && !isBeat;
+        const isBeat = g % 8 === 0;
+        const is16th = g % 4 === 0 && !isBeat;
         const tickLen = isBeat ? 12 : is16th ? 6 : 3;
         const tickAlpha = isBeat ? 0.3 : is16th ? 0.15 : 0.07;
         ctx.beginPath();
@@ -260,13 +258,12 @@ export class OrbitRenderer {
 
   getHitAt(mouseX: number, mouseY: number): { instrumentId: string; hitIndex: number } | null {
     const state = useStore.getState();
-    const { isPlaying, spinMode, bpm, stepsPerBeat } = state;
+    const { isPlaying, spinMode, bpm } = state;
     const { cx, cy } = this.layout;
 
     const toneTransport = Tone.getTransport();
-    const stepsPerBeatGlobal = stepsPerBeat ?? 8;
-    const secondsPerStep = 60 / bpm / stepsPerBeatGlobal;
-    const totalSteps = isPlaying ? toneTransport.seconds / secondsPerStep : 0;
+    const secondsPer32nd = 60 / bpm / 8;
+    const totalSteps = isPlaying ? toneTransport.seconds / secondsPer32nd : 0;
 
     for (const { inst, radius } of this.getOrderedLayout()) {
       const instProg = isPlaying ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
@@ -290,16 +287,15 @@ export class OrbitRenderer {
 
   getOrbitAt(mouseX: number, mouseY: number): { instrumentId: string; angle: number } | null {
     const state = useStore.getState();
-    const { isPlaying, spinMode, bpm, stepsPerBeat } = state;
+    const { isPlaying, spinMode, bpm } = state;
     const { cx, cy } = this.layout;
     const dx = mouseX - cx;
     const dy = mouseY - cy;
     const distFromCenter = Math.sqrt(dx * dx + dy * dy);
 
     const toneTransport = Tone.getTransport();
-    const stepsPerBeatGlobal = stepsPerBeat ?? 8;
-    const secondsPerStep = 60 / bpm / stepsPerBeatGlobal;
-    const totalSteps = isPlaying ? toneTransport.seconds / secondsPerStep : 0;
+    const secondsPer32nd = 60 / bpm / 8;
+    const totalSteps = isPlaying ? toneTransport.seconds / secondsPer32nd : 0;
 
     for (const { inst, radius } of this.getOrderedLayout()) {
       if (Math.abs(distFromCenter - radius) < 15) {

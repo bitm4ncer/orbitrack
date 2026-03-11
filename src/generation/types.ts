@@ -41,7 +41,7 @@ export type GenerationMode = 'random' | 'scaleBased' | 'chordBased' | 'bassline'
 export interface GenerationContext {
   scaleRoot: number;         // 0-11
   scaleType: string;         // key into SCALES
-  loopSize: number;          // total 32nd-note steps (1 bar = 32 steps)
+  loopSize: number;          // total 16th-note steps
   gridResolution: number;    // 1, 2, 4, 8
   instrumentType: 'synth' | 'sampler';
   octaveRange: [number, number]; // MIDI [low, high]

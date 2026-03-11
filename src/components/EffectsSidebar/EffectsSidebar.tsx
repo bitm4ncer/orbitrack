@@ -5,7 +5,6 @@ import { AddEffectMenu } from './AddEffectMenu';
 import { LUFSMeter } from './LUFSMeter';
 import { WaveformView } from './WaveformView';
 import { EffectKnob } from './EffectKnob';
-import { MidiSettingsPanel } from '../MidiSettings/MidiSettingsPanel';
 import { type RecordingFormat } from '../../audio/recorder';
 
 function formatDuration(ms: number): string {
@@ -743,9 +742,6 @@ export function EffectsSidebar() {
           </span>
         </div>
       </div>
-
-      {/* MIDI Settings */}
-      <MidiSettingsPanel />
 
       {/* Waveform view with record button and recordings folder */}
       <div className="shrink-0 flex items-center gap-2" style={{ padding: '0 20px 20px' }}>

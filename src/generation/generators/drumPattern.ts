@@ -49,28 +49,27 @@ export function generateDrumPattern(
  * These ensure patterns maintain their characteristic feel.
  */
 function applyGenreRules(hits: boolean[], genre: string, loopSize: number): void {
-  const spq = Math.round(loopSize / 4); // steps per quarter note
   switch (genre) {
     case 'house':
       // Four-on-the-floor: ensure hits on quarter notes
-      for (let i = 0; i < loopSize; i += spq) {
+      for (let i = 0; i < loopSize; i += 4) {
         hits[i] = true;
       }
       break;
 
     case 'dnb':
       // Ensure kick on 1 and ~11 (2-step)
-      if (loopSize >= spq * 2) {
+      if (loopSize >= 16) {
         hits[0] = true;
-        hits[Math.round(10 * loopSize / 16)] = true;  // ~beat 3 in DnB
+        hits[10] = true;
       }
       break;
 
     case 'hiphop':
       // Ensure hit on 1
       hits[0] = true;
-      // Half-time feel: ensure hit around beat 3 (step 2)
-      if (loopSize >= spq * 2) hits[spq * 2] = true;
+      // Half-time feel: ensure hit around step 8
+      if (loopSize >= 16) hits[8] = true;
       break;
 
     case 'breakbeat':
@@ -80,7 +79,7 @@ function applyGenreRules(hits: boolean[], genre: string, loopSize: number): void
 
     case 'techno':
       // Similar to house but allow more ghost notes
-      for (let i = 0; i < loopSize; i += spq) {
+      for (let i = 0; i < loopSize; i += 4) {
         hits[i] = true;
       }
       break;
@@ -96,9 +95,9 @@ function applyGenreRules(hits: boolean[], genre: string, loopSize: number): void
       break;
 
     case 'garage':
-      // Ensure hit on 1 and 8 (2-step skippy feel at beat 3)
+      // Ensure hit on 1 and 8 (2-step skippy feel)
       hits[0] = true;
-      if (loopSize >= spq * 2) hits[spq * 2] = true;
+      if (loopSize >= 16) hits[8] = true;
       break;
 
     case 'afrobeat':
