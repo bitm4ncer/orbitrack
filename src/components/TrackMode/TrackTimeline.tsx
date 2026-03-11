@@ -164,7 +164,7 @@ function SceneBlock({
         }
       }}
       tabIndex={0}
-      className={`relative flex flex-col cursor-move select-none transition-all rounded border overflow-visible
+      className={`relative flex flex-col cursor-move select-none transition-all rounded border overflow-visible shadow-none
         ${isPlaying ? 'ring-2 ring-yellow-400' : ''}`}
       style={{
         width: `${step.bars * barPx}px`,
@@ -172,7 +172,8 @@ function SceneBlock({
         backgroundColor: scene.color + '99',
         borderColor: isSelected ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.2)',
         borderWidth: isSelected ? '2px' : '1px',
-        boxShadow: 'none',
+        boxShadow: 'none !important',
+        filter: 'none',
       }}
     >
       {/* Header row */}
