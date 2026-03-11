@@ -834,29 +834,29 @@ export function InstrumentRack() {
 
             // Add new Card button
             elements.push(
-              <div key="add-card" className="mx-3 mt-3 pb-3 rounded cursor-default transition-colors" style={{ padding: 20, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.02)' }}>
-                <div className="flex flex-col gap-2">
-                  {([
-                    { type: 'synth',   label: '+ Synth',   fn: addSynth   },
-                    { type: 'sampler', label: '+ Sampler',  fn: addSampler },
-                    { type: 'looper',  label: '+ Looper',   fn: addLooper  },
-                  ] as const).map(({ type, label, fn }) => (
-                    <button
-                      key={type}
-                      onClick={() => fn()}
-                      className="w-full py-3 text-[11px] uppercase tracking-wider rounded transition-all cursor-pointer font-medium"
-                      style={{
-                        color: 'rgba(255,255,255,0.75)',
-                        border: '1px solid rgba(255,255,255,0.2)',
-                        background: 'rgba(255,255,255,0.06)',
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.09)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              <div key="add-card" className="mx-3 mt-3 pb-3 flex flex-col gap-1.5">
+                {([
+                  { type: 'synth',   label: '+ Synth',   fn: addSynth   },
+                  { type: 'sampler', label: '+ Sampler',  fn: addSampler },
+                  { type: 'looper',  label: '+ Looper',   fn: addLooper  },
+                ] as const).map(({ type, label, fn }) => (
+                  <button
+                    key={type}
+                    onClick={() => fn()}
+                    className="text-[10px] uppercase tracking-wider transition-all cursor-pointer font-medium"
+                    style={{
+                      color: '#888',
+                      border: 'none',
+                      background: 'rgba(0,0,0,0.3)',
+                      padding: '6px 12px',
+                      borderRadius: '16px',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.45)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.3)')}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             );
 

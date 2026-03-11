@@ -94,7 +94,9 @@ function setupInputListeners(): void {
   });
 
   midiInputDevice.addListener('noteon', (e: any) => {
-    const velocity = (e.velocity ?? e.rawVelocity ?? 0) / 127;
+    // WebMidi.js uses e.note.rawAttack for MIDI velocity (0-127)
+    const rawVelocity = e.note?.rawAttack ?? 100;
+    const velocity = Math.max(0, Math.min(1, rawVelocity / 127));
     noteCallbacks.forEach(cb => cb({ note: e.note?.number ?? 0 } as any, velocity));
   });
 

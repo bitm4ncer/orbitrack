@@ -28,25 +28,21 @@ function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
   return result;
 }
 
-const ADD_TYPES = ['synth', 'sampler', 'looper'] as const;
-
 function AddInstrumentCard() {
-  const mode = useStore((s) => s.addInstrumentType);
   const [sampleFiles, setSampleFiles] = useState<SampleEntry[]>([]);
 
   useEffect(() => {
     fetchSampleTree().then((tree) => setSampleFiles(flattenFiles(tree)));
   }, []);
 
-  const handleAdd = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const createInstrument = (type: 'synth' | 'sampler' | 'looper') => {
     const store = useStore.getState();
     const id = createId();
     const color = PASTEL_COLORS[store.instruments.length % PASTEL_COLORS.length];
     const orbitIndex = store.instruments.reduce((max, i) => Math.max(max, i.orbitIndex), -1) + 1;
     const loopSize = 16;
 
-    if (mode === 'synth') {
+    if (type === 'synth') {
       const newInst = {
         id,
         name: `Synth ${store.instruments.filter((i) => i.type === 'synth').length + 1}`,
@@ -68,7 +64,7 @@ function AddInstrumentCard() {
         gridNotes: { ...store.gridNotes, [id]: Array.from({ length: loopSize }, () => [60]) },
       });
       store.selectInstrument(id);
-    } else if (mode === 'looper') {
+    } else if (type === 'looper') {
       const newInst = {
         id,
         name: `Loop ${store.instruments.filter((i) => i.type === 'looper').length + 1}`,
@@ -120,31 +116,39 @@ function AddInstrumentCard() {
 
   return (
     <div
-      className="knob-cell flex flex-col items-center gap-1 p-2 rounded-lg select-none cursor-pointer hover:bg-white/[0.02]"
+      className="knob-cell flex flex-col items-center gap-2 p-3 rounded-lg select-none"
       style={{ border: '1px dashed rgba(255,255,255,0.08)' }}
-      onClick={handleAdd}
     >
       {/* "Add" label — top */}
       <span className="text-[9px] text-white/30 tracking-wider uppercase self-center">Add</span>
 
       {/* Center "+" icon */}
-      <div className="w-full aspect-square flex items-center justify-center">
+      <div className="w-full flex-1 flex items-center justify-center">
         <span className="text-4xl text-white/20 leading-none">+</span>
       </div>
 
-      {/* 3-way segmented type selector */}
-      <div
-        className="flex rounded-full overflow-hidden border border-white/10"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {ADD_TYPES.map((t) => (
+      {/* 3 pill buttons */}
+      <div className="w-full flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+        {([
+          { type: 'synth' as const,   label: '+ Synth' },
+          { type: 'sampler' as const, label: '+ Sampler' },
+          { type: 'looper' as const,  label: '+ Looper' },
+        ]).map(({ type, label }) => (
           <button
-            key={t}
-            className={`px-2 py-0.5 text-[8px] font-medium uppercase tracking-wider transition-colors cursor-pointer
-              ${mode === t ? 'bg-white/20 text-white/80' : 'text-white/30 hover:bg-white/5 hover:text-white/50'}`}
-            onClick={() => useStore.getState().setAddInstrumentType(t)}
+            key={type}
+            onClick={() => createInstrument(type)}
+            className="text-[10px] uppercase tracking-wider transition-all cursor-pointer font-medium w-full"
+            style={{
+              color: '#888',
+              border: 'none',
+              background: 'rgba(0,0,0,0.3)',
+              padding: '6px 12px',
+              borderRadius: '16px',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.45)')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.3)')}
           >
-            {t === 'synth' ? 'Syn' : t === 'sampler' ? 'Smp' : 'Loop'}
+            {label}
           </button>
         ))}
       </div>
