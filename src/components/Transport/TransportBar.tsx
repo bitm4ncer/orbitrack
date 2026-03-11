@@ -407,6 +407,15 @@ export function TransportBar() {
       </div>
 
       <div className="transport-bpm flex items-center gap-2">
+        <span className="transport-bpm-label text-xs text-text-secondary uppercase tracking-wide">BPM</span>
+        <input
+          type="number"
+          min={40}
+          max={240}
+          value={bpm}
+          onChange={handleBpmChange}
+          className="transport-bpm-input w-16 bg-bg-tertiary border border-border rounded px-2 py-0.5 text-sm text-text-primary font-mono text-center focus:outline-none focus:border-white/30"
+        />
         <select
           value={stepsPerBeat}
           onChange={handleGridChange}
@@ -417,15 +426,12 @@ export function TransportBar() {
           <option value={8}>32nd</option>
           <option value={16}>64th</option>
         </select>
-        <span className="transport-bpm-label text-xs text-text-secondary uppercase tracking-wide">BPM</span>
-        <input
-          type="number"
-          min={40}
-          max={240}
-          value={bpm}
-          onChange={handleBpmChange}
-          className="transport-bpm-input w-16 bg-bg-tertiary border border-border rounded px-2 py-0.5 text-sm text-text-primary font-mono text-center focus:outline-none focus:border-white/30"
-        />
+        <button
+          className="text-[10px] uppercase tracking-wider text-text-secondary/60 hover:text-text-primary px-2 py-1 transition-colors"
+          title="Settings"
+        >
+          Settings
+        </button>
         <button
           onClick={() => setSettingsOpen(true)}
           className="px-2 py-1 rounded border border-border text-text-secondary hover:border-white/30 hover:text-text-primary transition-colors text-[11px] font-semibold cursor-pointer"
