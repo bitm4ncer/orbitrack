@@ -2,6 +2,7 @@ import type { SynthParams } from '../audio/synth/types';
 import type { Instrument } from './instrument';
 import type { Effect } from './effects';
 import type { InstrumentScene } from './scene';
+import type { ArrangementStep } from './arrangement';
 
 // ── Synth Presets ─────────────────────────────────────────────────────────────
 
@@ -58,6 +59,11 @@ export interface OrbeatSet {
   groupEffects?: Record<string, Effect[]>;  // legacy: for backward compat on load
   sceneEffects?: Record<string, Effect[]>;
   customSamples?: EmbeddedSample[];
+  gridResolution?: number;
+  scaleRoot?: number;
+  scaleType?: string;
+  trackMode?: boolean;
+  arrangement?: ArrangementStep[];
 }
 
 // ── Sample Library ────────────────────────────────────────────────────────────

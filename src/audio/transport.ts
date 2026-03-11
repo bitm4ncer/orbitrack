@@ -26,12 +26,17 @@ let _instrRef: unknown = null;
 let _maxLoopSize = 1;
 let _anySolo = false;
 
+// Track Mode variables — incremented each _tick to track arrangement progression
+let _currentArrangementIdx = 0;
+let _stepLoopCount = 0;  // full loops of _maxLoopSize elapsed in current arrangement step
+
 // Position buffer — written by the audio tick (zero React involvement),
 // read by the rAF sync loop which gates UI updates to ~60 fps.
 const _pos = {
   progress: 0,
   currentStep: 0,
   instProgress: {} as Record<string, number>,
+  trackPosition: -1,
   dirty: false,
 };
 let _rafId: number | null = null;
@@ -40,7 +45,7 @@ function startUISync(): void {
   function sync(): void {
     if (_pos.dirty) {
       _pos.dirty = false;
-      useStore.getState().setPlaybackUI(_pos.progress, _pos.currentStep, _pos.instProgress);
+      useStore.getState().setPlaybackUI(_pos.progress, _pos.currentStep, _pos.instProgress, _pos.trackPosition);
     }
     _rafId = requestAnimationFrame(sync);
   }
@@ -62,6 +67,8 @@ export function startTransport(): void {
   transport.timeSignature = 4;
   _globalStep = 0;
   _lastFired.clear();
+  _currentArrangementIdx = 0;
+  _stepLoopCount = 0;
 
   if (schedulerId !== null) {
     transport.clear(schedulerId);
@@ -136,6 +143,8 @@ export function stopTransport(): void {
   _lastSceneApplied.clear();
   _lastSceneState.clear();
   _instrRef = null;
+  _currentArrangementIdx = 0;
+  _stepLoopCount = 0;
 
   if (schedulerId !== null) {
     transport.clear(schedulerId);
@@ -145,6 +154,7 @@ export function stopTransport(): void {
   useStore.getState().setPlaying(false);
   useStore.getState().setCurrentStep(-1);
   useStore.getState().setTransportProgress(0);
+  useStore.getState().setTrackPosition(-1);
 }
 
 export function toggleTransport(): void {
@@ -186,6 +196,21 @@ function _tick(time: number): void {
   const progress = (globalStep % _maxLoopSize) / _maxLoopSize;
   const currentStep = globalStep % _maxLoopSize;
 
+  // Track Mode: bar counting and scene advancement
+  if (state.trackMode && state.arrangement.length > 0) {
+    // One full loop of _maxLoopSize steps = one "bar"
+    if (globalStep > 0 && globalStep % _maxLoopSize === 0) {
+      _stepLoopCount++;
+      const currentStep = state.arrangement[_currentArrangementIdx];
+      if (_stepLoopCount >= currentStep.bars) {
+        _stepLoopCount = 0;
+        _currentArrangementIdx = (_currentArrangementIdx + 1) % state.arrangement.length;
+        _pos.trackPosition = _currentArrangementIdx;
+        _pos.dirty = true;
+      }
+    }
+  }
+
   // Per-instrument progress
   const instProgress: Record<string, number> = {};
 
@@ -197,6 +222,15 @@ function _tick(time: number): void {
 
     if (_anySolo && !instrument.solo) continue;
     if (instrument.muted && !instrument.solo) continue;
+
+    // Track Mode: mute instruments not in the active scene
+    if (state.trackMode && state.arrangement.length > 0) {
+      const activeSceneId = state.arrangement[_currentArrangementIdx]?.sceneId;
+      const activeScene = state.scenes.find((s) => s.id === activeSceneId);
+      const inAnyScene = state.scenes.some((s) => s.instrumentIds.includes(instrument.id));
+      // Play if: in active scene, OR in no scene at all (global instrument)
+      if (inAnyScene && !activeScene?.instrumentIds.includes(instrument.id)) continue;
+    }
 
     const { hitPositions, hits } = instrument;
     if (hits === 0 || hitPositions.length === 0) continue;

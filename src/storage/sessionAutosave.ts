@@ -36,6 +36,8 @@ interface AutosaveData {
   gridResolution?: number;
   scaleRoot?: number;
   scaleType?: string;
+  trackMode?: boolean;
+  arrangement?: { id: string; sceneId: string; bars: number }[];
   /** Custom sample blobs stored inline for autosave (avoids extra IDB reads on restore) */
   customSampleBlobs?: { key: string; name: string; mimeType: string; base64: string }[];
 }
@@ -102,6 +104,8 @@ async function saveSession(): Promise<void> {
     gridResolution: s.gridResolution,
     scaleRoot: s.scaleRoot,
     scaleType: s.scaleType,
+    trackMode: s.trackMode,
+    arrangement: s.arrangement,
     customSampleBlobs,
   };
 
@@ -163,6 +167,9 @@ export async function restoreAutosave(): Promise<boolean> {
       gridResolution: data.gridResolution ?? 1,
       scaleRoot: data.scaleRoot ?? 0,
       scaleType: data.scaleType ?? 'chromatic',
+      trackMode: data.trackMode ?? false,
+      arrangement: data.arrangement ?? [],
+      trackPosition: -1,
       customSamples,
       currentSetName: (data.meta?.name && data.meta.name !== 'Untitled') ? data.meta.name : generateName(),
       selectedInstrumentId: data.instruments[0]?.id ?? null,
@@ -224,7 +231,9 @@ export function initSessionAutosave(): void {
         state.currentSetName !== prevState.currentSetName ||
         state.gridResolution !== prevState.gridResolution ||
         state.scaleRoot !== prevState.scaleRoot ||
-        state.scaleType !== prevState.scaleType
+        state.scaleType !== prevState.scaleType ||
+        state.trackMode !== prevState.trackMode ||
+        state.arrangement !== prevState.arrangement
       ) {
         debouncedSave();
       }
