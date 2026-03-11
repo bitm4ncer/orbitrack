@@ -147,22 +147,23 @@ export function estimateLoopSize(buffer: AudioBuffer, projectBpm: number, detect
   const secondsPer16th = 60 / bpmForCalc / 4;
   const raw16ths = buffer.duration / secondsPer16th;
 
-  // Round to the nearest bar (16 sixteenth notes) for clean musical alignment.
-  // For shorter samples (< 1 bar) round to nearest beat (4 sixteenth notes).
+  // Round to the nearest bar (32 32nd notes = 16 sixteenth notes) for clean musical alignment.
+  // For shorter samples (< 1 bar) round to nearest beat (8 32nd notes = 4 sixteenth notes).
+  // With stepsPerBeat=8 (32nd note resolution), loopSize is in 32nd notes.
   let loopSize: number;
   if (raw16ths <= 6) {
-    // Very short: round to nearest 4 (one beat), minimum 4
-    loopSize = Math.max(4, Math.round(raw16ths / 4) * 4);
+    // Very short: round to nearest 8 (one beat in 32nds), minimum 8
+    loopSize = Math.max(8, Math.round(raw16ths / 4) * 8);
   } else if (raw16ths <= 24) {
-    // Short: round to nearest 8 (half-bar), minimum 8
-    loopSize = Math.max(8, Math.round(raw16ths / 8) * 8);
+    // Short: round to nearest 16 (half-bar in 32nds), minimum 16
+    loopSize = Math.max(16, Math.round(raw16ths / 8) * 16);
   } else {
-    // Standard+: round to nearest bar (16), minimum 16
-    loopSize = Math.max(16, Math.round(raw16ths / 16) * 16);
+    // Standard+: round to nearest bar (32 in 32nds), minimum 32
+    loopSize = Math.max(32, Math.round(raw16ths / 16) * 32);
   }
 
-  // Cap at 256 (16 bars)
-  loopSize = Math.min(loopSize, 256);
+  // Cap at 512 (16 bars at 32nd resolution)
+  loopSize = Math.min(loopSize, 512);
 
   console.log(`[estimateLoopSize] duration=${buffer.duration.toFixed(2)}s, bpm=${bpmForCalc}, raw16ths=${raw16ths.toFixed(1)}, loopSize=${loopSize}`);
   return loopSize;

@@ -83,15 +83,17 @@ export function LooperEditor() {
       if (outX < width) ctx.fillRect(Math.min(width, outX), 0, width - Math.min(width, outX), height);
     }
 
-    // Beat grid lines (16th subdivisions) + bar markers
+    // Beat grid lines + bar markers
     const loopSize = instrument.loopSize;
+    const stepsPerBar = loopSize;                  // full loop = 1 bar
+    const stepsPerBeat = Math.round(loopSize / 4); // quarter note
     for (let step = 0; step <= loopSize; step++) {
       const norm = step / loopSize;
       if (norm < viewStart || norm > viewEnd) continue;
       const x = ((norm - viewStart) / viewRange) * width;
 
-      const isBar = step % 16 === 0;
-      const isBeat = step % 4 === 0;
+      const isBar = step > 0 && step % stepsPerBar === 0;
+      const isBeat = step % stepsPerBeat === 0;
 
       if (isBar) {
         // Bar boundary: thicker, brighter line + bar number label
@@ -102,7 +104,7 @@ export function LooperEditor() {
         ctx.lineTo(x, height);
         ctx.stroke();
         // Bar number
-        const barNum = Math.floor(step / 16) + 1;
+        const barNum = Math.floor(step / stepsPerBar) + 1;
         ctx.fillStyle = 'rgba(255,255,255,0.3)';
         ctx.font = '9px monospace';
         ctx.fillText(String(barNum), x + 3, 10);

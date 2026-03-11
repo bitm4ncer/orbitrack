@@ -88,9 +88,13 @@ export function startTransport(): void {
     transport.clear(schedulerId);
   }
 
+  // Schedule at finest resolution: stepsPerBeat * 4 gives us the note value
+  // e.g., stepsPerBeat=8 → 32n, stepsPerBeat=4 → 16n
+  const { stepsPerBeat } = useStore.getState();
+  const intervalNote = `${stepsPerBeat * 4}n` as const;
   schedulerId = transport.scheduleRepeat((time) => {
     tick(time);
-  }, '16n');
+  }, intervalNote);
 
   transport.start();
   useStore.getState().setPlaying(true);
@@ -197,7 +201,8 @@ function _tick(time: number): void {
   const state = useStore.getState();
   const globalStep = _globalStep++;
 
-  const secondsPer16th = 60 / state.bpm / 4;
+  const stepsPerBeat = state.stepsPerBeat ?? 8;
+  const secondsPerStep = 60 / state.bpm / stepsPerBeat;
 
   // Recompute derived instrument stats only when the instruments array changes.
   if (state.instruments !== _instrRef) {
@@ -307,17 +312,18 @@ function _tick(time: number): void {
           const sortedHits = sortedHitsCache;
           const sortedIdx = sortedHits.indexOf(hitPos);
           if (sortedIdx >= 0) {
-            triggerLooperSlice(instrument, sortedIdx, sortedHits, secondsPer16th, time, state);
+            triggerLooperSlice(instrument, sortedIdx, sortedHits, secondsPerStep, time, state);
           }
         } else {
           const notes = state.gridNotes[instrument.id]?.[i];
           if (notes && notes.length > 0) {
             const glide = state.gridGlide[instrument.id]?.[i] ?? false;
             const noteLength = state.gridLengths[instrument.id]?.[i] ?? 1;
-            const noteDuration = secondsPer16th * noteLength * 0.9;
+            const velocity = state.gridVelocities[instrument.id]?.[i] ?? 100;
+            const noteDuration = secondsPerStep * noteLength * 0.9;
 
             for (const midiNote of notes) {
-              triggerSuperdough(instrument, midiNote, noteDuration, time, glide, state);
+              triggerSuperdough(instrument, midiNote, noteDuration, time, glide, velocity, state);
             }
           }
         }

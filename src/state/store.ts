@@ -32,6 +32,8 @@ import { postSync } from '../storage/recordingSync';
 import { createSceneBus, routeOrbitToScene, unrouteOrbitFromScene, destroySceneBus, destroyAllSceneBuses, initSceneBusesFromState } from '../audio/sceneBus';
 import { fetchSampleTree, type SampleEntry } from '../audio/sampleApi';
 import { removeSynthEngine } from '../audio/synthManager';
+import type { MidiSettings } from '../types/midi';
+import { DEFAULT_MIDI_SETTINGS } from '../types/midi';
 
 // LLM Generation settings types
 export type LLMEndpointType = 'none' | 'ollama' | 'claude' | 'custom';
@@ -93,7 +95,7 @@ const defaultInstruments: Instrument[] = (() => {
       color: PASTEL_COLORS[0],
       hits: kickHits,
       hitPositions: generateEvenHits(kickHits),
-      loopSize: 16,
+      loopSize: 32,
       loopSizeLocked: false,
       muted: false,
       solo: false,
@@ -109,7 +111,7 @@ const defaultInstruments: Instrument[] = (() => {
       color: PASTEL_COLORS[1],
       hits: snareHits,
       hitPositions: generateEvenHits(snareHits),
-      loopSize: 16,
+      loopSize: 32,
       loopSizeLocked: false,
       muted: false,
       solo: false,
@@ -125,7 +127,7 @@ const defaultInstruments: Instrument[] = (() => {
       color: PASTEL_COLORS[2],
       hits: hihatHits,
       hitPositions: generateEvenHits(hihatHits),
-      loopSize: 16,
+      loopSize: 32,
       loopSizeLocked: false,
       muted: false,
       solo: false,
@@ -141,7 +143,7 @@ const defaultInstruments: Instrument[] = (() => {
       color: PASTEL_COLORS[4],
       hits: clapHits,
       hitPositions: generateEvenHits(clapHits),
-      loopSize: 16,
+      loopSize: 32,
       loopSizeLocked: false,
       muted: true,
       solo: false,
@@ -155,6 +157,7 @@ const defaultInstruments: Instrument[] = (() => {
 export interface StoreState {
   // Transport
   bpm: number;
+  stepsPerBeat: number;         // 4=16th, 8=32nd, 16=64th notes (default 8)
   isPlaying: boolean;
   currentStep: number;
   transportProgress: number;
@@ -178,6 +181,7 @@ export interface StoreState {
 
   // Transport actions
   setBpm: (bpm: number) => void;
+  setStepsPerBeat: (stepsPerBeat: number) => void;
   setPlaying: (playing: boolean) => void;
   setCurrentStep: (step: number) => void;
   setTransportProgress: (progress: number) => void;
@@ -208,11 +212,13 @@ export interface StoreState {
   gridNotes: Record<string, number[][]>;
   gridGlide: Record<string, boolean[]>;
   gridLengths: Record<string, number[]>;
+  gridVelocities: Record<string, number[]>;
   octaveOffset: number;
 
   setGridNote: (instrumentId: string, hitIndex: number, notes: number[]) => void;
   setGridGlide: (instrumentId: string, hitIndex: number, glide: boolean) => void;
   setGridLength: (instrumentId: string, hitIndex: number, length: number) => void;
+  setGridVelocity: (instrumentId: string, hitIndex: number, velocity: number) => void;
   toggleGridNote: (instrumentId: string, hitIndex: number, midiNote: number) => void;
   moveGridNote: (instrumentId: string, hitIndex: number, fromNote: number, toNote: number) => void;
   moveGridNoteToStep: (instrumentId: string, fromHitIndex: number, toHitIndex: number, midiNote: number) => void;
@@ -354,6 +360,10 @@ export interface StoreState {
   genSettings: GenSettings;
   setGenSettings: (settings: Partial<GenSettings>) => void;
 
+  // MIDI settings
+  midiSettings: MidiSettings;
+  setMidiSettings: (settings: Partial<MidiSettings>) => void;
+
   // Set (project) management
   currentSetId: string | null;
   currentSetName: string;
@@ -365,6 +375,7 @@ export interface StoreState {
     gridNotes: Record<string, number[][]>;
     gridGlide: Record<string, boolean[]>;
     gridLengths: Record<string, number[]>;
+    gridVelocities: Record<string, number[]>;
     instrumentEffects: Record<string, Effect[]>;
     masterEffects: Effect[];
     scenes: InstrumentScene[];
@@ -383,6 +394,7 @@ export interface StoreState {
 export const useStore = create<StoreState>((set, get) => ({
   // Transport
   bpm: 128,
+  stepsPerBeat: 8,              // 8 = 32nd notes (default), 4 = 16th, 16 = 64th
   isPlaying: false,
   currentStep: -1,
   transportProgress: 0,
@@ -414,6 +426,7 @@ export const useStore = create<StoreState>((set, get) => ({
   })(),
   gridGlide: {},
   gridLengths: {},
+  gridVelocities: {},
   octaveOffset: 3, // Start at octave 3 (C3-B4 visible)
 
   // Per-instrument progress
@@ -443,10 +456,12 @@ export const useStore = create<StoreState>((set, get) => ({
   masterEffects: [],
   masterVolume: 0.8,
   genSettings: DEFAULT_GEN_SETTINGS,
+  midiSettings: DEFAULT_MIDI_SETTINGS,
 
   // Transport actions
-  setBpm: (bpm) => set({ bpm }),
-  setPlaying: (isPlaying) => set({ isPlaying }),
+  setBpm: (bpm: number) => set({ bpm }),
+  setStepsPerBeat: (stepsPerBeat: number) => set({ stepsPerBeat }),
+  setPlaying: (isPlaying: boolean) => set({ isPlaying }),
   setCurrentStep: (currentStep) => set({ currentStep }),
   setTransportProgress: (transportProgress) => set({ transportProgress }),
 
@@ -558,12 +573,17 @@ export const useStore = create<StoreState>((set, get) => ({
       if (!grid[id]) grid[id] = [];
       grid[id] = [...grid[id]];
       grid[id][newIndex] = [note];
+      const gVelocities = { ...s.gridVelocities };
+      if (!gVelocities[id]) gVelocities[id] = [];
+      gVelocities[id] = [...gVelocities[id]];
+      gVelocities[id][newIndex] = 100;
       return {
         instruments: s.instruments.map((i) => {
           if (i.id !== id) return i;
           return { ...i, hits: i.hits + 1, hitPositions: [...i.hitPositions, final] };
         }),
         gridNotes: grid,
+        gridVelocities: gVelocities,
       };
     }),
 
@@ -593,7 +613,13 @@ export const useStore = create<StoreState>((set, get) => ({
         arr.splice(hitIndex, 1);
         gLengths[id] = arr;
       }
-      return { instruments: newInstruments, gridNotes: grid, gridGlide: gGlide, gridLengths: gLengths };
+      const gVelocities = { ...s.gridVelocities };
+      if (gVelocities[id]) {
+        const arr = [...gVelocities[id]];
+        arr.splice(hitIndex, 1);
+        gVelocities[id] = arr;
+      }
+      return { instruments: newInstruments, gridNotes: grid, gridGlide: gGlide, gridLengths: gLengths, gridVelocities: gVelocities };
     }),
 
   selectInstrument: (id) => set({
@@ -737,6 +763,15 @@ export const useStore = create<StoreState>((set, get) => ({
       return { gridLengths: grid };
     }),
 
+  setGridVelocity: (instrumentId, hitIndex, velocity) =>
+    set((s) => {
+      const grid = { ...s.gridVelocities };
+      if (!grid[instrumentId]) grid[instrumentId] = [];
+      grid[instrumentId] = [...grid[instrumentId]];
+      grid[instrumentId][hitIndex] = Math.max(1, Math.min(127, velocity));
+      return { gridVelocities: grid };
+    }),
+
   toggleGridNote: (instrumentId, hitIndex, midiNote) =>
     set((s) => {
       const grid = { ...s.gridNotes };
@@ -828,11 +863,16 @@ export const useStore = create<StoreState>((set, get) => ({
       }
 
       let toHitIdx = stepToHit2.get(toStep);
+      const gVelocities = { ...s.gridVelocities };
+      if (!gVelocities[id]) gVelocities[id] = [];
+      gVelocities[id] = [...gVelocities[id]];
+
       if (toHitIdx === undefined) {
         toHitIdx = newPositions.length;
         const pos = toStep / inst.loopSize;
         newPositions.push(pos);
         grid[id][toHitIdx] = [midiNote];
+        gVelocities[id][toHitIdx] = gVelocities[id][fromHitIdx] ?? 100;
       } else {
         const toNotes = grid[id][toHitIdx] || [];
         if (!toNotes.includes(midiNote)) {
@@ -846,6 +886,7 @@ export const useStore = create<StoreState>((set, get) => ({
           return { ...i, hits: newPositions.length, hitPositions: newPositions };
         }),
         gridNotes: grid,
+        gridVelocities: gVelocities,
       };
     }),
 
@@ -1143,6 +1184,10 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setGenSettings: (settings) => set((state) => ({
     genSettings: { ...state.genSettings, ...settings },
+  })),
+
+  setMidiSettings: (settings) => set((state) => ({
+    midiSettings: { ...state.midiSettings, ...settings },
   })),
 
   // ── Group actions ──────────────────────────────────────────────────────────
@@ -2097,6 +2142,7 @@ export const useStore = create<StoreState>((set, get) => ({
       gridNotes: s.gridNotes,
       gridGlide: s.gridGlide,
       gridLengths: s.gridLengths,
+      gridVelocities: s.gridVelocities,
       instrumentEffects: s.instrumentEffects,
       masterEffects: s.masterEffects,
       scenes: s.scenes,
@@ -2139,13 +2185,26 @@ export const useStore = create<StoreState>((set, get) => ({
     // Reset orbit counter to match loaded instruments
     orbitCounter = orbeatSet.instruments.reduce((max, i) => Math.max(max, i.orbitIndex + 1), 0);
 
+    // Migration: if set was saved with old 16th-note base (no stepsPerBeat), upgrade to 32nd-note base
+    let instruments = orbeatSet.instruments;
+    let stepsPerBeat = orbeatSet.stepsPerBeat ?? 8;
+    if (!orbeatSet.stepsPerBeat) {
+      // Old format detected: double all loopSizes to maintain 1-bar timing with new 32nd-note transport
+      instruments = instruments.map((inst) => ({
+        ...inst,
+        loopSize: inst.loopSize * 2,
+      }));
+    }
+
     set({
       bpm: orbeatSet.bpm,
+      stepsPerBeat,
       masterVolume: orbeatSet.masterVolume,
-      instruments: orbeatSet.instruments,
+      instruments,
       gridNotes: orbeatSet.gridNotes,
       gridGlide: orbeatSet.gridGlide,
       gridLengths: orbeatSet.gridLengths,
+      gridVelocities: orbeatSet.gridVelocities ?? {},
       instrumentEffects: orbeatSet.instrumentEffects,
       masterEffects: orbeatSet.masterEffects ?? [],
       scenes: orbeatSet.scenes ?? [],

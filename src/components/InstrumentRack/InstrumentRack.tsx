@@ -651,7 +651,7 @@ export function InstrumentRack() {
       color,
       hits: 4,
       hitPositions: Array.from({ length: 4 }, (_, i) => i / 4),
-      loopSize: 16,
+      loopSize: 32,
       loopSizeLocked: false,
       muted: false,
       solo: false,
@@ -666,7 +666,7 @@ export function InstrumentRack() {
   const addSynth = () => {
     const store = useStore.getState();
     const color = PASTEL_COLORS[store.instruments.length % PASTEL_COLORS.length];
-    const loopSize = 16;
+    const loopSize = 32;
     const newInst = {
       id: createId(),
       name: `Synth ${store.instruments.filter((i) => i.type === 'synth').length + 1}`,
@@ -701,7 +701,7 @@ export function InstrumentRack() {
       color,
       hits: 0,
       hitPositions: [] as number[],
-      loopSize: 16,
+      loopSize: 32,
       loopSizeLocked: false,
       muted: false,
       solo: false,

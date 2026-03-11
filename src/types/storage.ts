@@ -47,11 +47,13 @@ export interface OrbeatSet {
   version: 1;
   meta: SetMeta;
   bpm: number;
+  stepsPerBeat?: number; // 4=16th, 8=32nd, 16=64th (optional, defaults to 8 on load)
   masterVolume: number;
   instruments: Instrument[];
   gridNotes: Record<string, number[][]>;
   gridGlide: Record<string, boolean[]>;
   gridLengths: Record<string, number[]>;
+  gridVelocities?: Record<string, number[]>;
   instrumentEffects: Record<string, Effect[]>;
   masterEffects?: Effect[];
   groups?: InstrumentScene[];  // legacy: for backward compat on load

@@ -89,8 +89,9 @@ export class KnobRenderer {
 
     // Real-time transport position
     const transport = Tone.getTransport();
-    const secondsPer16th = 60 / state.bpm / 4;
-    const totalSteps = state.isPlaying ? transport.seconds / secondsPer16th : 0;
+    const stepsPerBeatGlobal = state.stepsPerBeat ?? 8;
+    const secondsPerStep = 60 / state.bpm / stepsPerBeatGlobal;
+    const totalSteps = state.isPlaying ? transport.seconds / secondsPerStep : 0;
 
     const isSelected = state.selectedInstrumentId === this.instrumentId;
     const isMuted = inst.muted;
@@ -111,11 +112,12 @@ export class KnobRenderer {
 
     // --- 2. Step tick marks on the ring (one per step, fixed/not rotating) ---
     const stepCount = inst.loopSize;
+    const stepsPerBeat = Math.round(stepCount / 4); // beats every quarter note
     for (let g = 0; g < stepCount; g++) {
       const tickAngle = (g / stepCount) * TWO_PI + TRIGGER_ANGLE + dotRotation;
       const cos = Math.cos(tickAngle);
       const sin = Math.sin(tickAngle);
-      const isBeat = g % 4 === 0;
+      const isBeat = g % stepsPerBeat === 0;
       const innerLen = isBeat ? 10 : 5;
       const outerLen = isBeat ? 5 : 3;
       ctx.beginPath();
@@ -247,8 +249,9 @@ export class KnobRenderer {
 
     const { cx, cy, radius } = this.getLayout();
     const transport = Tone.getTransport();
-    const secondsPer16th = 60 / state.bpm / 4;
-    const totalSteps = state.isPlaying ? transport.seconds / secondsPer16th : 0;
+    const stepsPerBeatGlobal = state.stepsPerBeat ?? 8;
+    const secondsPerStep = 60 / state.bpm / stepsPerBeatGlobal;
+    const totalSteps = state.isPlaying ? transport.seconds / secondsPerStep : 0;
     const anySolo = state.instruments.some((i) => i.solo);
     const effectivelyMuted = (inst.muted && !inst.solo) || (anySolo && !inst.solo);
     const instProg = state.isPlaying && !effectivelyMuted
@@ -280,8 +283,9 @@ export class KnobRenderer {
     const { cx, cy } = this.getLayout();
 
     const transport = Tone.getTransport();
-    const secondsPer16th = 60 / state.bpm / 4;
-    const totalSteps = state.isPlaying ? transport.seconds / secondsPer16th : 0;
+    const stepsPerBeatGlobal = state.stepsPerBeat ?? 8;
+    const secondsPerStep = 60 / state.bpm / stepsPerBeatGlobal;
+    const totalSteps = state.isPlaying ? transport.seconds / secondsPerStep : 0;
     const anySolo = state.instruments.some((i) => i.solo);
     const effectivelyMuted = inst ? (inst.muted && !inst.solo) || (anySolo && !inst.solo) : false;
     const instProg = state.isPlaying && inst && !effectivelyMuted

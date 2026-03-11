@@ -33,10 +33,10 @@ interface SelectionRect {
 
 // ── Grid resolution options ─────────────────────────────────────────────────
 const GRID_RESOLUTIONS = [
-  { label: '1/16', value: 1 },
-  { label: '1/8', value: 2 },
-  { label: '1/4', value: 4 },
-  { label: '1/2', value: 8 },
+  { label: '1/32', value: 1 },  // 1 column = 1 step = 1/32nd note
+  { label: '1/16', value: 2 },  // 1 column = 2 steps = 1/16th note
+  { label: '1/8', value: 4 },   // 1 column = 4 steps = 1/8th note
+  { label: '1/4', value: 8 },   // 1 column = 8 steps = 1/4 note
 ] as const;
 
 function getBeatClass(hitIndex: number, _hitCount: number, gridRes: number): string {
@@ -82,6 +82,7 @@ export function GridSequencer() {
   const gridNotes = useStore((s) => s.gridNotes);
   const gridGlide = useStore((s) => s.gridGlide);
   const gridLengths = useStore((s) => s.gridLengths);
+  const gridVelocities = useStore((s) => s.gridVelocities);
   const octaveOffset = useStore((s) => s.octaveOffset);
   const instrumentProgress = useStore((s) => s.instrumentProgress);
   const isPlaying = useStore((s) => s.isPlaying);
@@ -93,11 +94,14 @@ export function GridSequencer() {
   const dragRef = useRef<DragState | null>(null);
   const gridBodyRef = useRef<HTMLDivElement>(null);
   const gridContainerRef = useRef<HTMLDivElement>(null);
+  const hoveredHitRef = useRef<{ instrumentId: string; hitIndex: number } | null>(null);
+  const velDragRef = useRef<{ hitIndex: number; startY: number; startVel: number } | null>(null);
 
   // Multi-select state
   const [selectedNotes, setSelectedNotes] = useState<Set<string>>(new Set());
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const selRectRef = useRef<SelectionRect | null>(null);
+  const [showVelocity, setShowVelocity] = useState(false);
 
   // GEN sidebar state
   const [genOpen, setGenOpen] = useState(false);
@@ -105,13 +109,25 @@ export function GridSequencer() {
 
   const instrument = instruments.find((i) => i.id === selectedId);
 
-  // ── Octave scroll via mouse wheel ──────────────────────────────────────
+  // ── Octave scroll via mouse wheel (or velocity scroll if hovering over note) ──────────────────────────────────────
   useEffect(() => {
     const el = gridContainerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const store = useStore.getState();
+
+      // Check if hovering over a note hit — if so, adjust velocity instead of octave
+      if (hoveredHitRef.current) {
+        const { instrumentId, hitIndex } = hoveredHitRef.current;
+        const vel = store.gridVelocities[instrumentId]?.[hitIndex] ?? 100;
+        const delta = e.deltaY < 0 ? 5 : -5;
+        const newVel = Math.max(1, Math.min(127, vel + delta));
+        store.setGridVelocity(instrumentId, hitIndex, newVel);
+        return;
+      }
+
+      // Otherwise, adjust octave
       const offset = store.octaveOffset;
       if (e.deltaY < 0) {
         store.setOctaveOffset(Math.min(7, offset + 1));
@@ -127,6 +143,28 @@ export function GridSequencer() {
   useEffect(() => {
     setSelectedNotes(new Set());
   }, [selectedId]);
+
+  // ── Velocity bar drag handler ──────────────────────────────────────
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!velDragRef.current) return;
+      const { hitIndex, startY, startVel } = velDragRef.current;
+      const dy = startY - e.clientY;
+      const newVel = Math.max(1, Math.min(127, startVel + Math.round(dy * 1.5)));
+      if (instrument) {
+        useStore.getState().setGridVelocity(instrument.id, hitIndex, newVel);
+      }
+    };
+    const onUp = () => {
+      velDragRef.current = null;
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+  }, [instrument]);
 
   // ── Keyboard handler for delete ──────────────────────────────────────
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -579,6 +617,44 @@ export function GridSequencer() {
     );
   })();
 
+  // ── Velocity lane renderer ──────────────────────────────────────
+  const renderVelocityLane = () => {
+    if (!showVelocity) return null;
+    const colPercent = 100 / totalSteps;
+    return (
+      <div className="flex shrink-0 border-t border-border" style={{ height: 64 }}>
+        <div className="w-10 shrink-0 flex items-center justify-center">
+          <span className="text-[8px] text-white/30 uppercase tracking-wider">vel</span>
+        </div>
+        <div className="flex-1 relative">
+          {Array.from(stepToHit.entries()).map(([stepIndex, hitIdx]) => {
+            const vel = gridVelocities[instrument.id]?.[hitIdx] ?? 100;
+            const barH = (vel / 127) * 56;
+            return (
+              <div
+                key={`vel-${stepIndex}`}
+                className="absolute bottom-0"
+                style={{
+                  left: `${stepIndex * colPercent}%`,
+                  width: `calc(${colPercent}% - 2px)`,
+                  height: barH,
+                  background: instrument.color,
+                  opacity: 0.7,
+                  borderRadius: '2px 2px 0 0',
+                  cursor: 'ns-resize',
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  velDragRef.current = { hitIndex: hitIdx, startY: e.clientY, startVel: vel };
+                }}
+              />
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   // ── Note block renderer ──────────────────────────────────────────────
   const renderNoteBlock = (
     stepIndex: number,
@@ -592,6 +668,8 @@ export function GridSequencer() {
     if (rowIndex === -1) return null;
     const key = noteKey(stepIndex, midiNote);
     const isNoteSelected = selectedNotes.has(key);
+    const vel = gridVelocities[instrument.id]?.[hitIdx] ?? 100;
+    const noteOpacity = 0.3 + (vel / 127) * 0.7; // 0.3-1.0
 
     return (
       <div
@@ -605,6 +683,12 @@ export function GridSequencer() {
           pointerEvents: 'auto',
           zIndex: isNoteSelected ? 11 : 10,
         }}
+        onMouseEnter={() => {
+          hoveredHitRef.current = { instrumentId: instrument.id, hitIndex: hitIdx };
+        }}
+        onMouseLeave={() => {
+          hoveredHitRef.current = null;
+        }}
       >
         {/* Note body */}
         <div
@@ -615,6 +699,7 @@ export function GridSequencer() {
             boxShadow: `0 0 4px ${instrument.color}40`,
             outline: isNoteSelected ? '2px solid rgba(255,255,255,0.8)' : 'none',
             outlineOffset: -1,
+            opacity: noteOpacity,
           }}
           onMouseDown={(e) => handleNoteMouseDown(e, stepIndex, midiNote)}
           onDoubleClick={(e) => {
@@ -741,6 +826,16 @@ export function GridSequencer() {
           <span className="text-[10px] text-text-secondary">{instrument.name}</span>
           <GenerateButton genOpen={genOpen} onToggleGen={() => setGenOpen(!genOpen)} />
           {gridResButtons}
+          <button
+            onClick={() => setShowVelocity(v => !v)}
+            className={`text-[9px] px-1.5 py-0.5 rounded transition-colors
+              ${showVelocity
+                ? 'bg-white/10 text-text-primary'
+                : 'text-text-secondary/50 hover:text-text-secondary hover:bg-white/5'}`}
+            title="Toggle velocity lane"
+          >
+            VEL
+          </button>
           {scaleSelector}
           <div className="ml-auto flex items-center gap-1">
             <span className="text-[10px] text-text-secondary mr-2">{loopSize} steps</span>
@@ -767,17 +862,20 @@ export function GridSequencer() {
               </div>
             </>
           )}
-          <div className="grid-body flex flex-1 overflow-x-auto">
-            {noteLabels}
-            <div
-              ref={gridBodyRef}
-              className="grid-cells flex-1 relative"
-              onMouseDown={handleGridMouseDown}
-            >
-              {renderGridCells(false)}
-              {renderNoteBlocks(0)}
-              {selectionOverlay}
+          <div className="grid-body flex flex-col flex-1 overflow-x-auto">
+            <div className="flex flex-1 min-h-0">
+              {noteLabels}
+              <div
+                ref={gridBodyRef}
+                className="grid-cells flex-1 relative"
+                onMouseDown={handleGridMouseDown}
+              >
+                {renderGridCells(false)}
+                {renderNoteBlocks(0)}
+                {selectionOverlay}
+              </div>
             </div>
+            {renderVelocityLane()}
           </div>
         </div>
       </div>
@@ -818,6 +916,16 @@ export function GridSequencer() {
         <GenerateButton genOpen={genOpen} onToggleGen={() => setGenOpen(!genOpen)} />
 
         {gridResButtons}
+        <button
+          onClick={() => setShowVelocity(v => !v)}
+          className={`text-[9px] px-1.5 py-0.5 rounded transition-colors
+            ${showVelocity
+              ? 'bg-white/10 text-text-primary'
+              : 'text-text-secondary/50 hover:text-text-secondary hover:bg-white/5'}`}
+          title="Toggle velocity lane"
+        >
+          VEL
+        </button>
         {scaleSelector}
 
         <div className="ml-auto flex items-center gap-1">
@@ -845,34 +953,37 @@ export function GridSequencer() {
             </div>
           </>
         )}
-        <div className="grid-body flex flex-1 overflow-x-auto">
-          {/* Synth note labels need extra top padding for glide row */}
-          <div className="grid-note-labels shrink-0 w-10">
-            <div style={{ height: 14 }} />
-            {rows.map((midiNote) => {
-              const isBlackKey = [1, 3, 6, 8, 10].includes(midiNote % 12);
-              return (
-                <div
-                  key={midiNote}
-                  className={`flex items-center justify-end pr-1 text-[9px]
-                    ${isBlackKey ? 'text-text-secondary/50' : 'text-text-secondary'}`}
-                  style={{ height: ROW_H }}
-                >
-                  {noteNameWithOctave(midiNote)}
-                </div>
-              );
-            })}
-          </div>
+        <div className="grid-body flex flex-col flex-1 overflow-x-auto">
+          <div className="flex flex-1 min-h-0">
+            {/* Synth note labels need extra top padding for glide row */}
+            <div className="grid-note-labels shrink-0 w-10">
+              <div style={{ height: 14 }} />
+              {rows.map((midiNote) => {
+                const isBlackKey = [1, 3, 6, 8, 10].includes(midiNote % 12);
+                return (
+                  <div
+                    key={midiNote}
+                    className={`flex items-center justify-end pr-1 text-[9px]
+                      ${isBlackKey ? 'text-text-secondary/50' : 'text-text-secondary'}`}
+                    style={{ height: ROW_H }}
+                  >
+                    {noteNameWithOctave(midiNote)}
+                  </div>
+                );
+              })}
+            </div>
 
-          <div
-            ref={gridBodyRef}
-            className="grid-cells flex-1 relative"
-            onMouseDown={handleGridMouseDown}
-          >
-            {renderGridCells(true)}
-            {renderNoteBlocks(14)}
-            {selectionOverlay}
+            <div
+              ref={gridBodyRef}
+              className="grid-cells flex-1 relative"
+              onMouseDown={handleGridMouseDown}
+            >
+              {renderGridCells(true)}
+              {renderNoteBlocks(14)}
+              {selectionOverlay}
+            </div>
           </div>
+          {renderVelocityLane()}
         </div>
       </div>
     </div>

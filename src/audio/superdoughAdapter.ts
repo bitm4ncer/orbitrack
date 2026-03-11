@@ -59,13 +59,14 @@ export function triggerSuperdough(
   noteDuration: number,
   audioTime: number,
   glide: boolean,
+  velocity: number,
   state: StoreState,
 ): void {
   if (instrument.type === 'synth') {
     // Route through the custom SynthEngine — NOT superdough.
     // This fixes "sound supersaw not found" and enables poly, LFO, FM, unison.
     const engine = getSynthEngine(instrument.id, instrument.orbitIndex);
-    const instGain = dbToLinear(instrument.volume);
+    const instGain = dbToLinear(instrument.volume) * (velocity / 127);
     void glide; // portamentoSpeed is already in SynthParams
     engine.noteOn(midiNote, audioTime, noteDuration, instGain);
 
@@ -81,7 +82,7 @@ export function triggerSuperdough(
 
     superdough({
       s: instrument.sampleName,
-      gain: sp.gain * instGain,
+      gain: sp.gain * instGain * (velocity / 127),
       speed,
       begin: sp.begin,
       end: sp.end,
@@ -105,7 +106,7 @@ export function triggerLooperSlice(
   instrument: Instrument,
   hitIndex: number,
   sortedHits: number[],
-  secondsPer16th: number,
+  secondsPerStep: number,
   audioTime: number,
   state: StoreState,
 ): void {
@@ -134,7 +135,7 @@ export function triggerLooperSlice(
   const nextStep = hitIndex + 1 < sortedHits.length
     ? Math.round(sortedHits[hitIndex + 1] * instrument.loopSize)
     : instrument.loopSize;
-  const availableSec = (nextStep - thisStep) * secondsPer16th;
+  const availableSec = (nextStep - thisStep) * secondsPerStep;
 
   let sliceSpeed = lp.speed;
   if (bufferDuration && bufferDuration > 0) {
