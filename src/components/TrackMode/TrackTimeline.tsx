@@ -1,37 +1,79 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../../state/store';
 import type { InstrumentScene } from '../../types/scene';
-import { KnobRenderer } from '../../canvas/KnobRenderer';
 
 const BLOCK_H = 150; // pixels, 250% of original ~60px
 
-function MiniOrb({ instrumentId }: { instrumentId: string }) {
+function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSceneSelected: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rendererRef = useRef<KnobRenderer | null>(null);
+  const rafRef = useRef<number | null>(null);
   const selectInstrument = useStore((s) => s.selectInstrument);
-  const instName = useStore((s) => s.instruments.find(i => i.id === instrumentId)?.name ?? '');
+  const inst = useStore((s) => s.instruments.find(i => i.id === instrumentId));
+  const instName = inst?.name ?? '';
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const renderer = new KnobRenderer(canvas, instrumentId);
-    renderer.resize();
-    renderer.start();
-    rendererRef.current = renderer;
-    return () => { renderer.stop(); rendererRef.current = null; };
-  }, [instrumentId]);
+    if (!canvas || !inst) return;
+
+    let rotation = 0;
+    const draw = () => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const w = canvas.width;
+      const h = canvas.height;
+      const cx = w / 2;
+      const cy = h / 2;
+      const radius = w / 2 - 2;
+
+      // Clear
+      ctx.clearRect(0, 0, w, h);
+
+      // Outer ring
+      ctx.strokeStyle = 'rgba(180, 180, 180, 0.8)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Hit position dots (rotating)
+      if (inst.hitPositions && inst.hitPositions.length > 0) {
+        inst.hitPositions.forEach((angle) => {
+          const rad = (angle * Math.PI * 2 + rotation) % (Math.PI * 2);
+          const x = cx + Math.cos(rad) * (radius - 3);
+          const y = cy + Math.sin(rad) * (radius - 3);
+          ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
+          ctx.beginPath();
+          ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+
+      rotation += 0.02;
+      rafRef.current = requestAnimationFrame(draw);
+    };
+
+    rafRef.current = requestAnimationFrame(draw);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [inst]);
 
   return (
     <div
-      className="cursor-pointer rounded hover:ring-1 hover:ring-white/50 transition-all flex-shrink-0"
-      style={{ width: 36, height: 36, filter: 'grayscale(1) brightness(1.4)' }}
+      className="cursor-pointer rounded transition-colors flex-shrink-0"
+      style={{
+        width: 36,
+        height: 36,
+        border: isSceneSelected ? '1px solid rgba(200, 200, 200, 0.6)' : '1px solid transparent',
+      }}
       title={instName}
       onClick={(e) => {
         e.stopPropagation();
         selectInstrument(instrumentId);
       }}
     >
-      <canvas ref={canvasRef} width={36} height={36} style={{ display: 'block' }} />
+      <canvas ref={canvasRef} width={36} height={36} style={{ display: 'block', width: 36, height: 36 }} />
     </div>
   );
 }
@@ -156,7 +198,7 @@ function SceneBlock({
       {/* Mini orbs grid */}
       <div className="flex flex-wrap gap-1 overflow-hidden flex-1 px-2 pb-2 pt-1 items-start content-start">
         {scene.instrumentIds.map(instId => (
-          <MiniOrb key={instId} instrumentId={instId} />
+          <MiniOrb key={instId} instrumentId={instId} isSceneSelected={isSelected} />
         ))}
       </div>
 
@@ -195,6 +237,7 @@ export function TrackTimeline() {
   const scenes = useStore((s) => s.scenes);
   const arrangement = useStore((s) => s.arrangement);
   const trackPosition = useStore((s) => s.trackPosition);
+  const trackStepProgress = useStore((s) => s.trackStepProgress);
   const addArrangementStep = useStore((s) => s.addArrangementStep);
   const removeArrangementStep = useStore((s) => s.removeArrangementStep);
   const reorderArrangementSteps = useStore((s) => s.reorderArrangementSteps);
@@ -340,10 +383,11 @@ export function TrackTimeline() {
     setDragOverIndex(null);
   };
 
-  // Calculate playhead position
+  // Calculate playhead position with smooth progress within current step
   const playheadX =
     trackPosition >= 0 && arrangement.length > 0
-      ? arrangement.slice(0, trackPosition).reduce((sum, step) => sum + step.bars * barPx, 0)
+      ? arrangement.slice(0, trackPosition).reduce((sum, step) => sum + step.bars * barPx, 0) +
+        (arrangement[trackPosition]?.bars ?? 0) * barPx * trackStepProgress
       : 0;
 
   // Show all scenes - they can be added multiple times to the arrangement
@@ -448,6 +492,7 @@ export function TrackTimeline() {
             style={{
               left: `${playheadX}px`,
               boxShadow: '0 0 8px rgba(250, 204, 21, 0.8)',
+              transition: 'left 41.66ms linear',
             }}
           />
         )}

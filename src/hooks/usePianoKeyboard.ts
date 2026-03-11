@@ -1,6 +1,23 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../state/store';
 import { getSynthEngine } from '../audio/synthManager';
+import { initAudio } from '../audio/engine';
+import { loadSamples } from '../audio/sampler';
+
+const audioInitRef = { initialized: false };
+
+async function ensureAudio() {
+  if (audioInitRef.initialized) return;
+  try {
+    await initAudio();
+    await loadSamples();
+    audioInitRef.initialized = true;
+  } catch (err) {
+    console.error('Failed to initialize audio:', err);
+    audioInitRef.initialized = false;
+    throw err;
+  }
+}
 
 const PIANO_KEY_MAP: Record<string, number> = {
   // Home row: C D E F G A B C D
@@ -27,13 +44,17 @@ const PIANO_KEY_MAP: Record<string, number> = {
 };
 
 export function usePianoKeyboard(): void {
-  const octaveRef = useRef(4); // Default octave: C4 = MIDI 60
-  const velocityRef = useRef(80); // 0-127, default 80
-  const heldKeysRef = useRef(new Map<string, number>()); // keyCode → midiNote
-  const lastHeldKeyRef = useRef<string | null>(null); // Track last triggered key for retrigger
+  const octaveRef = useRef(4);
+  const velocityRef = useRef(80);
+  const heldKeysRef = useRef(new Map<string, number>());
+  const audioInitializedRef = useRef(false);
 
   useEffect(() => {
+    let isMounted = true;
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isMounted) return;
+
       // Skip if typing in text input or textarea
       if (
         (e.target instanceof HTMLInputElement && e.target.type !== 'range') ||
@@ -42,15 +63,11 @@ export function usePianoKeyboard(): void {
         return;
       }
 
-      // Skip if key repeat (holding down a key)
-      if (e.repeat) {
-        return;
-      }
+      // Skip if key repeat
+      if (e.repeat) return;
 
-      // Skip if modifier key is pressed (let other shortcuts handle it)
-      if (e.metaKey || e.ctrlKey || e.altKey) {
-        return;
-      }
+      // Skip if modifier key pressed
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       // Octave control
       if (e.code === 'KeyZ') {
@@ -82,101 +99,114 @@ export function usePianoKeyboard(): void {
       if (e.code in PIANO_KEY_MAP && !heldKeysRef.current.has(e.code)) {
         e.preventDefault();
 
-        try {
-          const store = useStore.getState();
-          const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
-
-          // Only play if a synth instrument is selected
-          if (inst?.type === 'synth') {
-            const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-            const semitoneDelta = PIANO_KEY_MAP[e.code];
-            const midiNote = 12 * (octaveRef.current + 1) + semitoneDelta;
-
-            engine.noteOnNow(midiNote);
-            heldKeysRef.current.set(e.code, midiNote);
-            lastHeldKeyRef.current = e.code;
-          }
-        } catch (err) {
-          console.error('Piano keyboard error:', err);
+        // Initialize audio on first key press if needed
+        if (!audioInitializedRef.current) {
+          ensureAudio()
+            .then(() => {
+              audioInitializedRef.current = true;
+              triggerNote(e.code);
+            })
+            .catch((err) => {
+              console.error('Piano keyboard: failed to initialize audio:', err);
+            });
+        } else {
+          triggerNote(e.code);
         }
       }
     };
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      // Piano key released
-      if (e.code in PIANO_KEY_MAP && heldKeysRef.current.has(e.code)) {
-        e.preventDefault();
-
-        heldKeysRef.current.delete(e.code);
-
+    const triggerNote = (keyCode: string) => {
+      try {
         const store = useStore.getState();
         const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
 
         if (inst?.type === 'synth') {
           const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
+          const semitoneDelta = PIANO_KEY_MAP[keyCode];
+          const midiNote = 12 * (octaveRef.current + 1) + semitoneDelta;
 
-          if (heldKeysRef.current.size > 0) {
-            // Other keys still held: retrigger the last remaining key
-            const lastKey = Array.from(heldKeysRef.current.keys()).pop();
-            if (lastKey) {
-              const midiNote = heldKeysRef.current.get(lastKey)!;
-              engine.noteOnNow(midiNote);
-              lastHeldKeyRef.current = lastKey;
+          engine.noteOnNow(midiNote);
+          heldKeysRef.current.set(keyCode, midiNote);
+        }
+      } catch (err) {
+        console.error('Piano keyboard: failed to trigger note:', err);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (!isMounted) return;
+
+      if (e.code in PIANO_KEY_MAP && heldKeysRef.current.has(e.code)) {
+        e.preventDefault();
+        heldKeysRef.current.delete(e.code);
+
+        try {
+          const store = useStore.getState();
+          const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
+
+          if (inst?.type === 'synth' && audioInitializedRef.current) {
+            const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
+
+            if (heldKeysRef.current.size > 0) {
+              // Retrigger last held key
+              const lastKey = Array.from(heldKeysRef.current.keys()).pop();
+              if (lastKey) {
+                const midiNote = heldKeysRef.current.get(lastKey)!;
+                engine.noteOnNow(midiNote);
+              }
+            } else {
+              // All keys released
+              engine.noteOff();
             }
-          } else {
-            // No more keys held: silence
-            engine.noteOff();
-            lastHeldKeyRef.current = null;
           }
+        } catch (err) {
+          console.error('Piano keyboard: failed on key release:', err);
         }
       }
     };
 
-    // Cleanup stuck notes when window loses focus or is hidden
     const handleWindowBlur = () => {
-      try {
-        const store = useStore.getState();
-        const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
-        if (inst?.type === 'synth' && heldKeysRef.current.size > 0) {
-          const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-          engine.noteOff();
-          heldKeysRef.current.clear();
-          lastHeldKeyRef.current = null;
+      if (heldKeysRef.current.size > 0) {
+        try {
+          const store = useStore.getState();
+          const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
+          if (inst?.type === 'synth' && audioInitializedRef.current) {
+            getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams).noteOff();
+          }
+        } catch (err) {
+          // Ignore cleanup errors
         }
-      } catch (err) {
-        // Silently ignore errors on cleanup
+        heldKeysRef.current.clear();
       }
     };
 
     const handleVisibilityChange = () => {
-      try {
-        if (document.hidden) {
+      if (document.hidden && heldKeysRef.current.size > 0) {
+        try {
           const store = useStore.getState();
           const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
-          if (inst?.type === 'synth' && heldKeysRef.current.size > 0) {
-            const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-            engine.noteOff();
-            heldKeysRef.current.clear();
-            lastHeldKeyRef.current = null;
+          if (inst?.type === 'synth' && audioInitializedRef.current) {
+            getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams).noteOff();
           }
+        } catch (err) {
+          // Ignore cleanup errors
         }
-      } catch (err) {
-        // Silently ignore errors on cleanup
+        heldKeysRef.current.clear();
       }
     };
 
     const handleBeforeUnload = () => {
-      try {
-        const store = useStore.getState();
-        const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
-        if (inst?.type === 'synth' && heldKeysRef.current.size > 0) {
-          const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-          engine.noteStop();
-          heldKeysRef.current.clear();
-          lastHeldKeyRef.current = null;
+      if (heldKeysRef.current.size > 0) {
+        try {
+          const store = useStore.getState();
+          const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
+          if (inst?.type === 'synth' && audioInitializedRef.current) {
+            getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams).noteStop();
+          }
+        } catch (err) {
+          // Ignore cleanup errors
         }
-      } catch (err) {
-        // Silently ignore errors on cleanup
+        heldKeysRef.current.clear();
       }
     };
 
@@ -187,11 +217,25 @@ export function usePianoKeyboard(): void {
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
+      isMounted = false;
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleWindowBlur);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      // Force cleanup on unmount
+      if (heldKeysRef.current.size > 0) {
+        try {
+          const store = useStore.getState();
+          const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
+          if (inst?.type === 'synth' && audioInitializedRef.current) {
+            getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams).noteStop();
+          }
+        } catch (err) {
+          // Ignore
+        }
+        heldKeysRef.current.clear();
+      }
     };
   }, []);
 }

@@ -158,6 +158,7 @@ export interface StoreState {
   isPlaying: boolean;
   currentStep: number;
   transportProgress: number;
+  trackStepProgress: number;
 
   // Instruments
   instruments: Instrument[];
@@ -384,6 +385,7 @@ export const useStore = create<StoreState>((set, get) => ({
   isPlaying: false,
   currentStep: -1,
   transportProgress: 0,
+  trackStepProgress: 0,
 
   // Instruments
   instruments: defaultInstruments,

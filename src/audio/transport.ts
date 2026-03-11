@@ -46,7 +46,7 @@ function startUISync(): void {
   function sync(): void {
     if (_pos.dirty) {
       _pos.dirty = false;
-      useStore.getState().setPlaybackUI(_pos.progress, _pos.currentStep, _pos.instProgress, _pos.trackPosition);
+      useStore.getState().setPlaybackUI(_pos.progress, _pos.currentStep, _pos.instProgress, _pos.trackPosition, _pos.trackStepProgress);
     }
     _rafId = requestAnimationFrame(sync);
   }
