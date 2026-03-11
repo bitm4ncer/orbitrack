@@ -360,6 +360,12 @@ export class SynthEngine {
     this._lastLiveVoice = null;
   }
 
+  dispose(): void {
+    this.noteStop();
+    try { this.lfo1.stop(); } catch { /* already stopped */ }
+    try { this.lfo2.stop(); } catch { /* already stopped */ }
+  }
+
   private scheduleFilterEnv(audioTime: number, duration: number): void {
     const p = this.params;
     if (!p.filterEnvAmount) return;

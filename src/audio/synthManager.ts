@@ -15,6 +15,12 @@ export function getSynthEngine(instrumentId: string, orbitIndex: number, initial
   const existing = engines.get(instrumentId);
 
   if (existing) {
+    // Re-apply params if provided (e.g. restore from autosave on page reload)
+    if (initialParams) {
+      for (const key of Object.keys(initialParams) as (keyof SynthParams)[]) {
+        existing.engine.setParam(key, initialParams[key] as never);
+      }
+    }
     // Reconnect if not yet connected (audio wasn't ready at creation time) or orbit changed
     if (!existing.connected || existing.orbitIndex !== orbitIndex) {
       const orbitInput = getSynthOrbitInput(orbitIndex);
@@ -60,7 +66,7 @@ export function getSynthEngine(instrumentId: string, orbitIndex: number, initial
 export function removeSynthEngine(instrumentId: string): void {
   const entry = engines.get(instrumentId);
   if (entry) {
-    entry.engine.noteStop();
+    entry.engine.dispose();
     try { entry.engine.getOutputNode().disconnect(); } catch { /* ignore */ }
     engines.delete(instrumentId);
   }

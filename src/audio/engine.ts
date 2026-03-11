@@ -18,11 +18,17 @@ async function initSceneBusesFromStore(): Promise<void> {
 
 // Suppress superdough's internal "node.onended" deprecation warning — it fires
 // from inside the library's own legacy code path, not from our code, and there
-// is no API to opt out. All other console.warn calls pass through unchanged.
+// is no API to opt out. The warning goes through console.log, not console.warn.
+// All other console calls pass through unchanged.
 const _origWarn = console.warn.bind(console);
+const _origLog = console.log.bind(console);
 console.warn = (...args: unknown[]) => {
   if (typeof args[0] === 'string' && args[0].includes('node.onended')) return;
   _origWarn(...args);
+};
+console.log = (...args: unknown[]) => {
+  if (typeof args[0] === 'string' && args[0].includes('node.onended')) return;
+  _origLog(...args);
 };
 
 // Register the 4 default drum samples with superdough immediately at module load.

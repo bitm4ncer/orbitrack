@@ -5,6 +5,7 @@ import { PASTEL_COLORS } from '../../canvas/colors';
 import { fetchSampleTree, type SampleEntry } from '../../audio/sampleApi';
 import { DEFAULT_SAMPLER_PARAMS, DEFAULT_SYNTH_PARAMS } from '../../types/superdough';
 import { DEFAULT_LOOPER_PARAMS } from '../../types/looper';
+import { SYNTH_PRESETS } from '../../audio/synth/presets';
 import { generateName, type NamePattern } from '../../utils/nameGenerator';
 import { serializeSet } from '../../storage/serializer';
 import { storage } from '../../storage/LocalStorageProvider';
@@ -60,6 +61,7 @@ function AddInstrumentCard() {
         volume: 0,
         orbitIndex,
         synthParams: { ...DEFAULT_SYNTH_PARAMS },
+        engineParams: { ...SYNTH_PRESETS['INIT'] },
       };
       useStore.setState({
         instruments: [...store.instruments, newInst],

@@ -5,7 +5,7 @@ import type { Instrument } from '../types/instrument';
 import type { Effect, EffectType } from '../types/effects';
 import type { InstrumentScene } from '../types/scene';
 import { SCENE_COLORS } from '../types/scene';
-import type { ArrangementStep as __ArrangementStep__ } from '../types/arrangement';
+import type { ArrangementStep } from '../types/arrangement';
 import type { SuperdoughSynthParams, SuperdoughSamplerParams } from '../types/superdough';
 import type { SynthParams } from '../audio/synth/types';
 import { DEFAULT_SYNTH_PARAMS, DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
@@ -31,6 +31,7 @@ import {
 import { postSync } from '../storage/recordingSync';
 import { createSceneBus, routeOrbitToScene, unrouteOrbitFromScene, destroySceneBus, destroyAllSceneBuses, initSceneBusesFromState } from '../audio/sceneBus';
 import { fetchSampleTree, type SampleEntry } from '../audio/sampleApi';
+import { removeSynthEngine } from '../audio/synthManager';
 
 // LLM Generation settings types
 export type LLMEndpointType = 'none' | 'ollama' | 'claude' | 'custom';
@@ -165,9 +166,14 @@ export interface StoreState {
   selectedSceneId: string | null;
   renamingId: string | null;          // ID of instrument or group currently being renamed
 
-  // Groups
+  // Scenes
   scenes: InstrumentScene[];
   sceneEffects: Record<string, Effect[]>;
+
+  // Track Mode
+  trackMode: boolean;
+  arrangement: ArrangementStep[];
+  trackPosition: number;
 
   // Transport actions
   setBpm: (bpm: number) => void;
@@ -216,7 +222,7 @@ export interface StoreState {
   instrumentProgress: Record<string, number>;
   setInstrumentProgress: (progress: Record<string, number>) => void;
   // Batched UI update — single set() call instead of three separate dispatches
-  setPlaybackUI: (progress: number, currentStep: number, instProgress: Record<string, number>) => void;
+  setPlaybackUI: (progress: number, currentStep: number, instProgress: Record<string, number>, trackPosition?: number) => void;
   setLoopSize: (id: string, size: number) => void;
 
   // Default instrument type for the Add card
@@ -293,6 +299,15 @@ export interface StoreState {
   toggleSceneEffectCollapsed: (groupId: string, effectId: string) => void;
   reorderSceneEffects: (groupId: string, fromIdx: number, toIdx: number) => void;
 
+  // Track Mode actions
+  toggleTrackMode: () => void;
+  addArrangementStep: (sceneId: string, bars?: number) => void;
+  removeArrangementStep: (stepId: string) => void;
+  reorderArrangementSteps: (fromIdx: number, toIdx: number) => void;
+  setArrangementStepBars: (stepId: string, bars: number) => void;
+  duplicateArrangementStep: (stepId: string) => void;
+  setTrackPosition: (index: number) => void;
+
   // Recording
   isRecording: boolean;
   recordings: StoredRecording[];
@@ -353,6 +368,11 @@ export interface StoreState {
     scenes: InstrumentScene[];
     sceneEffects: Record<string, Effect[]>;
     customSamples: { key: string; url: string; name: string }[];
+    gridResolution: number;
+    scaleRoot: number;
+    scaleType: string;
+    trackMode: boolean;
+    arrangement: ArrangementStep[];
   };
   loadSet: (set: OrbeatSet) => void;
   newSet: () => void;
@@ -372,9 +392,14 @@ export const useStore = create<StoreState>((set, get) => ({
   selectedSceneId: null,
   renamingId: null,
 
-  // Groups
+  // Scenes
   scenes: [],
   sceneEffects: {},
+
+  // Track Mode
+  trackMode: false,
+  arrangement: [],
+  trackPosition: -1,
 
   // Grid sequencer — pre-populate C4 (MIDI 60) for all default instrument hits
   gridNotes: (() => {
@@ -603,6 +628,8 @@ export const useStore = create<StoreState>((set, get) => ({
   removeInstrument: (id) => {
     const s = get();
     const inst = s.instruments.find((i) => i.id === id);
+    // Clean up synth engine if it's a synth instrument
+    if (inst?.type === 'synth') removeSynthEngine(id);
     // Unroute from group bus if grouped
     if (inst) unrouteOrbitFromScene(inst.orbitIndex);
     const instruments = s.instruments.filter((i) => i.id !== id);
@@ -834,8 +861,8 @@ export const useStore = create<StoreState>((set, get) => ({
     }),
 
   setInstrumentProgress: (instrumentProgress) => set({ instrumentProgress }),
-  setPlaybackUI: (transportProgress, currentStep, instrumentProgress) =>
-    set({ transportProgress, currentStep, instrumentProgress }),
+  setPlaybackUI: (transportProgress, currentStep, instrumentProgress, trackPosition) =>
+    set({ transportProgress, currentStep, instrumentProgress, ...(trackPosition !== undefined && { trackPosition }) }),
 
   setLoopSize: (id, size) =>
     set((s) => {
@@ -1352,6 +1379,46 @@ export const useStore = create<StoreState>((set, get) => ({
       effects.splice(toIdx, 0, item);
       return { sceneEffects: { ...s.sceneEffects, [groupId]: effects } };
     }),
+
+  // Track Mode
+  toggleTrackMode: () => set((s) => ({ trackMode: !s.trackMode })),
+
+  addArrangementStep: (sceneId, bars = 4) =>
+    set((s) => ({
+      arrangement: [...s.arrangement, { id: crypto.randomUUID(), sceneId, bars }],
+    })),
+
+  removeArrangementStep: (stepId) =>
+    set((s) => ({
+      arrangement: s.arrangement.filter((a) => a.id !== stepId),
+    })),
+
+  reorderArrangementSteps: (fromIdx, toIdx) =>
+    set((s) => {
+      const arr = [...s.arrangement];
+      const [item] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, item);
+      return { arrangement: arr };
+    }),
+
+  setArrangementStepBars: (stepId, bars) =>
+    set((s) => ({
+      arrangement: s.arrangement.map((a) =>
+        a.id === stepId ? { ...a, bars: Math.max(1, Math.min(64, bars)) } : a,
+      ),
+    })),
+
+  duplicateArrangementStep: (stepId) =>
+    set((s) => {
+      const idx = s.arrangement.findIndex((a) => a.id === stepId);
+      if (idx === -1) return s;
+      const copy = { ...s.arrangement[idx], id: crypto.randomUUID() };
+      const arr = [...s.arrangement];
+      arr.splice(idx + 1, 0, copy);
+      return { arrangement: arr };
+    }),
+
+  setTrackPosition: (index) => set({ trackPosition: index }),
 
   // Recording
   isRecording: false,
@@ -2025,6 +2092,11 @@ export const useStore = create<StoreState>((set, get) => ({
       scenes: s.scenes,
       sceneEffects: s.sceneEffects,
       customSamples: s.customSamples,
+      gridResolution: s.gridResolution,
+      scaleRoot: s.scaleRoot,
+      scaleType: s.scaleType,
+      trackMode: s.trackMode,
+      arrangement: s.arrangement,
     };
   },
 
@@ -2074,6 +2146,11 @@ export const useStore = create<StoreState>((set, get) => ({
       selectedInstrumentId: orbeatSet.instruments[0]?.id ?? null,
       selectedInstrumentIds: orbeatSet.instruments[0] ? [orbeatSet.instruments[0].id] : [],
       selectedSceneId: null,
+      gridResolution: orbeatSet.gridResolution ?? 1,
+      scaleRoot: orbeatSet.scaleRoot ?? 0,
+      scaleType: orbeatSet.scaleType ?? 'chromatic',
+      trackMode: orbeatSet.trackMode ?? false,
+      arrangement: orbeatSet.arrangement ?? [],
     });
 
     // Re-init looper editors — async decode + BPM detection
@@ -2141,6 +2218,12 @@ export const useStore = create<StoreState>((set, get) => ({
       isPlaying: false,
       currentStep: -1,
       transportProgress: 0,
+      gridResolution: 1,
+      scaleRoot: 0,
+      scaleType: 'chromatic',
+      trackMode: false,
+      arrangement: [],
+      trackPosition: -1,
     });
 
     // Assign random samples to default sampler instruments
