@@ -51,6 +51,7 @@ class PolyVoice {
   voiceGain: GainNode;           // ADSR envelope
   triggeredAt = 0;
   releaseEnd = 0;                // approx time voice becomes silent
+  currentMidiNote: number | null = null; // track which note this voice is playing
 
   constructor(ac: AudioContext, destination: GainNode) {
     this.ac = ac;
@@ -119,6 +120,7 @@ class PolyVoice {
     const releaseStart = Math.max(now + duration, attackEnd + 0.001);
     this.triggeredAt = audioTime;
     this.releaseEnd = releaseStart + release * 5;
+    this.currentMidiNote = midiNote; // track which note this voice is playing
 
     // Schedule ADSR (gainScale allows per-note volume from instrument dB)
     const peak = p.masterVolume * Math.max(0, gainScale);
@@ -214,6 +216,7 @@ class PolyVoice {
     this.voiceGain.gain.cancelScheduledValues(when);
     this.voiceGain.gain.setTargetAtTime(0, when, 0.01);
     this.releaseEnd = when + 0.05;
+    this.currentMidiNote = null; // clear note tracking on silence
   }
 }
 
@@ -342,11 +345,23 @@ export class SynthEngine {
 
   private _lastLiveVoice: PolyVoice | null = null;
 
+  /** Release the most recently triggered voice (for backward compatibility) */
   noteOff(): void {
     if (this._lastLiveVoice) {
       const now = this.ac.currentTime + 0.01;
       this._lastLiveVoice.silence(now);
       this._lastLiveVoice = null;
+    }
+  }
+
+  /** Release the voice playing a specific MIDI note (for polyphonic keyboard) */
+  noteOffForNote(midiNote: number): void {
+    const now = this.ac.currentTime + 0.01;
+    for (const voice of this.voices) {
+      if (voice.currentMidiNote === midiNote && !voice.isIdle(now)) {
+        voice.silence(now);
+        return;
+      }
     }
   }
 

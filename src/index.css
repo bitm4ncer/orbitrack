@@ -8,6 +8,7 @@
   --color-text-secondary: #8888a0;
   --color-border: #2a2a3a;
   --color-accent: #c1eeca;
+  --color-white: #ffffff;
 }
 
 @layer base {

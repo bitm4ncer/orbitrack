@@ -144,10 +144,12 @@ function AddInstrumentCard() {
             onMouseEnter={(e) => {
               e.currentTarget.style.borderColor = nextColor;
               e.currentTarget.style.color = nextColor;
+              e.currentTarget.style.backgroundColor = 'color-mix(in oklab, var(--color-white) 2%, transparent)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
               e.currentTarget.style.color = '#777';
+              e.currentTarget.style.backgroundColor = 'transparent';
             }}
           >
             {label}
