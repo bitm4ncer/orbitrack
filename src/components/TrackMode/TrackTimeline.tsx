@@ -390,6 +390,55 @@ export function TrackTimeline() {
     setDragOverIndex(null);
   };
 
+  // Playhead dragging
+  const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
+
+  const handlePlayheadMouseDown = (e: React.MouseEvent) => {
+    setIsDraggingPlayhead(true);
+    e.preventDefault();
+  };
+
+  React.useEffect(() => {
+    if (!isDraggingPlayhead) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const scrollArea = scrollAreaRef.current;
+      if (!scrollArea) return;
+
+      const rect = scrollArea.getBoundingClientRect();
+      const relativeX = e.clientX - rect.left + scrollArea.scrollLeft;
+
+      // Find which scene and progress within that scene
+      let accumulatedX = 0;
+      for (let i = 0; i < arrangement.length; i++) {
+        const sceneWidth = arrangement[i].bars * barPx;
+        if (relativeX < accumulatedX + sceneWidth) {
+          // Found the scene
+          const positionInScene = relativeX - accumulatedX;
+          const progress = Math.max(0, Math.min(1, positionInScene / sceneWidth));
+
+          // We'll update via a store action
+          useStore.getState().setTrackPosition(i);
+          useStore.getState().setTrackStepProgress(progress);
+          return;
+        }
+        accumulatedX += sceneWidth;
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingPlayhead(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingPlayhead, arrangement, barPx]);
+
   // Calculate playhead position with smooth progress within current step
   const playheadX =
     trackPosition >= 0 && arrangement.length > 0
