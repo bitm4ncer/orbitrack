@@ -308,6 +308,7 @@ export interface StoreState {
   setArrangementStepBars: (stepId: string, bars: number) => void;
   duplicateArrangementStep: (stepId: string) => void;
   setTrackPosition: (index: number) => void;
+  setTrackStepProgress: (progress: number) => void;
 
   // Recording
   isRecording: boolean;
@@ -1427,6 +1428,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }),
 
   setTrackPosition: (index) => set({ trackPosition: index }),
+  setTrackStepProgress: (progress) => set({ trackStepProgress: progress }),
 
   // Recording
   isRecording: false,

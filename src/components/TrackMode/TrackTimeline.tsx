@@ -164,7 +164,7 @@ function SceneBlock({
         }
       }}
       tabIndex={0}
-      className={`relative flex flex-col cursor-move select-none transition-all rounded border overflow-hidden
+      className={`relative flex flex-col cursor-move select-none transition-all rounded border overflow-visible
         ${isSelected ? 'ring-2 ring-white' : ''} ${isPlaying ? 'ring-2 ring-yellow-400' : ''}`}
       style={{
         width: `${step.bars * barPx}px`,
@@ -224,7 +224,7 @@ function SceneBlock({
 
       {/* Multi-scene occurrence indicators */}
       {totalOccurrences > 1 && (
-        <div className="absolute bottom-1 left-0 right-0 flex flex-col gap-0.5 items-center justify-center px-1">
+        <div className="absolute -bottom-2 left-0 right-0 flex flex-col gap-0.5 items-center justify-center px-1 pointer-events-none">
           {Array.from({ length: totalOccurrences }).map((_, idx) => (
             <div
               key={idx}
@@ -541,16 +541,30 @@ export function TrackTimeline() {
         className="overflow-x-auto overflow-y-hidden bg-background/50 relative flex-shrink-0"
         style={{ height: BLOCK_H + 20 }}
       >
-        {/* Playhead */}
+        {/* Playhead scrubber handle */}
         {trackPosition >= 0 && arrangement.length > 0 && (
           <div
-            className="absolute top-0 bottom-0 w-1 bg-yellow-400 pointer-events-none z-20 shadow-lg"
+            onMouseDown={handlePlayheadMouseDown}
+            className="absolute top-0 cursor-col-resize z-30 pointer-events-auto"
             style={{
-              left: `${playheadX}px`,
-              boxShadow: '0 0 8px rgba(250, 204, 21, 0.8)',
-              transition: 'left 41.66ms linear',
+              left: `${playheadX - 6}px`,
+              transition: isDraggingPlayhead ? 'none' : 'left 41.66ms linear',
             }}
-          />
+            title="Drag to seek"
+          >
+            {/* Downward arrow */}
+            <div className="w-0 h-0 border-l-3 border-r-3 border-t-4 border-l-transparent border-r-transparent border-t-white mx-auto"
+              style={{ marginLeft: '3px' }}
+            />
+            {/* Scrubber line */}
+            <div
+              className="w-px bg-white opacity-50"
+              style={{
+                height: `${BLOCK_H + 20}px`,
+                marginLeft: '5.5px',
+              }}
+            />
+          </div>
         )}
 
         {/* Arrangement blocks container */}
