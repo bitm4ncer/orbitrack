@@ -2,11 +2,15 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 
 export function useResizable(defaultSize: number, min = 80, axis: 'x' | 'y' = 'y', direction: 1 | -1 = 1) {
   const [size, setSize] = useState(defaultSize);
+  const [isDragging, setIsDragging] = useState(false);
   const drag = useRef<{ startPos: number; startSize: number } | null>(null);
   const sizeRef = useRef(defaultSize);
+  const isDraggingRef = useRef(false);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    isDraggingRef.current = true;
+    setIsDragging(true);
     drag.current = { startPos: axis === 'x' ? e.clientX : e.clientY, startSize: sizeRef.current };
 
     const onMove = (e: MouseEvent) => {
@@ -23,19 +27,26 @@ export function useResizable(defaultSize: number, min = 80, axis: 'x' | 'y' = 'y
 
     const onUp = () => {
       drag.current = null;
+      isDraggingRef.current = false;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      // Update state only after listeners are removed to avoid re-renders during drag
+      setIsDragging(false);
     };
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   }, [min, axis, direction]);
 
-  // Keep ref in sync with state
+  // Keep refs in sync with state
   useEffect(() => {
     sizeRef.current = size;
   }, [size]);
 
-  // Backwards compat: return both height and size
-  return { height: size, size, onMouseDown };
+  useEffect(() => {
+    isDraggingRef.current = isDragging;
+  }, [isDragging]);
+
+  // Backwards compat: return both height and size + isDragging
+  return { height: size, size, onMouseDown, isDragging };
 }

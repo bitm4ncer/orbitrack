@@ -168,9 +168,10 @@ function GroupBadge({ instrumentId }: { instrumentId: string }) {
 
 interface Props {
   instrumentId: string;
+  isResizing?: boolean;
 }
 
-export function KnobCanvas({ instrumentId }: Props) {
+export function KnobCanvas({ instrumentId, isResizing }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cellRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<KnobRenderer | null>(null);
@@ -179,6 +180,7 @@ export function KnobCanvas({ instrumentId }: Props) {
   const dragHitIndex = useRef<number | null>(null);
   const levelBarRef = useRef<HTMLDivElement>(null);
   const levelStateRef = useRef({ level: 0 });
+  const isResizingRef = useRef(false);
 
   // Sample picker popup
   const [popupOpen, setPopupOpen] = useState(false);
@@ -225,6 +227,17 @@ export function KnobCanvas({ instrumentId }: Props) {
       observer.disconnect();
     };
   }, [instrumentId]);
+
+  // Stop/start RAF loops during panel resize to prevent layout thrashing
+  useEffect(() => {
+    isResizingRef.current = !!isResizing;
+    if (isResizing) {
+      rendererRef.current?.stop();
+    } else {
+      rendererRef.current?.resize();
+      rendererRef.current?.start();
+    }
+  }, [isResizing]);
 
   // Fetch sample tree once (module-level cached, near-instant on repeat calls)
   useEffect(() => {
@@ -390,7 +403,7 @@ export function KnobCanvas({ instrumentId }: Props) {
     let rafId: number;
     const draw = () => {
       const analyser = getOrbitAnalyser(orbitIndex);
-      if (analyser && levelBarRef.current) {
+      if (analyser && levelBarRef.current && !isResizingRef.current) {
         analyser.getFloatTimeDomainData(data);
         let sum = 0;
         for (let i = 0; i < data.length; i++) sum += data[i] * data[i];

@@ -289,7 +289,7 @@ function ProjectName() {
   );
 }
 
-export function KnobGrid() {
+export function KnobGrid({ isResizing }: { isResizing?: boolean }) {
   const instruments = useStore((s) => s.instruments);
   const snapEnabled = useStore((s) => s.snapEnabled);
   // sliderVal: 1 (left = small cards) … 12 (right = big cards)
@@ -338,7 +338,7 @@ export function KnobGrid() {
           style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardMinWidth}px, 1fr))` }}
         >
           {instruments.map((inst) => (
-            <KnobCanvas key={inst.id} instrumentId={inst.id} />
+            <KnobCanvas key={inst.id} instrumentId={inst.id} isResizing={isResizing} />
           ))}
           <AddInstrumentCard />
         </div>

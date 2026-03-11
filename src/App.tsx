@@ -42,9 +42,9 @@ function App() {
   const [fxSidebarOpen, setFxSidebarOpen] = useState(true);
   const DEFAULT_BOTTOM_H = 24 * 20 + 33;
   const { height: bottomHeight, onMouseDown: onResizeMouseDown } = useResizable(DEFAULT_BOTTOM_H);
-  const { size: layerWidth, onMouseDown: onLayerResizeDown } = useResizable(300, 160, 'x');
-  const { size: fxWidth, onMouseDown: onFxResizeDown } = useResizable(300, 160, 'x');
-  const { size: rightPanelWidth, onMouseDown: onRightPanelResizeDown } = useResizable(300, 160, 'x');
+  const { size: layerWidth, onMouseDown: onLayerResizeDown, isDragging: layerIsDragging } = useResizable(300, 160, 'x');
+  const { size: fxWidth, onMouseDown: onFxResizeDown, isDragging: fxIsDragging } = useResizable(300, 160, 'x');
+  const { size: rightPanelWidth, onMouseDown: onRightPanelResizeDown, isDragging: rightIsDragging } = useResizable(300, 160, 'x');
 
   // Delayed unmount: keep content rendered during the close animation
   const [bottomContentMounted, setBottomContentMounted] = useState(hasSelection);
@@ -120,7 +120,7 @@ function App() {
 
         {/* Orbit visualization */}
         <div className="orbit-viewport flex-1 relative overflow-hidden min-h-0">
-          <KnobGrid />
+          <KnobGrid isResizing={layerIsDragging || fxIsDragging || rightIsDragging} />
         </div>
 
         {/* Layers toggle tab */}
@@ -147,7 +147,7 @@ function App() {
 
         {/* Layers sidebar */}
         <div
-          className="overflow-hidden transition-[width] duration-300 shrink-0 h-full"
+          className={`overflow-hidden shrink-0 h-full ${layerIsDragging ? '' : 'transition-[width] duration-300'}`}
           style={{ width: layerSidebarOpen ? layerWidth : 0 }}
         >
           <InstrumentRack />
@@ -177,7 +177,7 @@ function App() {
 
         {/* FX Chain sidebar */}
         <div
-          className="overflow-hidden transition-[width] duration-300 shrink-0 h-full"
+          className={`overflow-hidden shrink-0 h-full ${fxIsDragging ? '' : 'transition-[width] duration-300'}`}
           style={{ width: fxSidebarOpen ? fxWidth : 0 }}
         >
           <EffectsSidebar />
@@ -215,7 +215,7 @@ function App() {
                   >
                     <div className="h-10 w-0.5 rounded-full bg-border/60 group-hover:bg-accent/60 transition-colors" />
                   </div>
-                  <div className="shrink-0 h-full overflow-y-auto" style={{ width: rightPanelWidth }}>
+                  <div className={`shrink-0 h-full overflow-y-auto ${rightIsDragging ? '' : 'transition-[width] duration-300'}`} style={{ width: rightPanelWidth }}>
                     {isSynthSelected && <SynthPanel />}
                     {isSamplerSelected && <SampleBank />}
                     {isLooperSelected && <LoopBrowser />}
