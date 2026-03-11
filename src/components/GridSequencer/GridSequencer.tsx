@@ -628,7 +628,7 @@ export function GridSequencer() {
           }}
         >
           <span
-            className="text-[8px] text-black/70 leading-none select-none whitespace-nowrap"
+            className="text-[10px] text-black/70 leading-none select-none whitespace-nowrap font-semibold"
           >
             {noteNameWithOctave(midiNote)}
           </span>

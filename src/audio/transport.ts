@@ -204,24 +204,23 @@ function _tick(time: number): void {
       _pos.trackPosition = _currentArrangementIdx;
     }
 
+    // One full loop of _maxLoopSize steps = one "bar" — check at tick boundary FIRST
+    if (globalStep > 0 && globalStep % _maxLoopSize === 0) {
+      _stepLoopCount++;
+      const sceneStep = state.arrangement[_currentArrangementIdx];
+      if (_stepLoopCount >= sceneStep.bars) {
+        _stepLoopCount = 0;
+        _currentArrangementIdx = (_currentArrangementIdx + 1) % state.arrangement.length;
+        _pos.trackPosition = _currentArrangementIdx;
+      }
+    }
+
+    // Now calculate progress with updated _stepLoopCount
     const currentSceneStep = state.arrangement[_currentArrangementIdx];
     const totalStepsInScene = currentSceneStep.bars * _maxLoopSize;
     const stepsElapsedInScene = _stepLoopCount * _maxLoopSize + currentStep;
     _pos.trackStepProgress = Math.min(stepsElapsedInScene / totalStepsInScene, 1);
     _pos.dirty = true;
-
-    // One full loop of _maxLoopSize steps = one "bar"
-    if (globalStep > 0 && globalStep % _maxLoopSize === 0) {
-      _stepLoopCount++;
-      const currentStep = state.arrangement[_currentArrangementIdx];
-      if (_stepLoopCount >= currentStep.bars) {
-        _stepLoopCount = 0;
-        _currentArrangementIdx = (_currentArrangementIdx + 1) % state.arrangement.length;
-        _pos.trackPosition = _currentArrangementIdx;
-        _pos.trackStepProgress = 0;
-        _pos.dirty = true;
-      }
-    }
   }
 
   // Per-instrument progress
