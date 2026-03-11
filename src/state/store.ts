@@ -427,7 +427,7 @@ export const useStore = create<StoreState>((set, get) => ({
   gridGlide: {},
   gridLengths: {},
   gridVelocities: {},
-  octaveOffset: 3, // Start at octave 3 (C3-B4 visible)
+  octaveOffset: 2, // Start at octave 2 (C4 centered, C2-C6 visible)
 
   // Per-instrument progress
   instrumentProgress: {},

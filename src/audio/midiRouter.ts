@@ -30,7 +30,7 @@ export function startMidiRouting(
   unsubscribeNote = onMidiNote((mapping, velocity) => {
     const noteNumber = (mapping as any).note;
 
-    // Always trigger synth directly on MIDI notes
+    // Route MIDI notes to selected instrument (synth or sampler)
     routeMidiNote(noteNumber, velocity);
 
     // Also check for explicit mappings
@@ -50,7 +50,7 @@ export function stopMidiRouting(): void {
 }
 
 /**
- * Route MIDI note directly to selected synth
+ * Route MIDI note directly to selected synth or sampler
  */
 function routeMidiNote(noteNumber: number, velocity: number): void {
   try {
@@ -68,8 +68,10 @@ function routeMidiNote(noteNumber: number, velocity: number): void {
       if (heldMidiNotes.size === 0) {
         engine.noteOff();
       } else {
-        // Retrigger last held note for smooth polyphony
-        const lastNote = Array.from(heldMidiNotes.values()).pop();
+        // Release current and retrigger last held note for smooth polyphony
+        engine.noteOff();
+        const heldNotes = Array.from(heldMidiNotes.values());
+        const lastNote = heldNotes[heldNotes.length - 1];
         if (lastNote !== undefined) {
           engine.noteOnNow(lastNote);
         }

@@ -129,11 +129,8 @@ export function usePianoKeyboard(): void {
           const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
           engine.noteOnNow(midiNote);
           heldKeysRef.current.set(keyCode, midiNote);
-        } else if (inst.type === 'sampler') {
-          // Trigger sample playback for sampler
-          if (inst.samplerSettings?.selectedSample) {
-            triggerSample(inst.samplerSettings.selectedSample, undefined, inst.volume ?? 0, 1.0);
-          }
+        } else if (inst.type === 'sampler' && inst.sampleName) {
+          triggerSample(inst.sampleName, undefined, inst.volume, 1.0);
         }
       } catch (err) {
         console.error('Piano keyboard: failed to trigger note:', err);
@@ -157,7 +154,8 @@ export function usePianoKeyboard(): void {
             const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
 
             if (heldKeysRef.current.size > 0) {
-              // Other keys still held - play the last held key
+              // Other keys still held - release current and retrigger last held key
+              engine.noteOff();
               const heldKeys = Array.from(heldKeysRef.current.values());
               const lastMidiNote = heldKeys[heldKeys.length - 1];
               engine.noteOnNow(lastMidiNote);

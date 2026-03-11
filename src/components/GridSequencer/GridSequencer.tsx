@@ -220,7 +220,7 @@ export function GridSequencer() {
   const gridRes = gridResolution;
 
   // 5 octaves of MIDI notes centered on octaveOffset, from high to low — filtered by scale
-  const centerNote = (octaveOffset + 2.5) * 12;  // Center on middle octave
+  const centerNote = (octaveOffset + 3) * 12;  // Center on C of octave (offset+3)
   const startNote = Math.max(0, Math.floor(centerNote - 30));  // ~5 octaves (60 semitones)
   const endNote = Math.min(127, Math.floor(centerNote + 30));
   const allRows: number[] = [];
