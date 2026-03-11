@@ -29,7 +29,10 @@ export function useMidiSetup(): {
     let mounted = true;
 
     const setupMidi = async () => {
-      if (!midiSettings.enabled) return;
+      if (!midiSettings.enabled) {
+        stopMidiRouting();
+        return;
+      }
 
       try {
         await initMidi();
@@ -69,7 +72,7 @@ export function useMidiSetup(): {
       cleanup?.then((fn) => fn?.());
       stopMidiRouting();
     };
-  }, [midiSettings.enabled]);
+  }, [midiSettings.enabled, midiSettings.midiInputDeviceId, midiSettings.midiOutputDeviceId, midiSettings.ccMappings, midiSettings.noteMappings]);
 
   useEffect(() => {
     if (isReady.current) {

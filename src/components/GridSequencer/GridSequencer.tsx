@@ -203,6 +203,24 @@ export function GridSequencer() {
     }
   }, [instrument, selectedNotes]);
 
+  // Scroll to center C4 in viewport (must be before early return)
+  const centerNote = (octaveOffset + 3) * 12;
+  const startNote = Math.max(0, Math.floor(centerNote - 48));
+  const endNote = Math.min(127, Math.floor(centerNote + 24));
+  const allRowsForScroll: number[] = [];
+  for (let i = endNote; i >= startNote; i--) allRowsForScroll.push(i);
+
+  useEffect(() => {
+    if (!scrollContainerRef.current) return;
+    const C4_MIDI = 60;
+    const C4_RowIndex = allRowsForScroll.indexOf(C4_MIDI);
+    if (C4_RowIndex === -1) return;
+
+    const viewportHeight = scrollContainerRef.current.clientHeight;
+    const scrollTop = C4_RowIndex * ROW_H - (viewportHeight / 2) + (ROW_H / 2);
+    scrollContainerRef.current.scrollTop = Math.max(0, scrollTop);
+  }, [octaveOffset, allRowsForScroll.length]);
+
   if (!instrument) {
     return (
       <div className="grid-empty h-48 flex items-center justify-center text-text-secondary text-sm bg-bg-secondary flex-1 min-w-0">
@@ -220,26 +238,10 @@ export function GridSequencer() {
   const totalSteps = loopSize;
   const gridRes = gridResolution;
 
-  // 6+ octaves of MIDI notes with C4 centered in viewport, from high to low — filtered by scale
-  const centerNote = (octaveOffset + 3) * 12;  // Center on C of octave (offset+3)
-  const startNote = Math.max(0, Math.floor(centerNote - 48));  // More lower octaves
-  const endNote = Math.min(127, Math.floor(centerNote + 24));  // Some higher octaves
-  const allRows: number[] = [];
-  for (let i = endNote; i >= startNote; i--) allRows.push(i);
+  // Note range filtering (using values from earlier useEffect)
+  const allRows = allRowsForScroll;
   const isChromatic = scaleType === 'chromatic';
   const rows = isChromatic ? allRows : allRows.filter((n) => isNoteInScale(n, scaleRoot, scaleType));
-
-  // Scroll to center C4 in viewport
-  useEffect(() => {
-    if (!scrollContainerRef.current) return;
-    const C4_MIDI = 60;
-    const C4_RowIndex = allRows.indexOf(C4_MIDI);
-    if (C4_RowIndex === -1) return;
-
-    const viewportHeight = scrollContainerRef.current.clientHeight;
-    const scrollTop = C4_RowIndex * ROW_H - (viewportHeight / 2) + (ROW_H / 2);
-    scrollContainerRef.current.scrollTop = Math.max(0, scrollTop);
-  }, [octaveOffset, scaleType, allRows.length]);
 
   // Active step for playback indicator
   const activeStep = isPlaying ? (() => {
