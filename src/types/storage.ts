@@ -13,6 +13,7 @@ export interface PresetMeta {
   source: 'factory' | 'user';
   createdAt: number;          // epoch ms
   updatedAt: number;
+  starred?: boolean;          // favorite/starred status
 }
 
 export interface SynthPreset extends PresetMeta {

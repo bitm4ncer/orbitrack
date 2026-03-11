@@ -73,6 +73,25 @@ function randomHits(min = 1, max = 8): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// Sample favorites helpers
+function loadSampleFavorites(): string[] {
+  try {
+    const stored = localStorage.getItem('orbeat-sample-favorites');
+    return stored ? JSON.parse(stored) : [];
+  } catch (e) {
+    console.error('Failed to load sample favorites:', e);
+    return [];
+  }
+}
+
+function saveSampleFavorites(paths: string[]): void {
+  try {
+    localStorage.setItem('orbeat-sample-favorites', JSON.stringify(paths));
+  } catch (e) {
+    console.error('Failed to save sample favorites:', e);
+  }
+}
+
 // Orbit index counter — incremented each time a new instrument is added
 let orbitCounter = 0;
 
@@ -364,6 +383,10 @@ export interface StoreState {
   midiSettings: MidiSettings;
   setMidiSettings: (settings: Partial<MidiSettings>) => void;
 
+  // Sample favorites
+  sampleFavorites: string[];
+  toggleSampleFavorite: (path: string) => void;
+
   // Set (project) management
   currentSetId: string | null;
   currentSetName: string;
@@ -457,6 +480,7 @@ export const useStore = create<StoreState>((set, get) => ({
   masterVolume: 0.8,
   genSettings: DEFAULT_GEN_SETTINGS,
   midiSettings: loadMidiSettings(),
+  sampleFavorites: loadSampleFavorites(),
 
   // Transport actions
   setBpm: (bpm: number) => set({ bpm }),
@@ -1190,6 +1214,14 @@ export const useStore = create<StoreState>((set, get) => ({
     const newSettings = { ...state.midiSettings, ...settings };
     saveMidiSettings(newSettings);
     return { midiSettings: newSettings };
+  }),
+
+  toggleSampleFavorite: (path: string) => set((state) => {
+    const favorites = state.sampleFavorites.includes(path)
+      ? state.sampleFavorites.filter(p => p !== path)
+      : [...state.sampleFavorites, path];
+    saveSampleFavorites(favorites);
+    return { sampleFavorites: favorites };
   }),
 
   // ── Group actions ──────────────────────────────────────────────────────────

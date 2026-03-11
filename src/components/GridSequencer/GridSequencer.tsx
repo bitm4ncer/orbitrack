@@ -211,6 +211,7 @@ export function GridSequencer() {
   for (let i = endNote; i >= startNote; i--) allRowsForScroll.push(i);
 
   useEffect(() => {
+    // Only scroll on initial mount to center C4, don't scroll on every octave change
     if (!scrollContainerRef.current) return;
     const C4_MIDI = 60;
     const C4_RowIndex = allRowsForScroll.indexOf(C4_MIDI);
@@ -219,7 +220,7 @@ export function GridSequencer() {
     const viewportHeight = scrollContainerRef.current.clientHeight;
     const scrollTop = C4_RowIndex * ROW_H - (viewportHeight / 2) + (ROW_H / 2);
     scrollContainerRef.current.scrollTop = Math.max(0, scrollTop);
-  }, [octaveOffset, allRowsForScroll.length]);
+  }, []);
 
   if (!instrument) {
     return (

@@ -32,6 +32,7 @@ interface PresetStoreState {
   renamePreset: (id: string, newName: string) => Promise<void>;
   movePreset: (id: string, newFolder: string) => Promise<void>;
   duplicatePreset: (id: string) => Promise<void>;
+  toggleStarPreset: (id: string) => Promise<void>;
 }
 
 export const usePresetStore = create<PresetStoreState>((set, get) => ({
@@ -116,6 +117,15 @@ export const usePresetStore = create<PresetStoreState>((set, get) => ({
       params: { ...original.params },
     };
     await storage.savePreset(copy);
+    await get().loadPresets();
+  },
+
+  toggleStarPreset: async (id) => {
+    const preset = await storage.getPreset(id);
+    if (!preset) return;
+    preset.starred = !preset.starred;
+    preset.updatedAt = Date.now();
+    await storage.savePreset(preset);
     await get().loadPresets();
   },
 }));
