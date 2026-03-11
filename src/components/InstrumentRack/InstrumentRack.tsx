@@ -782,7 +782,7 @@ export function InstrumentRack() {
         </div>
       ) : (
         /* ── Card Mode ── */
-        <div className="layers-list flex-1 flex flex-col overflow-y-auto pb-3">
+        <div className="layers-list flex-1 flex flex-col overflow-y-auto">
           {/* Render scenes first, then unsceneed instruments */}
           {(() => {
             const rendered = new Set<string>();
@@ -832,6 +832,34 @@ export function InstrumentRack() {
               if (rendered.has(inst.id)) continue;
               elements.push(renderCard(inst, idx));
             }
+
+            // Add new Card button
+            elements.push(
+              <div key="add-card" className="mx-3 mt-3 pb-3 rounded cursor-default transition-colors" style={{ padding: 20, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.02)' }}>
+                <div className="flex flex-col gap-2">
+                  {([
+                    { type: 'synth',   label: '+ Synth',   fn: addSynth   },
+                    { type: 'sampler', label: '+ Sampler',  fn: addSampler },
+                    { type: 'looper',  label: '+ Looper',   fn: addLooper  },
+                  ] as const).map(({ type, label, fn }) => (
+                    <button
+                      key={type}
+                      onClick={() => { setActiveAddType(type); fn(); }}
+                      className="w-full py-3 text-[11px] uppercase tracking-wider rounded transition-all cursor-pointer font-medium"
+                      style={{
+                        color: 'rgba(255,255,255,0.75)',
+                        border: '1px solid rgba(255,255,255,0.2)',
+                        background: 'rgba(255,255,255,0.06)',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.09)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
 
             return elements;
 
@@ -955,32 +983,6 @@ export function InstrumentRack() {
           })()}
         </div>
       )}
-
-      {/* Add buttons */}
-      <div className="layers-add-bar flex items-center gap-1.5 px-3 py-2.5 border-t border-border/50" style={{ margin: '0 -10px' }}>
-        {([
-          { type: 'synth',   label: 'Synth',   fn: addSynth   },
-          { type: 'sampler', label: 'Sampler',  fn: addSampler },
-          { type: 'looper',  label: 'Looper',   fn: addLooper  },
-        ] as const).map(({ type, label, fn }) => {
-          const active = activeAddType === type;
-          return (
-            <button
-              key={type}
-              onClick={() => { setActiveAddType(type); fn(); }}
-              className="flex-1 text-[9px] uppercase tracking-wider rounded transition-all cursor-pointer"
-              style={{
-                padding: '3px 0',
-                color: active ? 'rgba(255,255,255,0.82)' : 'rgba(255,255,255,0.28)',
-                border: active ? '1px solid rgba(255,255,255,0.22)' : '1px solid rgba(255,255,255,0.06)',
-                background: active ? 'rgba(255,255,255,0.05)' : 'transparent',
-              }}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 }
