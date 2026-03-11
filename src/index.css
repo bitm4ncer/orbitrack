@@ -102,6 +102,12 @@
   50% { opacity: 0.25; }
 }
 
+/* Settings panel slide from bottom */
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
 /* Custom instrument sliders with per-instrument color */
 .inst-slider {
   -webkit-appearance: none;

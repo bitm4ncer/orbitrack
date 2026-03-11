@@ -11,6 +11,7 @@ interface SettingsSection {
 }
 
 const SECTIONS: SettingsSection[] = [
+  { id: 'guide', label: 'Guide', icon: '🎵' },
   { id: 'midi', label: 'MIDI', icon: '🎹' },
   { id: 'audio', label: 'Audio', icon: '🔊' },
   { id: 'display', label: 'Display', icon: '⚙️' },
@@ -19,7 +20,7 @@ const SECTIONS: SettingsSection[] = [
 ];
 
 export function SettingsPopup({ onClose }: { onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<string>('midi');
+  const [activeTab, setActiveTab] = useState<string>('guide');
   const masterVolume = useStore((s) => s.masterVolume);
   const setMasterVolume = useStore((s) => s.setMasterVolume);
 
@@ -31,11 +32,11 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
       />
 
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        className="fixed bottom-0 left-0 right-0 z-50 flex items-end justify-center p-4 animate-[slideUp_0.3s_ease-out]"
         onClick={onClose}
       >
         <div
-          className="bg-bg-secondary border border-border rounded-lg shadow-2xl overflow-hidden w-full max-w-2xl max-h-[90vh] flex flex-col"
+          className="bg-bg-secondary border border-border rounded-t-lg shadow-2xl overflow-hidden w-full max-w-2xl max-h-[90vh] flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-bg-tertiary/50">
@@ -68,6 +69,62 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
             </div>
 
             <div className="flex-1 overflow-y-auto">
+              {activeTab === 'guide' && (
+                <div className="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                  {/* Polyrhythmic Concept */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-text-primary mb-3">Polyrhythmic Sequencing</h3>
+                    <div className="space-y-2 text-xs text-text-secondary/70 leading-relaxed">
+                      <p>
+                        Orbeat creates complex rhythms by layering independent hit patterns across instruments. Each Orb (instrument) has its own hit count and step size, letting you build polyrhythms where patterns interloc k at different intervals.
+                      </p>
+                      <p>
+                        For example: a bass with 4 hits per 16-step loop, drums with 3 hits per 16 steps, and a synth with 5 hits creates a naturally cycling pattern that resolves after 16 steps.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Scroll Adjustments */}
+                  <div className="border-t border-border/30 pt-4">
+                    <h3 className="text-sm font-semibold text-text-primary mb-3">Scroll Adjustments</h3>
+                    <div className="space-y-3 text-xs text-text-secondary/70 leading-relaxed">
+                      <div>
+                        <div className="text-accent/80 font-mono mb-1">Hit Count:</div>
+                        <div>Scroll up/down anywhere on the piano roll to add/remove hits in the current instrument.</div>
+                      </div>
+                      <div>
+                        <div className="text-accent/80 font-mono mb-1">Step Count:</div>
+                        <div>Hold <span className="text-accent/80 font-mono">Ctrl</span> while scrolling to adjust the loop length (number of steps displayed).</div>
+                      </div>
+                      <div>
+                        <div className="text-accent/80 font-mono mb-1">Volume:</div>
+                        <div>Hold <span className="text-accent/80 font-mono">Alt</span> while scrolling to adjust the instrument's volume in real-time.</div>
+                      </div>
+                      <div>
+                        <div className="text-accent/80 font-mono mb-1">Velocity:</div>
+                        <div>Hover over a note block and scroll to adjust that note's velocity (1-127). Enable the <span className="text-accent/80 font-mono">VEL</span> button to see velocity bars below the grid.</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* MIDI Integration */}
+                  <div className="border-t border-border/30 pt-4">
+                    <h3 className="text-sm font-semibold text-text-primary mb-3">MIDI Input & Note Generation</h3>
+                    <div className="space-y-2 text-xs text-text-secondary/70 leading-relaxed">
+                      <p>
+                        Connect a MIDI keyboard in the MIDI settings to play notes live. The piano roll automatically generates appropriate note numbers based on the selected instrument's voice and octave offset.
+                      </p>
+                      <p>
+                        In the piano roll toolbar, use <span className="text-accent/80 font-mono">Base Oct</span> (0-8) to set the octave and <span className="text-accent/80 font-mono">Span</span> (1-4) to control the range of playable notes.
+                      </p>
+                      <p>
+                        MIDI velocity from your keyboard is automatically captured and applied to each note, letting you perform with dynamic expression.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {activeTab === 'midi' && (
                 <div className="p-6">
                   <h3 className="text-sm font-semibold text-text-primary mb-4">MIDI Configuration</h3>
@@ -180,7 +237,7 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
 
                       <div>
                         <div className="text-accent/80 font-mono mb-1">Track View:</div>
-                        <div>Click the <span className="text-accent/80">▶▶</span> icon to enter Track Mode. Drag scene blocks to arrange the order and length of each scene.</div>
+                        <div>Click the <span className="text-accent/80 font-mono">TRACK</span> button in the bottom right to enter Track Mode. Drag scene blocks to arrange the order and length of each scene.</div>
                       </div>
 
                       <div>
