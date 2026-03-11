@@ -68,8 +68,21 @@ export function startTransport(): void {
   transport.timeSignature = 4;
   _globalStep = 0;
   _lastFired.clear();
-  _currentArrangementIdx = 0;
-  _stepLoopCount = 0;
+
+  // In Track Mode, start from the current playhead position (trackPosition)
+  if (state.trackMode && state.arrangement.length > 0 && state.trackPosition >= 0) {
+    _currentArrangementIdx = state.trackPosition;
+    // Calculate globalStep to match the trackStepProgress
+    const currentScene = state.arrangement[_currentArrangementIdx];
+    _maxLoopSize = state.instruments.reduce((m, i) => Math.max(m, i.loopSize), 1);
+    const stepsInScene = currentScene.bars * _maxLoopSize;
+    const targetStep = Math.round(state.trackStepProgress * stepsInScene);
+    _stepLoopCount = Math.floor(targetStep / _maxLoopSize);
+    _globalStep = _stepLoopCount * _maxLoopSize + (targetStep % _maxLoopSize);
+  } else {
+    _currentArrangementIdx = 0;
+    _stepLoopCount = 0;
+  }
 
   if (schedulerId !== null) {
     transport.clear(schedulerId);
@@ -199,6 +212,9 @@ function _tick(time: number): void {
 
   // Track Mode: bar counting and scene advancement
   if (state.trackMode && state.arrangement.length > 0) {
+    // Sync _currentArrangementIdx with store's trackPosition (user may have moved playhead)
+    _currentArrangementIdx = Math.max(0, Math.min(state.trackPosition, state.arrangement.length - 1));
+
     // Ensure trackPosition is initialized
     if (_pos.trackPosition < 0) {
       _pos.trackPosition = _currentArrangementIdx;
@@ -212,6 +228,8 @@ function _tick(time: number): void {
         _stepLoopCount = 0;
         _currentArrangementIdx = (_currentArrangementIdx + 1) % state.arrangement.length;
         _pos.trackPosition = _currentArrangementIdx;
+        _pos.trackStepProgress = 0;
+        _pos.dirty = true;
       }
     }
 
@@ -220,6 +238,7 @@ function _tick(time: number): void {
     const totalStepsInScene = currentSceneStep.bars * _maxLoopSize;
     const stepsElapsedInScene = _stepLoopCount * _maxLoopSize + currentStep;
     _pos.trackStepProgress = Math.min(stepsElapsedInScene / totalStepsInScene, 1);
+    _pos.trackPosition = _currentArrangementIdx;
     _pos.dirty = true;
   }
 

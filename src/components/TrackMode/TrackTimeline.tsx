@@ -165,12 +165,13 @@ function SceneBlock({
       }}
       tabIndex={0}
       className={`relative flex flex-col cursor-move select-none transition-all rounded border overflow-visible
-        ${isSelected ? 'ring-2 ring-white' : ''} ${isPlaying ? 'ring-2 ring-yellow-400' : ''}`}
+        ${isPlaying ? 'ring-2 ring-yellow-400' : ''}`}
       style={{
         width: `${step.bars * barPx}px`,
         minHeight: BLOCK_H,
         backgroundColor: scene.color + '99',
-        borderColor: 'rgba(255, 255, 255, 0.2)',
+        borderColor: isSelected ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.2)',
+        borderWidth: isSelected ? '2px' : '1px',
       }}
     >
       {/* Header row */}
@@ -417,9 +418,17 @@ export function TrackTimeline() {
           const positionInScene = relativeX - accumulatedX;
           const progress = Math.max(0, Math.min(1, positionInScene / sceneWidth));
 
-          // We'll update via a store action
+          // Update playhead position
           useStore.getState().setTrackPosition(i);
           useStore.getState().setTrackStepProgress(progress);
+
+          // Auto-scroll to keep playhead visible
+          const playheadScreenX = accumulatedX + progress * sceneWidth - scrollArea.scrollLeft;
+          if (playheadScreenX < 50) {
+            scrollArea.scrollLeft = Math.max(0, accumulatedX + progress * sceneWidth - 50);
+          } else if (playheadScreenX > rect.width - 50) {
+            scrollArea.scrollLeft = accumulatedX + progress * sceneWidth - (rect.width - 50);
+          }
           return;
         }
         accumulatedX += sceneWidth;
