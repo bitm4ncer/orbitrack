@@ -95,7 +95,7 @@ const defaultInstruments: Instrument[] = (() => {
       color: PASTEL_COLORS[0],
       hits: kickHits,
       hitPositions: generateEvenHits(kickHits),
-      loopSize: 32,
+      loopSize: 16,
       loopSizeLocked: false,
       muted: false,
       solo: false,
@@ -111,7 +111,7 @@ const defaultInstruments: Instrument[] = (() => {
       color: PASTEL_COLORS[1],
       hits: snareHits,
       hitPositions: generateEvenHits(snareHits),
-      loopSize: 32,
+      loopSize: 16,
       loopSizeLocked: false,
       muted: false,
       solo: false,
@@ -127,7 +127,7 @@ const defaultInstruments: Instrument[] = (() => {
       color: PASTEL_COLORS[2],
       hits: hihatHits,
       hitPositions: generateEvenHits(hihatHits),
-      loopSize: 32,
+      loopSize: 16,
       loopSizeLocked: false,
       muted: false,
       solo: false,
@@ -143,7 +143,7 @@ const defaultInstruments: Instrument[] = (() => {
       color: PASTEL_COLORS[4],
       hits: clapHits,
       hitPositions: generateEvenHits(clapHits),
-      loopSize: 32,
+      loopSize: 16,
       loopSizeLocked: false,
       muted: true,
       solo: false,
@@ -157,7 +157,7 @@ const defaultInstruments: Instrument[] = (() => {
 export interface StoreState {
   // Transport
   bpm: number;
-  stepsPerBeat: number;         // 4=16th, 8=32nd, 16=64th notes (default 8)
+  stepsPerBeat: number;         // 4=16th, 8=32nd, 16=64th notes (default 4)
   isPlaying: boolean;
   currentStep: number;
   transportProgress: number;
@@ -394,7 +394,7 @@ export interface StoreState {
 export const useStore = create<StoreState>((set, get) => ({
   // Transport
   bpm: 128,
-  stepsPerBeat: 8,              // 8 = 32nd notes (default), 4 = 16th, 16 = 64th
+  stepsPerBeat: 4,              // 4 = 16th notes (default), 8 = 32nd, 16 = 64th
   isPlaying: false,
   currentStep: -1,
   transportProgress: 0,
@@ -2185,16 +2185,9 @@ export const useStore = create<StoreState>((set, get) => ({
     // Reset orbit counter to match loaded instruments
     orbitCounter = orbeatSet.instruments.reduce((max, i) => Math.max(max, i.orbitIndex + 1), 0);
 
-    // Migration: if set was saved with old 16th-note base (no stepsPerBeat), upgrade to 32nd-note base
+    // Migration: use stepsPerBeat if saved, otherwise default to 16th notes
     let instruments = orbeatSet.instruments;
-    let stepsPerBeat = orbeatSet.stepsPerBeat ?? 8;
-    if (!orbeatSet.stepsPerBeat) {
-      // Old format detected: double all loopSizes to maintain 1-bar timing with new 32nd-note transport
-      instruments = instruments.map((inst) => ({
-        ...inst,
-        loopSize: inst.loopSize * 2,
-      }));
-    }
+    let stepsPerBeat = orbeatSet.stepsPerBeat ?? 4;  // Default to 16th notes (4)
 
     set({
       bpm: orbeatSet.bpm,

@@ -297,6 +297,8 @@ function ShareMenu({ anchorRef, onClose }: { anchorRef: React.RefObject<HTMLButt
 export function TransportBar() {
   const isPlaying = useStore((s) => s.isPlaying);
   const bpm = useStore((s) => s.bpm);
+  const stepsPerBeat = useStore((s) => s.stepsPerBeat);
+  const setStepsPerBeat = useStore((s) => s.setStepsPerBeat);
   const trackMode = useStore((s) => s.trackMode);
   const toggleTrackMode = useStore((s) => s.toggleTrackMode);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -312,6 +314,10 @@ export function TransportBar() {
 
   const handleBpmChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setBpm(Number(e.target.value));
+  };
+
+  const handleGridChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setStepsPerBeat(Number(e.target.value));
   };
 
   return (
@@ -377,6 +383,16 @@ export function TransportBar() {
       </div>
 
       <div className="transport-bpm flex items-center gap-2">
+        <select
+          value={stepsPerBeat}
+          onChange={handleGridChange}
+          className="bg-bg-tertiary border border-border rounded px-2 py-0.5 text-xs text-text-primary font-mono focus:outline-none focus:border-white/30"
+          title="Grid resolution"
+        >
+          <option value={4}>16th</option>
+          <option value={8}>32nd</option>
+          <option value={16}>64th</option>
+        </select>
         <span className="transport-bpm-label text-xs text-text-secondary uppercase tracking-wide">BPM</span>
         <input
           type="number"
