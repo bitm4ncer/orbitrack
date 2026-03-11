@@ -1,6 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../state/store';
 import { getSynthEngine } from '../audio/synthManager';
+import { initAudio } from '../audio/engine';
+import { loadSamples } from '../audio/sampler';
+
+const audioInitRef = { initialized: false };
+
+async function ensureAudio() {
+  if (audioInitRef.initialized) return;
+  await initAudio();
+  await loadSamples();
+  audioInitRef.initialized = true;
+}
 
 const PIANO_KEY_MAP: Record<string, number> = {
   // Home row: C D E F G A B C D
@@ -33,7 +44,7 @@ export function usePianoKeyboard(): void {
   const lastHeldKeyRef = useRef<string | null>(null); // Track last triggered key for retrigger
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
       // Skip if typing in text input or textarea
       if (
         (e.target instanceof HTMLInputElement && e.target.type !== 'range') ||
@@ -82,18 +93,24 @@ export function usePianoKeyboard(): void {
       if (e.code in PIANO_KEY_MAP && !heldKeysRef.current.has(e.code)) {
         e.preventDefault();
 
-        const store = useStore.getState();
-        const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
+        try {
+          await ensureAudio();
 
-        // Only play if a synth instrument is selected
-        if (inst?.type === 'synth') {
-          const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-          const semitoneDelta = PIANO_KEY_MAP[e.code];
-          const midiNote = 12 * (octaveRef.current + 1) + semitoneDelta;
+          const store = useStore.getState();
+          const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
 
-          engine.noteOnNow(midiNote);
-          heldKeysRef.current.set(e.code, midiNote);
-          lastHeldKeyRef.current = e.code;
+          // Only play if a synth instrument is selected
+          if (inst?.type === 'synth') {
+            const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
+            const semitoneDelta = PIANO_KEY_MAP[e.code];
+            const midiNote = 12 * (octaveRef.current + 1) + semitoneDelta;
+
+            engine.noteOnNow(midiNote);
+            heldKeysRef.current.set(e.code, midiNote);
+            lastHeldKeyRef.current = e.code;
+          }
+        } catch (err) {
+          console.error('Piano keyboard error:', err);
         }
       }
     };
@@ -128,12 +145,54 @@ export function usePianoKeyboard(): void {
       }
     };
 
+    // Cleanup stuck notes when window loses focus or is hidden
+    const handleWindowBlur = () => {
+      const store = useStore.getState();
+      const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
+      if (inst?.type === 'synth' && heldKeysRef.current.size > 0) {
+        const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
+        engine.noteOff();
+        heldKeysRef.current.clear();
+        lastHeldKeyRef.current = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        const store = useStore.getState();
+        const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
+        if (inst?.type === 'synth' && heldKeysRef.current.size > 0) {
+          const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
+          engine.noteOff();
+          heldKeysRef.current.clear();
+          lastHeldKeyRef.current = null;
+        }
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      const store = useStore.getState();
+      const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
+      if (inst?.type === 'synth' && heldKeysRef.current.size > 0) {
+        const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
+        engine.noteStop();
+        heldKeysRef.current.clear();
+        lastHeldKeyRef.current = null;
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 }

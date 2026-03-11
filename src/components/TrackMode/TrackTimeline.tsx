@@ -35,6 +35,7 @@ function SceneBlock({
 
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     setIsResizing(true);
     setResizeStart(e.clientX);
     setOriginalBars(step.bars);
@@ -66,7 +67,13 @@ function SceneBlock({
   return (
     <div
       draggable
-      onDragStart={onDragStart}
+      onDragStart={(e) => {
+        if (!isResizing) {
+          onDragStart(e);
+        } else {
+          e.preventDefault();
+        }
+      }}
       onClick={onSelect}
       onKeyDown={(e) => {
         if (e.key === 'Delete') {
@@ -112,8 +119,14 @@ function SceneBlock({
       {/* Resize handle */}
       <div
         onMouseDown={handleResizeMouseDown}
-        className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:w-1.5 bg-white/30 hover:bg-white/60 transition-all"
-        title="Drag to resize"
+        onDragStart={(e) => e.preventDefault()}
+        draggable={false}
+        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:w-3 bg-white/40 hover:bg-white/80 transition-all pointer-events-auto z-10"
+        style={{
+          marginRight: '-4px',
+          paddingRight: '4px',
+        }}
+        title="Drag to resize (1-64 bars)"
       />
 
       {/* Multi-scene occurrence indicators */}
@@ -323,8 +336,11 @@ export function TrackTimeline() {
         {/* Playhead */}
         {trackPosition >= 0 && arrangement.length > 0 && (
           <div
-            className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 pointer-events-none z-20"
-            style={{ left: `${playheadX}px` }}
+            className="absolute top-0 bottom-0 w-1 bg-yellow-400 pointer-events-none z-20 shadow-lg"
+            style={{
+              left: `${playheadX}px`,
+              boxShadow: '0 0 8px rgba(250, 204, 21, 0.8)',
+            }}
           />
         )}
 
