@@ -2,7 +2,7 @@ import * as Tone from 'tone';
 import { useStore } from '../state/store';
 
 const TWO_PI = Math.PI * 2;
-const TRIGGER_ANGLE = -Math.PI / 2; // 12 o'clock
+const TRIGGER_ANGLE = Math.PI / 2; // 6 o'clock (bottom)
 const HIT_RADIUS = 7;
 const RING_PADDING = 22; // px from canvas edge to ring center
 
@@ -112,7 +112,7 @@ export class KnobRenderer {
     // --- 2. Step tick marks on the ring (one per step, fixed/not rotating) ---
     const stepCount = inst.loopSize;
     for (let g = 0; g < stepCount; g++) {
-      const tickAngle = (g / stepCount) * TWO_PI + TRIGGER_ANGLE - dotRotation;
+      const tickAngle = (g / stepCount) * TWO_PI + TRIGGER_ANGLE + dotRotation;
       const cos = Math.cos(tickAngle);
       const sin = Math.sin(tickAngle);
       const isBeat = g % 4 === 0;
@@ -145,8 +145,8 @@ export class KnobRenderer {
 
     if (hasLoopRegion) {
       // Draw dimmed full ring, then bright arc for loop region
-      const arcStart = loopIn * TWO_PI - dotRotation + TRIGGER_ANGLE;
-      const arcEnd = loopOut * TWO_PI - dotRotation + TRIGGER_ANGLE;
+      const arcStart = loopIn * TWO_PI + dotRotation + TRIGGER_ANGLE;
+      const arcEnd = loopOut * TWO_PI + dotRotation + TRIGGER_ANGLE;
 
       // Dim arc for the inactive region (draw full ring dimmed, then overdraw active)
       ctx.beginPath();
@@ -164,7 +164,7 @@ export class KnobRenderer {
 
       // Small ticks at loop in/out boundaries
       for (const pos of [loopIn, loopOut]) {
-        const tickAngle = pos * TWO_PI - dotRotation + TRIGGER_ANGLE;
+        const tickAngle = pos * TWO_PI + dotRotation + TRIGGER_ANGLE;
         const tc = Math.cos(tickAngle);
         const ts = Math.sin(tickAngle);
         ctx.beginPath();
@@ -180,7 +180,7 @@ export class KnobRenderer {
 
     for (let i = 0; i < inst.hitPositions.length; i++) {
       const hitPos = inst.hitPositions[i];
-      const hitAngle = hitPos * TWO_PI - dotRotation + TRIGGER_ANGLE;
+      const hitAngle = hitPos * TWO_PI + dotRotation + TRIGGER_ANGLE;
       const hx = cx + Math.cos(hitAngle) * radius;
       const hy = cy + Math.sin(hitAngle) * radius;
 
@@ -256,7 +256,7 @@ export class KnobRenderer {
     const dotRotation = instProg * TWO_PI;
 
     for (let i = 0; i < inst.hitPositions.length; i++) {
-      const hitAngle = inst.hitPositions[i] * TWO_PI - dotRotation + TRIGGER_ANGLE;
+      const hitAngle = inst.hitPositions[i] * TWO_PI + dotRotation + TRIGGER_ANGLE;
       const hx = cx + Math.cos(hitAngle) * radius;
       const hy = cy + Math.sin(hitAngle) * radius;
       const dx = mouseX - hx;
@@ -289,7 +289,7 @@ export class KnobRenderer {
     const dotRotation = instProg * TWO_PI;
 
     const angle = Math.atan2(mouseY - cy, mouseX - cx);
-    const normalizedPos = (angle - TRIGGER_ANGLE + dotRotation) / TWO_PI;
+    const normalizedPos = (angle - TRIGGER_ANGLE - dotRotation) / TWO_PI;
     return ((normalizedPos % 1) + 1) % 1;
   }
 }

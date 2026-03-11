@@ -40,7 +40,7 @@ function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSc
       // Hit position dots (only rotate if playing, clockwise)
       if (inst.hitPositions && inst.hitPositions.length > 0) {
         inst.hitPositions.forEach((angle) => {
-          const rad = (angle * Math.PI * 2 - (isPlaying ? rotation : 0)) % (Math.PI * 2);
+          const rad = (angle * Math.PI * 2 + (isPlaying ? rotation : 0)) % (Math.PI * 2);
           const x = cx + Math.cos(rad) * (radius - 4);
           const y = cy + Math.sin(rad) * (radius - 4);
           ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
@@ -70,8 +70,8 @@ function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSc
     <div
       className="cursor-pointer rounded transition-colors flex-shrink-0"
       style={{
-        width: 72,
-        height: 72,
+        width: 48,
+        height: 48,
         border: isSceneSelected ? '1px solid rgba(200, 200, 200, 0.6)' : '1px solid transparent',
       }}
       title={instName}
@@ -80,7 +80,7 @@ function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSc
         selectInstrument(instrumentId);
       }}
     >
-      <canvas ref={canvasRef} width={72} height={72} style={{ display: 'block', width: 72, height: 72 }} />
+      <canvas ref={canvasRef} width={48} height={48} style={{ display: 'block', width: 48, height: 48 }} />
     </div>
   );
 }
@@ -224,12 +224,12 @@ function SceneBlock({
 
       {/* Multi-scene occurrence indicators */}
       {totalOccurrences > 1 && (
-        <div className="absolute bottom-1 left-0 right-0 flex gap-0.5 justify-center px-1">
+        <div className="absolute bottom-1 left-0 right-0 flex flex-col gap-0.5 items-center justify-center px-1">
           {Array.from({ length: totalOccurrences }).map((_, idx) => (
             <div
               key={idx}
-              className={`h-1 rounded-full transition-all ${
-                idx === occurrenceIndex ? 'w-2 bg-white' : 'w-1 bg-white/40'
+              className={`w-1 rounded-full transition-all ${
+                idx === occurrenceIndex ? 'h-2 bg-white' : 'h-1 bg-white/40'
               }`}
               title={`Occurrence ${idx + 1} of ${totalOccurrences}`}
             />
