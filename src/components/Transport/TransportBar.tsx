@@ -6,6 +6,7 @@ import { initAudio } from '../../audio/engine';
 import { loadSamples } from '../../audio/sampler';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { FilesMenu } from './FilesMenu';
+import { SettingsPopup } from './SettingsPopup';
 import { encodeSetToUrl, buildShareUrl, exportSamplesZip, importSamplesZip } from '../../storage/urlShare';
 const orbeatLogo = `${import.meta.env.BASE_URL}ORBEAT_Logo.svg`;
 
@@ -136,6 +137,28 @@ function InfoPopup({ onClose }: { onClose: () => void }) {
                 <div className="bg-red-500/20 border border-red-500/40 rounded px-1 py-0.5 text-red-400/80 font-mono text-xs">V</div>
                 <div className="text-text-secondary/60 mt-0.5">Vel▲</div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Scenes & Track View Section */}
+        <div className="border-t border-border/30 pt-4">
+          <div className="text-[9px] text-accent/80 font-mono uppercase mb-2 tracking-wider">Scenes & Track View</div>
+
+          <div className="space-y-2 text-[10px] text-text-secondary leading-relaxed">
+            <div>
+              <div className="text-accent/80 font-mono mb-0.5">Creating Scenes:</div>
+              <div>Select one or more Orbs (Shift+Click), then press <span className="text-accent/80 font-mono">Ctrl+G</span> to group them into a Scene. Scenes appear as colored blocks at the bottom.</div>
+            </div>
+
+            <div>
+              <div className="text-accent/80 font-mono mb-0.5">Track View:</div>
+              <div>Click the <span className="text-accent/80">▶▶</span> icon to enter Track Mode. Drag scene blocks in the timeline to arrange the order and length of each scene. Each scene bar shows how many bars it loops for.</div>
+            </div>
+
+            <div>
+              <div className="text-accent/80 font-mono mb-0.5">Scene Controls:</div>
+              <div>Within each scene block: • Click to select • Drag to reorder • Use the colored label to rename. Right-click to remove from scene.</div>
             </div>
           </div>
         </div>
@@ -302,6 +325,7 @@ export function TransportBar() {
   const trackMode = useStore((s) => s.trackMode);
   const toggleTrackMode = useStore((s) => s.toggleTrackMode);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const filesRef = useRef<HTMLButtonElement>(null);
@@ -403,8 +427,15 @@ export function TransportBar() {
           className="transport-bpm-input w-16 bg-bg-tertiary border border-border rounded px-2 py-0.5 text-sm text-text-primary font-mono text-center focus:outline-none focus:border-white/30"
         />
         <button
+          onClick={() => setSettingsOpen(true)}
+          className="px-2 py-1 rounded border border-border text-text-secondary hover:border-white/30 hover:text-text-primary transition-colors text-[11px] font-semibold cursor-pointer"
+          title="Settings"
+        >
+          Settings
+        </button>
+        <button
           onClick={() => setInfoOpen((o) => !o)}
-          className="w-5 h-5 rounded-full border border-border text-text-secondary hover:border-white/30 hover:text-text-primary transition-colors flex items-center justify-center text-[10px] font-bold leading-none"
+          className="w-5 h-5 rounded-full border border-border text-text-secondary hover:border-white/30 hover:text-text-primary transition-colors flex items-center justify-center text-[10px] font-bold leading-none cursor-pointer"
           title="About Orbeat"
         >
           i
@@ -412,6 +443,7 @@ export function TransportBar() {
       </div>
 
       {infoOpen && <InfoPopup onClose={() => setInfoOpen(false)} />}
+      {settingsOpen && <SettingsPopup onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
