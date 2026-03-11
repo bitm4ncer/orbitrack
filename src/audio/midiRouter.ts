@@ -62,25 +62,13 @@ function routeMidiNote(noteNumber: number, velocity: number): void {
     if (inst.type === 'synth') {
       const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
 
-      if (velocity === 0) {
-        // Note off
-        heldMidiNotes.delete(noteNumber);
-
-        if (heldMidiNotes.size === 0) {
-          engine.noteOff();
-        } else {
-          // Release current and retrigger last held note for smooth polyphony
-          engine.noteOff();
-          const heldNotes = Array.from(heldMidiNotes.values());
-          const lastNote = heldNotes[heldNotes.length - 1];
-          if (lastNote !== undefined) {
-            engine.noteOnNow(lastNote);
-          }
-        }
-      } else {
-        // Note on
+      if (velocity > 0) {
+        // Note on - synth handles true polyphony with 8 voices
         heldMidiNotes.set(noteNumber, noteNumber);
-        engine.noteOnNow(noteNumber);
+        engine.noteOnNow(noteNumber, velocity);
+      } else {
+        // Note off - just remove from tracking, synth ADSR handles release
+        heldMidiNotes.delete(noteNumber);
       }
     }
   } catch (err) {

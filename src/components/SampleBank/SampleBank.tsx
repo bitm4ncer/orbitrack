@@ -21,6 +21,21 @@ const ALIAS_PATHS: Record<string, string> = {
   clap: 'samples/Default/clap.wav',
 };
 
+// Star icon for favorites
+function SampleStarIcon({ isFavorite, onClick }: { isFavorite: boolean; onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="shrink-0 rounded-full transition-colors text-text-secondary/40 hover:text-accent"
+      title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill={isFavorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+        <polygon points="12 2 15.09 10.26 24 10.35 17.77 16.01 20.16 24.02 12 18.35 3.84 24.02 6.23 16.01 0 10.35 8.91 10.26" />
+      </svg>
+    </button>
+  );
+}
+
 // Circular SVG knob — border and indicator inherit color prop.
 // Drag: captures startY + startValue at mousedown so the stale-closure bug is avoided.
 // Text input: click the value label to type an exact number.
@@ -139,9 +154,11 @@ export function SampleBank() {
   const assignSample = useStore((s) => s.assignSample);
   const addCustomSample = useStore((s) => s.addCustomSample);
   const removeCustomSample = useStore((s) => s.removeCustomSample);
+  const sampleFavorites = useStore((s) => s.sampleFavorites);
+  const toggleSampleFavorite = useStore((s) => s.toggleSampleFavorite);
 
   const [tree, setTree] = useState<SampleEntry[]>([]);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['__favorites__']));
   const [focusIdx, setFocusIdx] = useState(-1);
   const [searchQuery, setSearchQuery] = useState('');
   const [previewingUrl, setPreviewingUrl] = useState<string | null>(null);
@@ -194,6 +211,37 @@ export function SampleBank() {
         }
       }
     };
+
+    // Add Favorites folder at the top if any samples are starred
+    const store = useStore.getState();
+    const favoritePaths = store.sampleFavorites;
+    if (favoritePaths.length > 0) {
+      // Find all favorite entries recursively
+      const favoritesChildren: SampleEntry[] = [];
+      const collectFavorites = (entries: SampleEntry[]) => {
+        for (const e of entries) {
+          if (favoritePaths.includes(e.path) && e.type === 'file') {
+            favoritesChildren.push(e);
+          }
+          if (e.children) collectFavorites(e.children);
+        }
+      };
+      collectFavorites(tree);
+
+      // Also include favorites from custom samples
+      favoritesChildren.push(...customSamples.filter(cs => favoritePaths.includes(cs.key)).map(cs => ({ name: cs.name, path: cs.key, type: 'file' as const })));
+
+      if (favoritesChildren.length > 0) {
+        const favoritesFolder: SampleEntry = {
+          name: 'Favorites',
+          path: '__favorites__',
+          type: 'folder',
+          children: favoritesChildren,
+        };
+        walk([favoritesFolder], 0);
+      }
+    }
+
     walk(tree, 0);
 
     if (customSamples.length > 0) {
@@ -495,11 +543,18 @@ export function SampleBank() {
               onDoubleClick={() => { if (!isFolder) handleAssign(entry); }}
             >
               {isFolder ? (
-                <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"
-                  className="text-text-secondary/60 shrink-0 transition-transform"
-                  style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
-                  <path d="M2 1 L6 4 L2 7 Z" />
-                </svg>
+                entry.path === '__favorites__' ? (
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor"
+                    className="text-accent shrink-0">
+                    <polygon points="12 2 15.09 10.26 24 10.35 17.77 16.01 20.16 24.02 12 18.35 3.84 24.02 6.23 16.01 0 10.35 8.91 10.26" />
+                  </svg>
+                ) : (
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"
+                    className="text-text-secondary/60 shrink-0 transition-transform"
+                    style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>
+                    <path d="M2 1 L6 4 L2 7 Z" />
+                  </svg>
+                )
               ) : (
                 /* Circled + assign button at the start of the row */
                 <button
@@ -550,6 +605,10 @@ export function SampleBank() {
                       </svg>
                     )}
                   </button>
+                  <SampleStarIcon
+                    isFavorite={sampleFavorites.includes(entry.path)}
+                    onClick={(e) => { e.stopPropagation(); toggleSampleFavorite(entry.path); }}
+                  />
                   {isImportedItem && (
                     <button
                       onClick={(e) => { e.stopPropagation(); removeCustomSample(entry.path); }}

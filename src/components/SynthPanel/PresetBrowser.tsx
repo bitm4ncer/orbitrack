@@ -34,17 +34,38 @@ function buildTree(presets: SynthPreset[]): FolderNode {
   return root;
 }
 
+// ── Star icon SVG ────────────────────────────────────────────────────────────
+
+function StarIcon({ filled, onClick }: { filled: boolean; onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity px-1"
+      title={filled ? 'Remove from favorites' : 'Add to favorites'}
+    >
+      <svg className="w-3 h-3" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+        <polygon points="12 2 15.09 10.26 24 10.35 17.77 16.01 20.16 24.02 12 18.35 3.84 24.02 6.23 16.01 0 10.35 8.91 10.26" />
+      </svg>
+    </button>
+  );
+}
+
 // ── Sub-components ───────────────────────────────────────────────────────────
 
 function FolderTreeNode({
-  node, depth, color, selectedId, expanded, onToggle, onSelect, onAction,
+  node, depth, color, selectedId, expanded, onToggle, onSelect, onAction, onToggleStar,
 }: {
   node: FolderNode; depth: number; color: string; selectedId: string | null;
   expanded: Set<string>; onToggle: (path: string) => void;
   onSelect: (preset: SynthPreset) => void;
   onAction: (preset: SynthPreset, action: string) => void;
+  onToggleStar: (presetId: string) => Promise<void>;
 }) {
   const isOpen = expanded.has(node.path);
+
+  // Extract starred presets for Favorites folder
+  const starredPresets = node.presets.filter(p => p.starred);
+  const unstarredPresets = node.presets.filter(p => !p.starred);
 
   return (
     <div>
@@ -66,14 +87,47 @@ function FolderTreeNode({
       {/* Children + presets */}
       {(isOpen || !node.name) && (
         <>
+          {/* Favorites folder at top (root only) */}
+          {!node.name && starredPresets.length > 0 && (
+            <div>
+              <button
+                onClick={() => onToggle('Favorites')}
+                className="w-full flex items-center gap-1.5 px-2 py-1 text-left hover:bg-white/5 rounded transition-colors"
+                style={{ paddingLeft: 8 }}
+              >
+                <span className="text-[9px] text-text-secondary/50 w-3">{expanded.has('Favorites') ? '▼' : '▶'}</span>
+                <svg className="w-3 h-3 text-accent" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="12 2 15.09 10.26 24 10.35 17.77 16.01 20.16 24.02 12 18.35 3.84 24.02 6.23 16.01 0 10.35 8.91 10.26" />
+                </svg>
+                <span className="text-[10px] text-text-secondary/80 font-medium">Favorites</span>
+                <span className="text-[8px] text-text-secondary/30 ml-auto">{starredPresets.length}</span>
+              </button>
+              {expanded.has('Favorites') && (
+                <div>
+                  {starredPresets
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((p) => (
+                      <PresetRow
+                        key={p.id} preset={p} depth={1}
+                        color={color} selected={p.id === selectedId}
+                        onSelect={() => onSelect(p)}
+                        onAction={(action) => onAction(p, action)}
+                        onToggleStar={() => onToggleStar(p.id)}
+                      />
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {[...node.children.values()].map((child) => (
             <FolderTreeNode
               key={child.path} node={child} depth={depth + (node.name ? 1 : 0)}
               color={color} selectedId={selectedId} expanded={expanded}
-              onToggle={onToggle} onSelect={onSelect} onAction={onAction}
+              onToggle={onToggle} onSelect={onSelect} onAction={onAction} onToggleStar={onToggleStar}
             />
           ))}
-          {node.presets
+          {unstarredPresets
             .sort((a, b) => a.name.localeCompare(b.name))
             .map((p) => (
               <PresetRow
@@ -81,6 +135,7 @@ function FolderTreeNode({
                 color={color} selected={p.id === selectedId}
                 onSelect={() => onSelect(p)}
                 onAction={(action) => onAction(p, action)}
+                onToggleStar={() => onToggleStar(p.id)}
               />
             ))}
         </>
@@ -96,10 +151,11 @@ function countPresets(node: FolderNode): number {
 }
 
 function PresetRow({
-  preset, depth, color, selected, onSelect, onAction,
+  preset, depth, color, selected, onSelect, onAction, onToggleStar,
 }: {
   preset: SynthPreset; depth: number; color: string; selected: boolean;
   onSelect: () => void; onAction: (action: string) => void;
+  onToggleStar: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -118,6 +174,9 @@ function PresetRow({
       >
         {preset.name}
       </span>
+
+      {/* Star button */}
+      <StarIcon filled={preset.starred ?? false} onClick={(e) => { e.stopPropagation(); onToggleStar(); }} />
 
       {/* Dot menu */}
       <div className="relative">
@@ -180,7 +239,7 @@ export function PresetBrowser({ engine, color, currentPresetName, onPresetLoaded
   const {
     presets, browserOpen, searchQuery, expandedFolders, selectedPresetId,
     openBrowser, closeBrowser, setSearchQuery, toggleFolder, selectPreset,
-    loadPresets, deletePreset, renamePreset, duplicatePreset,
+    loadPresets, deletePreset, renamePreset, duplicatePreset, toggleStarPreset,
   } = usePresetStore();
 
   const [saveOpen, setSaveOpen] = useState(false);
@@ -299,6 +358,7 @@ export function PresetBrowser({ engine, color, currentPresetName, onPresetLoaded
                     selected={p.id === selectedPresetId}
                     onSelect={() => handleSelect(p)}
                     onAction={(action) => handleAction(p, action)}
+                    onToggleStar={() => toggleStarPreset(p.id)}
                   />
                 ))
             ) : (
@@ -306,6 +366,7 @@ export function PresetBrowser({ engine, color, currentPresetName, onPresetLoaded
                 node={tree} depth={0} color={color} selectedId={selectedPresetId}
                 expanded={expandedFolders} onToggle={toggleFolder}
                 onSelect={handleSelect} onAction={handleAction}
+                onToggleStar={toggleStarPreset}
               />
             )}
             {filtered.length === 0 && (

@@ -95,7 +95,7 @@ export function usePianoKeyboard(): void {
         return;
       }
 
-      // Piano key pressed
+      // Piano key pressed - only trigger if not already held
       if (e.code in PIANO_KEY_MAP && !heldKeysRef.current.has(e.code)) {
         e.preventDefault();
 
@@ -127,7 +127,7 @@ export function usePianoKeyboard(): void {
 
         if (inst.type === 'synth') {
           const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-          engine.noteOnNow(midiNote);
+          engine.noteOnNow(midiNote, velocityRef.current);
           heldKeysRef.current.set(keyCode, midiNote);
         } else if (inst.type === 'sampler' && inst.sampleName) {
           triggerSample(inst.sampleName, undefined, inst.volume, 1.0);
@@ -150,20 +150,9 @@ export function usePianoKeyboard(): void {
 
           if (!inst || !audioInitializedRef.current) return;
 
-          if (inst.type === 'synth') {
-            const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-
-            if (heldKeysRef.current.size > 0) {
-              // Other keys still held - release current and retrigger last held key
-              engine.noteOff();
-              const heldKeys = Array.from(heldKeysRef.current.values());
-              const lastMidiNote = heldKeys[heldKeys.length - 1];
-              engine.noteOnNow(lastMidiNote);
-            } else {
-              // All keys released
-              engine.noteOff();
-            }
-          }
+          // For synths: just remove from tracking, synth handles polyphony and ADSR naturally
+          // For samplers: nothing to do on key up
+          // The synth engine will let voices decay naturally via their ADSR envelopes
         } catch (err) {
           console.error('Piano keyboard: failed on key release:', err);
         }

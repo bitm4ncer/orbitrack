@@ -334,11 +334,13 @@ export class SynthEngine {
   }
 
   /** Called from SynthPanel for live keyboard/mouse playback (no scheduled time). */
-  noteOnNow(midiNote: number): void {
+  noteOnNow(midiNote: number, velocity?: number): void {
     const now = this.ac.currentTime;
     const p = this.params;
     const voice = this.getOrStealVoice(now);
-    voice.trigger(midiNote, now, 10, p, 1); // 10s sustain — noteOff stops it
+    // Convert velocity (0-127) to gainScale (0-1); default 1 if not provided
+    const gainScale = velocity !== undefined ? Math.max(0, velocity / 127) : 1;
+    voice.trigger(midiNote, now, 10, p, gainScale); // 10s sustain — noteOff stops it
     this._lastLiveVoice = voice;
     this.scheduleFilterEnv(now, 10);
   }

@@ -40,7 +40,7 @@ export const usePresetStore = create<PresetStoreState>((set, get) => ({
   loading: false,
   browserOpen: false,
   searchQuery: '',
-  expandedFolders: new Set(['Factory']),
+  expandedFolders: new Set(['Factory', 'Favorites']),
   selectedPresetId: null,
 
   openBrowser: () => set({ browserOpen: true }),

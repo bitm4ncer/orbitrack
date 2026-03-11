@@ -700,7 +700,7 @@ export function InstrumentRack() {
       color,
       hits: 0,
       hitPositions: [] as number[],
-      loopSize: 32,
+      loopSize: 16,
       loopSizeLocked: false,
       muted: false,
       solo: false,
