@@ -219,9 +219,12 @@ export function GridSequencer() {
   const totalSteps = loopSize;
   const gridRes = gridResolution;
 
-  // All MIDI octaves (0-127), from high to low — filtered by scale
+  // 5 octaves of MIDI notes centered on octaveOffset, from high to low — filtered by scale
+  const centerNote = (octaveOffset + 2.5) * 12;  // Center on middle octave
+  const startNote = Math.max(0, Math.floor(centerNote - 30));  // ~5 octaves (60 semitones)
+  const endNote = Math.min(127, Math.floor(centerNote + 30));
   const allRows: number[] = [];
-  for (let i = 127; i >= 0; i--) allRows.push(i);
+  for (let i = endNote; i >= startNote; i--) allRows.push(i);
   const isChromatic = scaleType === 'chromatic';
   const rows = isChromatic ? allRows : allRows.filter((n) => isNoteInScale(n, scaleRoot, scaleType));
 

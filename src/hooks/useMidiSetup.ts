@@ -81,8 +81,11 @@ export function useMidiSetup(): {
   useEffect(() => {
     if (isReady.current && midiSettings.midiInputDeviceId) {
       setMidiInputDevice(midiSettings.midiInputDeviceId);
+      // Restart routing to subscribe to events from the newly selected device
+      stopMidiRouting();
+      startMidiRouting(midiSettings.ccMappings, midiSettings.noteMappings);
     }
-  }, [midiSettings.midiInputDeviceId]);
+  }, [midiSettings.midiInputDeviceId, midiSettings.ccMappings, midiSettings.noteMappings]);
 
   useEffect(() => {
     if (isReady.current && midiSettings.midiOutputDeviceId) {

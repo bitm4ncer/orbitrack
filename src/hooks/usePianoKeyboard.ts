@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useStore } from '../state/store';
 import { getSynthEngine } from '../audio/synthManager';
 import { initAudio } from '../audio/engine';
-import { loadSamples } from '../audio/sampler';
+import { loadSamples, triggerSample } from '../audio/sampler';
 
 const audioInitRef = { initialized: false };
 
@@ -120,13 +120,20 @@ export function usePianoKeyboard(): void {
         const store = useStore.getState();
         const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
 
-        if (inst?.type === 'synth') {
-          const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-          const semitoneDelta = PIANO_KEY_MAP[keyCode];
-          const midiNote = 12 * (octaveRef.current + 1) + semitoneDelta;
+        if (!inst) return;
 
+        const semitoneDelta = PIANO_KEY_MAP[keyCode];
+        const midiNote = 12 * (octaveRef.current + 1) + semitoneDelta;
+
+        if (inst.type === 'synth') {
+          const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
           engine.noteOnNow(midiNote);
           heldKeysRef.current.set(keyCode, midiNote);
+        } else if (inst.type === 'sampler') {
+          // Trigger sample playback for sampler
+          if (inst.samplerSettings?.selectedSample) {
+            triggerSample(inst.samplerSettings.selectedSample, undefined, inst.volume ?? 0, 1.0);
+          }
         }
       } catch (err) {
         console.error('Piano keyboard: failed to trigger note:', err);
@@ -144,16 +151,16 @@ export function usePianoKeyboard(): void {
           const store = useStore.getState();
           const inst = store.instruments.find((i) => i.id === store.selectedInstrumentId);
 
-          if (inst?.type === 'synth' && audioInitializedRef.current) {
+          if (!inst || !audioInitializedRef.current) return;
+
+          if (inst.type === 'synth') {
             const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
 
             if (heldKeysRef.current.size > 0) {
-              // Retrigger last held key without calling noteOff first
-              const lastKey = Array.from(heldKeysRef.current.keys()).pop();
-              if (lastKey) {
-                const midiNote = heldKeysRef.current.get(lastKey)!;
-                engine.noteOnNow(midiNote);
-              }
+              // Other keys still held - play the last held key
+              const heldKeys = Array.from(heldKeysRef.current.values());
+              const lastMidiNote = heldKeys[heldKeys.length - 1];
+              engine.noteOnNow(lastMidiNote);
             } else {
               // All keys released
               engine.noteOff();
