@@ -3,6 +3,7 @@
 import { useStore } from '../state/store';
 import { onMidiCC, onMidiNote, isMidiEnabled } from './midiController';
 import { getSynthEngine } from './synthManager';
+import { midiActivityEmitter } from '../components/Transport/MidiLight';
 import type { MidiCCMapping, MidiNoteMapping } from '../types/midi';
 
 let unsubscribeCC: (() => void) | null = null;
@@ -18,6 +19,7 @@ export function startMidiRouting(
   stopMidiRouting();
 
   unsubscribeCC = onMidiCC((mapping, normalizedValue) => {
+    midiActivityEmitter.trigger();
     const ccNumber = (mapping as any).cc;
     const applicableMappings = ccMappings.filter(m => m.cc === ccNumber);
 
@@ -57,29 +59,35 @@ function routeMidiNote(noteNumber: number, velocity: number): void {
     const store = useStore.getState();
     const inst = store.instruments.find(i => i.id === store.selectedInstrumentId);
 
-    if (!inst || inst.type !== 'synth') return;
+    if (!inst) return;
 
-    const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
+    if (velocity > 0) {
+      midiActivityEmitter.trigger();
+    }
 
-    if (velocity === 0) {
-      // Note off
-      heldMidiNotes.delete(noteNumber);
+    if (inst.type === 'synth') {
+      const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
 
-      if (heldMidiNotes.size === 0) {
-        engine.noteOff();
-      } else {
-        // Release current and retrigger last held note for smooth polyphony
-        engine.noteOff();
-        const heldNotes = Array.from(heldMidiNotes.values());
-        const lastNote = heldNotes[heldNotes.length - 1];
-        if (lastNote !== undefined) {
-          engine.noteOnNow(lastNote);
+      if (velocity === 0) {
+        // Note off
+        heldMidiNotes.delete(noteNumber);
+
+        if (heldMidiNotes.size === 0) {
+          engine.noteOff();
+        } else {
+          // Release current and retrigger last held note for smooth polyphony
+          engine.noteOff();
+          const heldNotes = Array.from(heldMidiNotes.values());
+          const lastNote = heldNotes[heldNotes.length - 1];
+          if (lastNote !== undefined) {
+            engine.noteOnNow(lastNote);
+          }
         }
+      } else {
+        // Note on
+        heldMidiNotes.set(noteNumber, noteNumber);
+        engine.noteOnNow(noteNumber);
       }
-    } else {
-      // Note on
-      heldMidiNotes.set(noteNumber, noteNumber);
-      engine.noteOnNow(noteNumber);
     }
   } catch (err) {
     console.error('[MIDI] Failed to route note:', err);
