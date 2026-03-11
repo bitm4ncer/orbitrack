@@ -4,7 +4,6 @@ import { usePresetStore } from '../../state/presetStore';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { PresetSaveDialog } from './PresetSaveDialog';
 import type { SynthPreset } from '../../types/storage';
-import type { SynthParams } from '../../audio/synth/types';
 import type { SynthEngine } from '../../audio/synth/SynthEngine';
 
 // ── Folder tree helpers ──────────────────────────────────────────────────────

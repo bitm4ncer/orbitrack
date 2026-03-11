@@ -96,8 +96,6 @@ export function classifyInstrument(sampleName: string, displayName: string): Ins
   if (openhatScore > 0 && hihatScore > 0) {
     const openIdx = combined.indexOf('open');
     const hatIdx = combined.indexOf('hat');
-    const ohIdx = combined.indexOf('oh');
-    const hhIdx = combined.indexOf('hh');
     if (openIdx >= 0 && hatIdx >= 0 && openIdx > hatIdx) {
       scores.openhat -= 1;
     }

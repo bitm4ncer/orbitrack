@@ -36,7 +36,7 @@ export function WaveformView({ isRecording = false }: { isRecording?: boolean })
         if (!dataBuffer || dataBuffer.length !== analyser.fftSize) {
           dataBuffer = new Float32Array(analyser.fftSize);
         }
-        analyser.getFloatTimeDomainData(dataBuffer);
+        analyser.getFloatTimeDomainData(dataBuffer as Float32Array<ArrayBuffer>);
         for (let i = 0; i < dataBuffer.length; i++) {
           const abs = Math.abs(dataBuffer[i]);
           if (abs > peak) peak = abs;

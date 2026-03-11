@@ -13,7 +13,7 @@ interface WaveformViewProps {
 
 type DragTarget = 'begin' | 'end' | null;
 
-export function WaveformView({ sampleUrl, begin, end, attack = 0, release = 0, color = '#7dd3fc', onRegionChange }: WaveformViewProps) {
+export function WaveformView({ sampleUrl, begin, end, attack = 0, color = '#7dd3fc', onRegionChange }: WaveformViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
   const [loading, setLoading] = useState(false);

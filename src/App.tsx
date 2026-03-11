@@ -48,7 +48,7 @@ function App() {
 
   // Delayed unmount: keep content rendered during the close animation
   const [bottomContentMounted, setBottomContentMounted] = useState(hasSelection);
-  const unmountTimer = useRef<ReturnType<typeof setTimeout>>();
+  const unmountTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     if (hasSelection) {

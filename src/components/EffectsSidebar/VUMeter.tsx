@@ -56,7 +56,7 @@ export function VUMeter() {
 
       // --- Read level ---
       const data = dataBuffer;
-      analyser.getFloatTimeDomainData(data);
+      analyser.getFloatTimeDomainData(data as Float32Array<ArrayBuffer>);
 
       let sum = 0;
       for (let i = 0; i < data.length; i++) sum += data[i] * data[i];

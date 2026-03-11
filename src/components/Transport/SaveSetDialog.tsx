@@ -9,7 +9,7 @@ interface SaveSetDialogProps {
   onClose: () => void;
 }
 
-export function SaveSetDialog({ forceNewName, onClose }: SaveSetDialogProps) {
+export function SaveSetDialog({ onClose }: SaveSetDialogProps) {
   const currentName = useStore((s) => s.currentSetName);
   const [name, setName] = useState(currentName);
   const [embedSamples, setEmbedSamples] = useState(true);

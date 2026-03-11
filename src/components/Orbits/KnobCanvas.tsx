@@ -207,11 +207,20 @@ export function KnobCanvas({ instrumentId }: Props) {
     renderer.resize();
     renderer.start();
 
-    const handleResize = () => renderer.resize();
+    // Debounce ResizeObserver with requestAnimationFrame to prevent flickering
+    let rafId: number | null = null;
+    const handleResize = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        renderer.resize();
+        rafId = null;
+      });
+    };
     const observer = new ResizeObserver(handleResize);
     observer.observe(canvas);
 
     return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
       renderer.stop();
       observer.disconnect();
     };

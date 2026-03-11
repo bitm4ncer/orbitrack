@@ -1,6 +1,6 @@
 import type { GeneratedPattern, GeneratedEvent, GenerationContext, BasslineParams } from '../types';
 import type { RNG } from '../rng';
-import { getScaleNotesInRange, nearestScaleNote, getScaleDegree } from '../scaleUtils';
+import { getScaleNotesInRange, nearestScaleNote } from '../scaleUtils';
 import { BASS_RHYTHM_TEMPLATES, resizeTemplate, applyDensity } from '../rhythmTemplates';
 
 /**

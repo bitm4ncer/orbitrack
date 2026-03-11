@@ -28,7 +28,6 @@ function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
 }
 
 const ADD_TYPES = ['synth', 'sampler', 'looper'] as const;
-type AddType = (typeof ADD_TYPES)[number];
 
 function AddInstrumentCard() {
   const mode = useStore((s) => s.addInstrumentType);

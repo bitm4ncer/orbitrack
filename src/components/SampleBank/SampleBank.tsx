@@ -478,7 +478,7 @@ export function SampleBank() {
             .replace(/[^a-zA-Z0-9_-]/g, '_') ?? '';
           const isCurrentSample =
             targetInst.sampleName === entry.path ||           // exact path match
-            ALIAS_PATHS[targetInst.sampleName] === entry.path || // built-in alias
+            (targetInst.sampleName && ALIAS_PATHS[targetInst.sampleName] === entry.path) || // built-in alias
             (entryKey !== '' && targetInst.sampleName === entryKey); // sdKey match (subfolder files)
           const isImportedItem = entry.path.startsWith('__imported__/');
 

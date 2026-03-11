@@ -3,8 +3,8 @@ import { useStore } from '../../state/store';
 import type { InstrumentGroup } from '../../types/group';
 
 // Reuse Knob28 inline (same pattern as InstrumentRack)
-function Knob28({ label, value, min, max, step = 1, color, format, onChange }: {
-  label: string; value: number; min: number; max: number; step?: number;
+function Knob28({ value, min, max, step = 1, color, format, onChange }: {
+  label?: string; value: number; min: number; max: number; step?: number;
   color: string; format?: (v: number) => string; onChange: (v: number) => void;
 }) {
   const norm = Math.max(0, Math.min(1, (value - min) / (max - min)));

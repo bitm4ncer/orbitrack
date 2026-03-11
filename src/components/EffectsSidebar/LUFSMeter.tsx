@@ -133,7 +133,7 @@ export function LUFSMeter() {
         if (!vuDataBuffer || vuDataBuffer.length !== analyser.fftSize) {
           vuDataBuffer = new Float32Array(analyser.fftSize);
         }
-        analyser.getFloatTimeDomainData(vuDataBuffer);
+        analyser.getFloatTimeDomainData(vuDataBuffer as Float32Array<ArrayBuffer>);
         let sum = 0;
         for (let i = 0; i < vuDataBuffer.length; i++) sum += vuDataBuffer[i] * vuDataBuffer[i];
         const rms = Math.sqrt(sum / vuDataBuffer.length);
@@ -182,7 +182,7 @@ export function LUFSMeter() {
         const blockElapsed = timestamp - ls.lastBlockTime;
         if (blockElapsed >= LUFS_BLOCK_MS) {
           ls.lastBlockTime = timestamp;
-          ls.lufsAnalyser.getFloatTimeDomainData(ls.lufsBuffer);
+          ls.lufsAnalyser.getFloatTimeDomainData(ls.lufsBuffer as Float32Array<ArrayBuffer>);
           let blockPower = 0;
           for (let i = 0; i < ls.lufsBuffer.length; i++) blockPower += ls.lufsBuffer[i] * ls.lufsBuffer[i];
           blockPower /= ls.lufsBuffer.length;

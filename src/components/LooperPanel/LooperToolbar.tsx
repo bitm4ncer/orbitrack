@@ -29,7 +29,8 @@ function MiniKnob({ value, min, max, step, color, onChange, title }: {
 
   return (
     <svg width="20" height="20" viewBox="-1 -1 2 2" onMouseDown={handleMouseDown}
-      style={{ cursor: 'ns-resize', display: 'block' }} title={title}>
+      style={{ cursor: 'ns-resize', display: 'block' }}>
+      {title && <title>{title}</title>}
       <circle cx="0" cy="0" r="0.72" fill="none" stroke={color} strokeWidth="0.12" opacity="0.5" />
       <line x1="0" y1="0" x2={lx} y2={ly} stroke={color} strokeWidth="0.16" strokeLinecap="round" />
     </svg>

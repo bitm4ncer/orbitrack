@@ -13,13 +13,6 @@ function ySample(t: number, shape: string): number {
   }
 }
 
-// Normalize custom wave amplitudes to ±1 for display
-function normalizeY(t: number, shape: string): number {
-  const raw = ySample(t, shape);
-  // Quick pass to find peak for normalization (computed once per shape if needed)
-  return raw;
-}
-
 // Per-shape peak amplitude cache (for normalization in display)
 const peakCache = new Map<string, number>();
 function getPeak(shape: string): number {

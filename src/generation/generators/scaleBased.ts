@@ -10,7 +10,7 @@ export function generateScaleBased(
   params: ScaleBasedParams,
   rng: RNG,
 ): GeneratedPattern {
-  const [lo, hi] = ctx.octaveRange;
+  const [lo] = ctx.octaveRange;
   // Expand range by octaves param
   const expandedHi = Math.min(127, lo + params.octaves * 12 + 11);
   const scaleNotes = getScaleNotesInRange(ctx.scaleRoot, ctx.scaleType, lo, expandedHi);

@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../../state/store';
 import { PASTEL_COLORS } from '../../canvas/colors';
 import { getOrbitAnalyser } from '../../audio/orbitEffects';
+import { getMasterAnalyser } from '../../audio/routingEngine';
 import type { Instrument } from '../../types/instrument';
 import { GroupHeader } from './GroupHeader';
 
@@ -128,8 +129,8 @@ function Knob28({ label, value, min, max, step = 1, color, format, onChange }: {
 
 // ── VerticalVU ──────────────────────────────────────────────────────────────
 
-const DB_FLOOR = -48;
-const VU_GRID_DB = [0, -6, -12, -18, -24, -36, -48];
+const DB_FLOOR = -60;
+const VU_GRID_DB = [0, -6, -12, -18, -24, -36, -48, -60];
 
 function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -259,13 +260,12 @@ function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }
 const FADER_MIN = -20;
 const FADER_MAX = 20;
 
-function VerticalFader({ value, color, onChange, showTooltip = true }: {
-  value: number; color: string; onChange: (v: number) => void; showTooltip?: boolean;
+function VerticalFader({ value, color, onChange }: {
+  value: number; color: string; onChange: (v: number) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const norm = (value - FADER_MIN) / (FADER_MAX - FADER_MIN); // 0=bottom, 1=top
   const handleTop = `calc(${(1 - norm) * 100}% - 7px)`;
-  const dbLabel = value === 0 ? '0 dB' : `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`;
 
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -324,25 +324,120 @@ function VerticalFader({ value, color, onChange, showTooltip = true }: {
         boxShadow: `0 0 8px ${color}70, 0 2px 5px rgba(0,0,0,0.85)`,
         border: '1px solid rgba(255,255,255,0.35)',
       }}>
-        {/* dB tooltip above handle */}
-        {showTooltip && (
-          <div style={{
-            position: 'absolute',
-            bottom: '100%',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            marginBottom: '4px',
-            whiteSpace: 'nowrap',
-            fontSize: '9px',
-            fontFamily: 'monospace',
-            color: color,
-            fontWeight: 'bold',
-            textShadow: '0 0 2px rgba(0,0,0,0.8)',
-            pointerEvents: 'none',
-          }}>
-            {dbLabel}
-          </div>
-        )}
+      </div>
+    </div>
+  );
+}
+
+// ── MasterVU ─────────────────────────────────────────────────────────────────
+
+function MasterVU() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stateRef = useRef({ level: 0, peak: 0, peakHold: 0, currentDb: DB_FLOOR });
+  const rafRef = useRef<number>(0);
+  const [tooltipDb, setTooltipDb] = useState(DB_FLOOR);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const draw = () => {
+      rafRef.current = requestAnimationFrame(draw);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const parent = canvas.parentElement;
+      if (parent) {
+        const pw = parent.clientWidth;
+        const ph = parent.clientHeight;
+        if (canvas.width !== pw || canvas.height !== ph) {
+          canvas.width = pw;
+          canvas.height = ph;
+        }
+      }
+      const W = canvas.width;
+      const H = canvas.height;
+      if (W === 0 || H === 0) return;
+
+      ctx.clearRect(0, 0, W, H);
+
+      const analyser = getMasterAnalyser();
+      const s = stateRef.current;
+      if (analyser) {
+        const buf = new Float32Array(analyser.fftSize);
+        analyser.getFloatTimeDomainData(buf as Float32Array<ArrayBuffer>);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        const rms = Math.sqrt(sum / buf.length);
+        const db = rms > 0 ? Math.max(DB_FLOOR, 20 * Math.log10(rms)) : DB_FLOOR;
+        s.currentDb = db;
+        const lvl = (db - DB_FLOOR) / -DB_FLOOR;
+        if (lvl > s.level) s.level = lvl;
+        else s.level = Math.max(0, s.level - 0.02);
+        if (lvl > s.peak) { s.peak = lvl; s.peakHold = 120; }
+        else if (s.peakHold > 0) s.peakHold--;
+        else s.peak = Math.max(0, s.peak - 0.003);
+        if (s.peakHold > 0) setTooltipDb(Math.round(db * 10) / 10);
+      }
+
+      for (const db of VU_GRID_DB) {
+        const t = (db - DB_FLOOR) / -DB_FLOOR;
+        const y = Math.round(H * (1 - t)) + 0.5;
+        ctx.strokeStyle = db === 0 ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+
+      if (s.level > 0.001) {
+        const grad = ctx.createLinearGradient(0, H, 0, 0);
+        grad.addColorStop(0,    '#16a34a');
+        grad.addColorStop(0.55, '#22c55e');
+        grad.addColorStop(0.75, '#f59e0b');
+        grad.addColorStop(0.88, '#f97316');
+        grad.addColorStop(1.0,  '#ef4444');
+        ctx.fillStyle = grad;
+        const yTop = H * (1 - s.level);
+        ctx.fillRect(0, yTop, W, H - yTop);
+      }
+
+      if (s.peak > 0.002) {
+        const py = Math.round(H * (1 - s.peak));
+        ctx.fillStyle = s.peak > 0.93 ? '#ff5555' : '#888';
+        ctx.fillRect(0, py, W, 2);
+      }
+
+      ctx.font = '6.5px monospace';
+      ctx.textAlign = 'left';
+      for (const db of [0, -12, -24, -48]) {
+        const t = (db - DB_FLOOR) / -DB_FLOOR;
+        const y = H * (1 - t);
+        ctx.fillStyle = 'rgba(255,255,255,0.30)';
+        ctx.fillText(db === 0 ? ' 0' : String(db), 2, y - 2);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+      <div style={{
+        position: 'absolute',
+        top: '0',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        fontSize: '8px',
+        fontFamily: 'monospace',
+        color: '#888',
+        fontWeight: 'bold',
+        textShadow: '0 0 2px rgba(0,0,0,0.8)',
+        pointerEvents: 'none',
+        opacity: stateRef.current.peakHold > 0 ? 1 : 0,
+        transition: 'opacity 0.15s',
+      }}>
+        {tooltipDb === 0 ? '0 dB' : `${tooltipDb > 0 ? '+' : ''}${tooltipDb.toFixed(1)} dB`}
       </div>
     </div>
   );
@@ -354,8 +449,8 @@ function MasterFader({ value, onChange }: { value: number; onChange: (v: number)
   const trackRef = useRef<HTMLDivElement>(null);
   const norm = (value - FADER_MIN) / (FADER_MAX - FADER_MIN);
   const handleTop = `calc(${(1 - norm) * 100}% - 7px)`;
-  const dbLabel = value === 0 ? '0 dB' : `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`;
   const masterColor = '#888';
+  const dbLabel = value === 0 ? '0 dB' : `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`;
 
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -397,19 +492,25 @@ function MasterFader({ value, onChange }: { value: number; onChange: (v: number)
 
       {/* Fader */}
       <div className="relative flex-1 min-h-0 px-1.5 pb-0.5">
-        <div className="absolute inset-0 rounded-sm overflow-hidden" style={{ background: 'rgba(0,0,0,0.35)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)' }} />
-        <div className="absolute inset-0" ref={trackRef} className="relative w-full h-full select-none cursor-ns-resize" onMouseDown={startDrag}>
-          {/* 0 dB notch */}
-          <div className="absolute" style={{ left: '22%', right: '22%', height: 1, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.35)' }} />
-          {/* Handle */}
-          <div className="absolute rounded" style={{
-            left: '12%', right: '12%', height: 14, top: handleTop,
-            background: `linear-gradient(160deg, ${masterColor}ee 0%, ${masterColor}99 100%)`,
-            boxShadow: `0 0 8px ${masterColor}70, 0 2px 5px rgba(0,0,0,0.85)`,
-            border: '1px solid rgba(255,255,255,0.35)',
-          }}>
-            <div style={{ position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '4px', whiteSpace: 'nowrap', fontSize: '9px', fontFamily: 'monospace', color: masterColor, fontWeight: 'bold', textShadow: '0 0 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
-              {dbLabel}
+        {/* Master VU meter — fills entire area, background layer */}
+        <div className="absolute inset-0 rounded-sm overflow-hidden" style={{ background: 'rgba(0,0,0,0.35)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)' }}>
+          <MasterVU />
+        </div>
+        {/* Fader — transparent overlay, handle floats on top of meter */}
+        <div className="absolute inset-0">
+          <div ref={trackRef} className="relative w-full h-full select-none cursor-ns-resize" onMouseDown={startDrag}>
+            {/* 0 dB notch */}
+            <div className="absolute" style={{ left: '22%', right: '22%', height: 1, top: '50%', transform: 'translateY(-50%)', background: 'rgba(255,255,255,0.35)' }} />
+            {/* Handle */}
+            <div className="absolute rounded" style={{
+              left: '12%', right: '12%', height: 14, top: handleTop,
+              background: `linear-gradient(160deg, ${masterColor}ee 0%, ${masterColor}99 100%)`,
+              boxShadow: `0 0 8px ${masterColor}70, 0 2px 5px rgba(0,0,0,0.85)`,
+              border: '1px solid rgba(255,255,255,0.35)',
+            }}>
+              <div style={{ position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '4px', whiteSpace: 'nowrap', fontSize: '9px', fontFamily: 'monospace', color: masterColor, fontWeight: 'bold', textShadow: '0 0 2px rgba(0,0,0,0.8)', pointerEvents: 'none' }}>
+                {dbLabel}
+              </div>
             </div>
           </div>
         </div>
@@ -532,23 +633,12 @@ export function InstrumentRack() {
   const selectedIds = useStore((s) => s.selectedInstrumentIds);
   const groups = useStore((s) => s.groups);
   const renamingId = useStore((s) => s.renamingId);
+  const masterVolume = useStore((s) => s.masterVolume);
   const dragIdx = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [levelMode, setLevelMode] = useState(false);
   const [activeAddType, setActiveAddType] = useState<'synth' | 'sampler' | 'looper'>('synth');
 
-  // Build grouped instrument ID set and a map of instrumentId → group
-  const groupedIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const g of groups) for (const id of g.instrumentIds) set.add(id);
-    return set;
-  }, [groups]);
-
-  const instGroupMap = useMemo(() => {
-    const map = new Map<string, typeof groups[0]>();
-    for (const g of groups) for (const id of g.instrumentIds) map.set(id, g);
-    return map;
-  }, [groups]);
 
   const addSampler = () => {
     const store = useStore.getState();
@@ -617,7 +707,7 @@ export function InstrumentRack() {
       solo: false,
       volume: 0,
       orbitIndex: store.instruments.length,
-      looperParams: { gain: 0.9, speed: 1, attack: 0.001, release: 0.05, pan: 0, cutoff: 20000, resonance: 0 },
+      looperParams: { gain: 0.9, speed: 1, attack: 0.001, release: 0.05, pan: 0, cutoff: 20000, resonance: 0, pitchSemitones: 0, reverse: false, startOffset: 0 },
     };
     store.setInstruments([...store.instruments, newInst]);
     store.selectInstrument(newInst.id);
@@ -686,7 +776,7 @@ export function InstrumentRack() {
           ))}
           {/* Master Fader on the right */}
           <MasterFader
-            value={useStore((s) => s.masterVolume * 20 - 10)}
+            value={masterVolume * 20 - 10}
             onChange={(v) => useStore.getState().setMasterVolume((v + 10) / 20)}
           />
         </div>

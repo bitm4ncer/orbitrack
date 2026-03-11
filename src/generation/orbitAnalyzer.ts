@@ -1,8 +1,5 @@
 import { useStore } from '../state/store';
 import { classifyInstrument } from './sampleClassifier';
-import { resizeTemplate, applyDensity } from './rhythmTemplates';
-import { createRNG } from './rng';
-import { KICK_TEMPLATES } from './rhythmTemplates';
 
 /**
  * Krumhansl-Schmuckler key profiles (12 pitch classes).

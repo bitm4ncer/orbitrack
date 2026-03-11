@@ -8,6 +8,7 @@ function ySample(t: number, shape: OscillatorType): number {
     case 'triangle': return 1 - 4 * Math.abs(t - Math.round(t));
     case 'square':   return t < 0.5 ? 1 : -1;
     case 'sawtooth': return 2 * (t - Math.floor(t + 0.5));
+    default:         return 0;
   }
 }
 

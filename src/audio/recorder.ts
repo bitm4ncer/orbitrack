@@ -233,7 +233,7 @@ function encodeMP3(left: Float32Array, right: Float32Array, sr: number, kbps: nu
   const flush = encoder.flush();
   if (flush.length > 0) mp3Chunks.push(flush);
 
-  return new Blob(mp3Chunks, { type: 'audio/mpeg' });
+  return new Blob(mp3Chunks as BlobPart[], { type: 'audio/mpeg' });
 }
 
 function floatToInt16(input: Float32Array): Int16Array {
