@@ -637,7 +637,6 @@ export function InstrumentRack() {
   const dragIdx = useRef<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [levelMode, setLevelMode] = useState(false);
-  const [activeAddType, setActiveAddType] = useState<'synth' | 'sampler' | 'looper'>('synth');
 
 
   const addSampler = () => {
@@ -844,7 +843,7 @@ export function InstrumentRack() {
                   ] as const).map(({ type, label, fn }) => (
                     <button
                       key={type}
-                      onClick={() => { setActiveAddType(type); fn(); }}
+                      onClick={() => fn()}
                       className="w-full py-3 text-[11px] uppercase tracking-wider rounded transition-all cursor-pointer font-medium"
                       style={{
                         color: 'rgba(255,255,255,0.75)',
