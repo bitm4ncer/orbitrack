@@ -411,9 +411,9 @@ export function SampleBank() {
                   setDraft(d => ({...d, rootNote: val}));
                   updateSamplerParams(selectedId, { rootNote: val });
                 }}
-                className="bg-bg-tertiary text-text-primary text-[8px] rounded px-1 py-0.5 border border-border
+                className="bg-bg-tertiary text-text-primary text-[8px] rounded-full px-2 py-0.5 border border-border
                            cursor-pointer mt-9"
-                style={{ width: 40 }}
+                style={{ width: 48 }}
               >
                 {Array.from({ length: 128 }, (_, i) => (
                   <option key={i} value={i}>{midiToLabel(i)}</option>

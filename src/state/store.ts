@@ -1383,7 +1383,13 @@ export const useStore = create<StoreState>((set, get) => ({
     }),
 
   // Track Mode
-  toggleTrackMode: () => set((s) => ({ trackMode: !s.trackMode })),
+  toggleTrackMode: () => set((s) => {
+    const newTrackMode = !s.trackMode;
+    return {
+      trackMode: newTrackMode,
+      trackPosition: newTrackMode && s.arrangement.length > 0 ? 0 : -1,
+    };
+  }),
 
   addArrangementStep: (sceneId, bars = 4) =>
     set((s) => ({

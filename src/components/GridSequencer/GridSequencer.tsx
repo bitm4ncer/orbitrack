@@ -611,7 +611,7 @@ export function GridSequencer() {
           className="absolute inset-0 m-px cursor-grab active:cursor-grabbing transition-opacity hover:opacity-90 overflow-hidden"
           style={{
             backgroundColor: instrument.color + 'cc',
-            borderRadius: 4,
+            borderRadius: 12,
             boxShadow: `0 0 4px ${instrument.color}40`,
             outline: isNoteSelected ? '2px solid rgba(255,255,255,0.8)' : 'none',
             outlineOffset: -1,
@@ -641,7 +641,7 @@ export function GridSequencer() {
             right: 0,
             width: RESIZE_HANDLE_W,
             background: `linear-gradient(90deg, transparent, ${instrument.color}80)`,
-            borderRadius: '0 4px 4px 0',
+            borderRadius: '0 12px 12px 0',
           }}
           onMouseDown={(e) => handleResizeMouseDown(e, hitIdx, midiNote, stepIndex)}
         />
