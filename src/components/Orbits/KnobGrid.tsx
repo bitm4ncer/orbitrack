@@ -120,7 +120,7 @@ function AddInstrumentCard() {
 
   return (
     <div
-      className="knob-cell flex flex-col items-center justify-center gap-4 p-4 rounded-lg select-none"
+      className="knob-cell flex flex-col items-center justify-center gap-4 p-4 rounded-lg select-none hover:bg-white/[0.02] transition-all"
       style={{ background: 'transparent', border: '1px solid rgba(255, 217, 186, 0.133)' }}
     >
       {/* 3 big buttons */}
