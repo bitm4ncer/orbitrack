@@ -94,6 +94,7 @@ export function GridSequencer() {
   const dragRef = useRef<DragState | null>(null);
   const gridBodyRef = useRef<HTMLDivElement>(null);
   const gridContainerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const hoveredHitRef = useRef<{ instrumentId: string; hitIndex: number } | null>(null);
   const velDragRef = useRef<{ hitIndex: number; startY: number; startVel: number } | null>(null);
 
@@ -227,6 +228,18 @@ export function GridSequencer() {
   for (let i = endNote; i >= startNote; i--) allRows.push(i);
   const isChromatic = scaleType === 'chromatic';
   const rows = isChromatic ? allRows : allRows.filter((n) => isNoteInScale(n, scaleRoot, scaleType));
+
+  // Scroll to center C4 in viewport
+  useEffect(() => {
+    if (!scrollContainerRef.current) return;
+    const C4_MIDI = 60;
+    const C4_RowIndex = allRows.indexOf(C4_MIDI);
+    if (C4_RowIndex === -1) return;
+
+    const viewportHeight = scrollContainerRef.current.clientHeight;
+    const scrollTop = C4_RowIndex * ROW_H - (viewportHeight / 2) + (ROW_H / 2);
+    scrollContainerRef.current.scrollTop = Math.max(0, scrollTop);
+  }, [octaveOffset, scaleType, allRows.length]);
 
   // Active step for playback indicator
   const activeStep = isPlaying ? (() => {
@@ -863,7 +876,7 @@ export function GridSequencer() {
               </div>
             </>
           )}
-          <div className="grid-body flex flex-col flex-1 overflow-x-auto">
+          <div className="grid-body flex flex-col flex-1 overflow-x-auto overflow-y-auto" ref={scrollContainerRef}>
             <div className="flex flex-1 min-h-0">
               {noteLabels}
               <div
@@ -954,7 +967,7 @@ export function GridSequencer() {
             </div>
           </>
         )}
-        <div className="grid-body flex flex-col flex-1 overflow-x-auto">
+        <div className="grid-body flex flex-col flex-1 overflow-x-auto overflow-y-auto" ref={scrollContainerRef}>
           <div className="flex flex-1 min-h-0">
             {/* Synth note labels need extra top padding for glide row */}
             <div className="grid-note-labels shrink-0 w-10">

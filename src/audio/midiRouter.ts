@@ -3,7 +3,6 @@
 import { useStore } from '../state/store';
 import { onMidiCC, onMidiNote, isMidiEnabled } from './midiController';
 import { getSynthEngine } from './synthManager';
-import { midiActivityEmitter } from '../components/Transport/MidiLight';
 import type { MidiCCMapping, MidiNoteMapping } from '../types/midi';
 
 let unsubscribeCC: (() => void) | null = null;
@@ -19,7 +18,6 @@ export function startMidiRouting(
   stopMidiRouting();
 
   unsubscribeCC = onMidiCC((mapping, normalizedValue) => {
-    midiActivityEmitter.trigger();
     const ccNumber = (mapping as any).cc;
     const applicableMappings = ccMappings.filter(m => m.cc === ccNumber);
 
@@ -60,10 +58,6 @@ function routeMidiNote(noteNumber: number, velocity: number): void {
     const inst = store.instruments.find(i => i.id === store.selectedInstrumentId);
 
     if (!inst) return;
-
-    if (velocity > 0) {
-      midiActivityEmitter.trigger();
-    }
 
     if (inst.type === 'synth') {
       const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);

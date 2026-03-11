@@ -3,7 +3,6 @@ import { useStore } from '../state/store';
 import { getSynthEngine } from '../audio/synthManager';
 import { initAudio } from '../audio/engine';
 import { loadSamples, triggerSample } from '../audio/sampler';
-import { midiActivityEmitter } from '../components/Transport/MidiLight';
 
 const audioInitRef = { initialized: false };
 
@@ -125,8 +124,6 @@ export function usePianoKeyboard(): void {
 
         const semitoneDelta = PIANO_KEY_MAP[keyCode];
         const midiNote = 12 * (octaveRef.current + 1) + semitoneDelta;
-
-        midiActivityEmitter.trigger();
 
         if (inst.type === 'synth') {
           const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);

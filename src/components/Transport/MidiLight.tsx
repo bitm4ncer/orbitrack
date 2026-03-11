@@ -37,10 +37,9 @@ export const midiActivityEmitter = new MidiActivityEmitter();
 export const metronomeEmitter = new MetronomeEmitter();
 
 export function MidiLight() {
-  const [isActive, setIsActive] = useState(false);
   const [pulses, setPulses] = useState<{ id: number }[]>([]);
   const [metronomeEnabled, setMetronomeEnabled] = useState(true);
-  const timeoutRef = useRef<NodeJS.Timeout | undefined>();
+  const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const audioContextRef = useRef<AudioContext | null>(null);
   const pulseIdRef = useRef(0);
   const isPlayingRef = useRef(false);
@@ -53,9 +52,8 @@ export function MidiLight() {
 
   useEffect(() => {
     const unsubscribeActivity = midiActivityEmitter.subscribe(() => {
-      setIsActive(true);
       clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => setIsActive(false), 150);
+      timeoutRef.current = setTimeout(() => {}, 150);
     });
 
     const unsubscribeMetronome = metronomeEmitter.subscribe(() => {
@@ -76,9 +74,8 @@ export function MidiLight() {
       }
 
       // Light up the dot
-      setIsActive(true);
       clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => setIsActive(false), 100);
+      timeoutRef.current = setTimeout(() => {}, 100);
     });
 
     return () => {
@@ -137,20 +134,10 @@ export function MidiLight() {
         />
       ))}
 
-      {/* Main dot */}
       <button
         onClick={toggleMetronomeSound}
-        className={`w-3 h-3 rounded-full transition-all ${
-          isActive
-            ? 'bg-red-500 shadow-lg shadow-red-500/80 scale-110'
-            : 'bg-red-900/40 shadow-none scale-100'
-        }`}
-        title={`MIDI/Metronome - Sound ${metronomeEnabled ? 'ON' : 'OFF'} (click to toggle)`}
-        style={{
-          cursor: 'pointer',
-          position: 'relative',
-          zIndex: 10,
-        }}
+        className="invisible w-0"
+        title={`MIDI/Metronome - Sound ${metronomeEnabled ? 'ON' : 'OFF'}`}
       />
 
       <style>{`
