@@ -118,19 +118,18 @@ export function triggerLooperSlice(
   const loopIn = editorState?.loopIn ?? 0;
   const loopOut = editorState?.loopOut ?? 1;
 
-  // Hit positions are normalized within the loop region (0-1)
-  // Need to convert to buffer-space (actual positions in the audio buffer)
-  const loopDuration = loopOut - loopIn;
+  // Hit positions are normalized [0..1] in the FULL buffer (from transient detection).
+  // loopIn/loopOut define a trim window [loopIn..loopOut] of the buffer to play.
+  // Filter hits to only those within the loop region; use their buffer-space coords directly.
   const rawBegin = sortedHits[hitIndex];
-  const rawEnd = hitIndex + 1 < sortedHits.length ? sortedHits[hitIndex + 1] : 1;
+  const rawEnd = hitIndex + 1 < sortedHits.length ? sortedHits[hitIndex + 1] : loopOut;
 
-  // Clamp in loop-space first
-  const clampedBegin = Math.max(rawBegin, 0);
-  const clampedEnd = Math.min(rawEnd, 1);
+  // Skip hits outside the loop region
+  if (rawBegin < loopIn || rawBegin >= loopOut) return;
 
-  // Then convert to buffer-space for playback
-  const sliceBegin = loopIn + clampedBegin * loopDuration;
-  const sliceEnd = loopIn + clampedEnd * loopDuration;
+  // Use buffer-space coordinates directly (no rescaling)
+  const sliceBegin = rawBegin;
+  const sliceEnd = Math.min(rawEnd, loopOut); // clamp end to loop boundary
 
   if (sliceBegin >= sliceEnd) return; // degenerate slice
 
