@@ -37,10 +37,10 @@ function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSc
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Hit position dots (only rotate if playing)
+      // Hit position dots (only rotate if playing, clockwise)
       if (inst.hitPositions && inst.hitPositions.length > 0) {
         inst.hitPositions.forEach((angle) => {
-          const rad = (angle * Math.PI * 2 + (isPlaying ? rotation : 0)) % (Math.PI * 2);
+          const rad = (angle * Math.PI * 2 - (isPlaying ? rotation : 0)) % (Math.PI * 2);
           const x = cx + Math.cos(rad) * (radius - 4);
           const y = cy + Math.sin(rad) * (radius - 4);
           ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
@@ -49,6 +49,12 @@ function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSc
           ctx.fill();
         });
       }
+
+      // Bottom indicator
+      ctx.fillStyle = 'rgba(220, 220, 220, 0.8)';
+      ctx.beginPath();
+      ctx.arc(cx, cy + radius - 2, 2.5, 0, Math.PI * 2);
+      ctx.fill();
 
       if (isPlaying) rotation += 0.02;
       rafRef.current = requestAnimationFrame(draw);
