@@ -4,6 +4,7 @@ import { useStore } from '../../state/store';
 import { toggleTransport, setBpm } from '../../audio/transport';
 import { initAudio } from '../../audio/engine';
 import { loadSamples } from '../../audio/sampler';
+import { useClickOutside } from '../../hooks/useClickOutside';
 import { FilesMenu } from './FilesMenu';
 import { encodeSetToUrl, buildShareUrl, exportSamplesZip, importSamplesZip } from '../../storage/urlShare';
 const orbeatLogo = `${import.meta.env.BASE_URL}ORBEAT_Logo.svg`;
@@ -159,11 +160,13 @@ async function ensureAudio() {
   audioInitRef.initialized = true;
 }
 
-function ShareMenu({ anchorRef }: { anchorRef: React.RefObject<HTMLButtonElement | null> }) {
+function ShareMenu({ anchorRef, onClose }: { anchorRef: React.RefObject<HTMLButtonElement | null>; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
   const [zipStatus, setZipStatus] = useState<'idle' | 'working' | 'done' | 'error'>('idle');
   const [hasCustomSamples, setHasCustomSamples] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
+  useClickOutside(ref, onClose);
 
   // Position above the anchor button
   const rect = anchorRef.current?.getBoundingClientRect();
@@ -229,7 +232,7 @@ function ShareMenu({ anchorRef }: { anchorRef: React.RefObject<HTMLButtonElement
     copyStatus === 'copying' ? 'Encoding…' : copyStatus === 'copied' ? 'Copied!' : copyStatus === 'error' ? 'Failed' : 'Copy link';
 
   return createPortal(
-    <div style={{ ...style, width: 260 }} className="bg-bg-secondary border border-border rounded-lg shadow-2xl py-3 px-4">
+    <div ref={ref} style={{ ...style, width: 260 }} className="bg-bg-secondary border border-border rounded-lg shadow-2xl py-3 px-4">
       <div className="text-[11px] uppercase tracking-wider text-text-secondary/50 mb-3">Share Track</div>
 
       {/* Copy link */}
@@ -330,7 +333,7 @@ export function TransportBar() {
         >
           Share
         </button>
-        {shareOpen && <ShareMenu anchorRef={shareRef} />}
+        {shareOpen && <ShareMenu anchorRef={shareRef} onClose={() => setShareOpen(false)} />}
       </div>
 
       <button
