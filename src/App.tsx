@@ -224,7 +224,7 @@ function App() {
           </div>
           {bottomContentMounted && (
             <div
-              className="synth-bottom-bar flex overflow-hidden"
+              className="synth-bottom-bar flex overflow-hidden min-h-0"
               style={{ height: bottomHeight }}
             >
               {isLooperSelected ? <LooperEditor /> : <GridSequencer />}

@@ -359,8 +359,17 @@ export function TransportBar() {
       <div className="flex items-center gap-3 pr-4">
         <button
           onClick={toggleTrackMode}
-          className={`px-2 py-1 text-xs rounded font-mono tracking-wide transition-colors
-            ${trackMode ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          className={`px-2 py-1 text-xs rounded font-mono tracking-wide transition-colors border
+            ${trackMode ? 'border-current' : 'text-muted-foreground hover:text-foreground border-transparent'}`}
+          style={
+            trackMode
+              ? {
+                  backgroundColor: '#c1eeca',
+                  color: '#1a1a1a',
+                  borderColor: '#a8dab0',
+                }
+              : {}
+          }
           title="Toggle Track Mode"
         >
           TRACK
