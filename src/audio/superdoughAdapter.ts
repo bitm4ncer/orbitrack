@@ -118,11 +118,18 @@ export function triggerLooperSlice(
   const loopIn = editorState?.loopIn ?? 0;
   const loopOut = editorState?.loopOut ?? 1;
 
-  // Clamp slice boundaries to loop region
-  const rawBegin = sortedHits[hitIndex];
-  const rawEnd = hitIndex + 1 < sortedHits.length ? sortedHits[hitIndex + 1] : loopOut;
-  const sliceBegin = Math.max(rawBegin, loopIn);
-  const sliceEnd = Math.min(rawEnd, loopOut);
+  // Convert hit positions from loop-space (0-1 within loop) to buffer-space (0-1 in entire buffer)
+  const loopDuration = loopOut - loopIn;
+  const rawBegin = sortedHits[hitIndex];  // Position in loop-space (0-1)
+  const rawEnd = hitIndex + 1 < sortedHits.length ? sortedHits[hitIndex + 1] : 1;  // 1 = end of loop
+
+  // Map from loop-space to buffer-space
+  const bufferRawBegin = loopIn + rawBegin * loopDuration;
+  const bufferRawEnd = loopIn + rawEnd * loopDuration;
+
+  // Clamp to loop region (already in buffer-space)
+  const sliceBegin = Math.max(bufferRawBegin, loopIn);
+  const sliceEnd = Math.min(bufferRawEnd, loopOut);
 
   if (sliceBegin >= sliceEnd) return; // degenerate slice
 
