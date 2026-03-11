@@ -608,7 +608,7 @@ export function GridSequencer() {
       >
         {/* Note body */}
         <div
-          className="absolute inset-0 m-px cursor-grab active:cursor-grabbing transition-opacity hover:opacity-90 overflow-hidden"
+          className="absolute inset-0 m-px cursor-grab active:cursor-grabbing transition-opacity hover:opacity-90 overflow-hidden flex items-center justify-center"
           style={{
             backgroundColor: instrument.color + 'cc',
             borderRadius: 12,
@@ -628,8 +628,7 @@ export function GridSequencer() {
           }}
         >
           <span
-            className="text-[8px] text-black/70 pl-1 leading-none select-none whitespace-nowrap"
-            style={{ lineHeight: `${ROW_H - 2}px` }}
+            className="text-[8px] text-black/70 leading-none select-none whitespace-nowrap"
           >
             {noteNameWithOctave(midiNote)}
           </span>

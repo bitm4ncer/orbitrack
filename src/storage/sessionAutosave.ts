@@ -169,7 +169,7 @@ export async function restoreAutosave(): Promise<boolean> {
       scaleType: data.scaleType ?? 'chromatic',
       trackMode: data.trackMode ?? false,
       arrangement: data.arrangement ?? [],
-      trackPosition: -1,
+      trackPosition: (data.trackMode && data.arrangement?.length) ? 0 : -1,
       customSamples,
       currentSetName: (data.meta?.name && data.meta.name !== 'Untitled') ? data.meta.name : generateName(),
       selectedInstrumentId: data.instruments[0]?.id ?? null,
