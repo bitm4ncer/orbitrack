@@ -468,7 +468,7 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
 
       {/* Card name — above the orbit; click to mute/unmute */}
       <span
-        className="card-name text-[11px] truncate max-w-full px-1 font-medium transition-colors duration-150 cursor-pointer"
+        className="card-name text-[11px] truncate w-full px-1 font-medium transition-colors duration-150 cursor-pointer"
         style={{
           color: isSelected ? inst.color : `rgba(255,255,255,0.25)`,
           opacity: inst.muted ? 0.4 : 1,
