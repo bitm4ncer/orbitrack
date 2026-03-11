@@ -61,17 +61,20 @@ export function generateChordBased(
       }
       break;
 
-    case 'offbeat':
+    case 'offbeat': {
+      const spq = Math.round(ctx.loopSize / 4); // steps per quarter note
+      const halfBeat = Math.round(spq / 2);     // "the and" of a beat
       for (let i = 0; i < ledChords.length; i++) {
         const baseStep = i * stepsPerChord;
         // Place chord on the "and" of each beat within this chord's zone
-        for (let s = baseStep + 2; s < baseStep + stepsPerChord; s += 4) {
+        for (let s = baseStep + halfBeat; s < baseStep + stepsPerChord; s += spq) {
           if (s < ctx.loopSize) {
-            events.push({ step: s, notes: ledChords[i], length: 2 });
+            events.push({ step: s, notes: ledChords[i], length: halfBeat });
           }
         }
       }
       break;
+    }
 
     case 'arp': {
       for (let i = 0; i < ledChords.length; i++) {

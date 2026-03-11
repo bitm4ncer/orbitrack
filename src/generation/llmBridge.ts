@@ -42,7 +42,7 @@ export function buildPrompt(request: LLMGenerationRequest): string {
 
 CONTEXT:
 - Scale: ${rootName} ${context.scaleType}
-- Loop length: ${context.loopSize} steps (16th notes)
+- Loop length: ${context.loopSize} steps (32nd notes, 1 bar = 32 steps)
 - Grid resolution: ${context.gridResolution} (snap to multiples of this)
 - Instrument type: ${context.instrumentType}
 - Instrument role: ${context.instrumentRole}

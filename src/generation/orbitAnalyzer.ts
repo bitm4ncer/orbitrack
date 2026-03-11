@@ -145,26 +145,27 @@ function detectGrooveFingerprint(): GrooveFingerprint | null {
   if (!kickInstrument) return null;
 
   // Extract kick pattern as step set
+  const spq = Math.round(kickInstrument.loopSize / 4); // steps per quarter note
   const kickPositions = kickInstrument.hitPositions ?? [];
   const kickSteps = new Set(
-    kickPositions.map((pos) => Math.round(pos * kickInstrument.loopSize)).filter((s) => s < 16),
+    kickPositions.map((pos) => Math.round(pos * kickInstrument.loopSize)),
   );
 
-  // Check for 4-on-floor (hits on steps 0, 4, 8, 12)
-  const fourOnFloorSteps = [0, 4, 8, 12];
+  // Check for 4-on-floor (hits on quarter notes: 0, spq, 2*spq, 3*spq)
+  const fourOnFloorSteps = [0, spq, spq * 2, spq * 3];
   const fourOnFloorHits = fourOnFloorSteps.filter((step) => kickSteps.has(step)).length;
   const isFourOnFloor = fourOnFloorHits >= 3;
 
-  // Check for half-time (kick avoids 4+12, snare mostly on 8)
+  // Check for half-time (kick avoids beats 2 and 4, snare mostly on beat 3)
   let isHalfTime = false;
   if (snareInstrument) {
     const snarePositions = snareInstrument.hitPositions ?? [];
     const snareSteps = new Set(
-      snarePositions.map((pos) => Math.round(pos * snareInstrument.loopSize)).filter((s) => s < 16),
+      snarePositions.map((pos) => Math.round(pos * snareInstrument.loopSize)),
     );
-    const halfTimeKickMissing = !kickSteps.has(4) && !kickSteps.has(12);
-    const snareOnEight = snareSteps.has(8);
-    isHalfTime = halfTimeKickMissing && snareOnEight;
+    const halfTimeKickMissing = !kickSteps.has(spq) && !kickSteps.has(spq * 3);
+    const snareOnHalfBar = snareSteps.has(spq * 2);
+    isHalfTime = halfTimeKickMissing && snareOnHalfBar;
   }
 
   // Suggest genre based on pattern (simple heuristic)
