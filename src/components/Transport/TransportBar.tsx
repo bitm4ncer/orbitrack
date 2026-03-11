@@ -86,8 +86,9 @@ function ShareMenu({ anchorRef }: { anchorRef: React.RefObject<HTMLButtonElement
     if (copyStatus === 'copying') return;
     setCopyStatus('copying');
     try {
-      const state = useStore.getState().getSerializableState();
-      const { encoded, hasCustomSamples: hcs } = await encodeSetToUrl(state);
+      const store = useStore.getState();
+      const state = store.getSerializableState();
+      const { encoded, hasCustomSamples: hcs } = await encodeSetToUrl(state, store.currentSetName);
       setHasCustomSamples(hcs);
       await navigator.clipboard.writeText(buildShareUrl(encoded));
       setCopyStatus('copied');

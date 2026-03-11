@@ -64,11 +64,14 @@ function fromBase64Url(str: string): Uint8Array {
  * Encode a serializable state into a gzip-compressed, base64url-encoded string.
  * Custom samples are excluded from the URL (embedSamples: false) to keep the hash short.
  */
-export async function encodeSetToUrl(state: Parameters<typeof serializeSet>[0]): Promise<EncodeResult> {
+export async function encodeSetToUrl(
+  state: Parameters<typeof serializeSet>[0],
+  projectName?: string,
+): Promise<EncodeResult> {
   const hasCustomSamples = state.customSamples.length > 0;
 
   const set = await serializeSet(state, {
-    name: 'shared',
+    name: projectName || 'Shared Track',
     embedSamples: false,
     includeInstruments: true,
     includeEffects: true,
