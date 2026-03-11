@@ -116,19 +116,11 @@ function AddInstrumentCard() {
 
   return (
     <div
-      className="knob-cell flex flex-col items-center gap-2 p-3 rounded-lg select-none"
-      style={{ border: '1px dashed rgba(255,255,255,0.08)' }}
+      className="knob-cell flex flex-col items-center justify-center gap-4 p-4 rounded-lg select-none"
+      style={{ background: 'rgba(255,255,255,0.08)', border: 'none' }}
     >
-      {/* "Add" label — top */}
-      <span className="text-[9px] text-white/30 tracking-wider uppercase self-center">Add</span>
-
-      {/* Center "+" icon */}
-      <div className="w-full flex-1 flex items-center justify-center">
-        <span className="text-4xl text-white/20 leading-none">+</span>
-      </div>
-
-      {/* 3 pill buttons */}
-      <div className="w-full flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+      {/* 3 big buttons */}
+      <div className="w-full flex flex-col gap-2.5" onClick={(e) => e.stopPropagation()}>
         {([
           { type: 'synth' as const,   label: '+ Synth' },
           { type: 'sampler' as const, label: '+ Sampler' },
@@ -137,16 +129,22 @@ function AddInstrumentCard() {
           <button
             key={type}
             onClick={() => createInstrument(type)}
-            className="text-[10px] uppercase tracking-wider transition-all cursor-pointer font-medium w-full"
+            className="text-[13px] uppercase tracking-wider transition-all cursor-pointer font-medium w-full"
             style={{
-              color: '#888',
-              border: 'none',
-              background: 'rgba(0,0,0,0.3)',
-              padding: '6px 12px',
-              borderRadius: '16px',
+              color: '#999',
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.04)',
+              padding: '12px 16px',
+              borderRadius: '6px',
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.45)')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(0,0,0,0.3)')}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+              e.currentTarget.style.color = '#aaa';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+              e.currentTarget.style.color = '#999';
+            }}
           >
             {label}
           </button>
