@@ -23,6 +23,8 @@ jobs:
 
       - run: npm ci
       - run: npx vite build
+        env:
+          VITE_SAMPLE_CDN: ${{ vars.VITE_SAMPLE_CDN }}
 
       - name: Deploy to gh-pages branch
         uses: peaceiris/actions-gh-pages@v4

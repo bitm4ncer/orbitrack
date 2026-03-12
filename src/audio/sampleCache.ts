@@ -1,5 +1,6 @@
 import { loadBuffer, getAudioContext as getSdAudioContext } from 'superdough';
 import { registerSampleForPlayback } from './engine';
+import { SAMPLE_BASE_URL } from './sampleBaseUrl';
 import type { SampleEntry } from './sampleApi';
 
 const MAX_CACHE = 50;
@@ -56,7 +57,7 @@ export async function preloadSample(path: string): Promise<void> {
     const sdKey = registerSampleForPlayback(path);
     const ac = getSdAudioContext();
     if (!ac) { loaded.delete(path); return; }
-    const base = window.location.origin + import.meta.env.BASE_URL;
+    const base = SAMPLE_BASE_URL;
     await loadBuffer(`${base}${path}`, ac, sdKey, 0);
   } catch {
     loaded.delete(path); // don't count failed loads

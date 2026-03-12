@@ -287,7 +287,8 @@ export async function restoreLegacyAutosave(): Promise<boolean> {
     setOrbitCounter(maxOrbit);
 
     // Re-init looper editors — async decode + BPM detection
-    const baseUrl = ((import.meta.env.BASE_URL as string) ?? '/').replace(/\/$/, '') + '/';
+    const { SAMPLE_BASE_URL } = await import('../audio/sampleBaseUrl');
+    const baseUrl = SAMPLE_BASE_URL;
     for (const inst of data.instruments) {
       if (inst.type === 'looper' && inst.samplePath) {
         const custom = customSamples.find((c) => c.key === inst.samplePath);

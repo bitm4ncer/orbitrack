@@ -155,15 +155,24 @@ export function sampleListPlugin(): Plugin {
     },
     closeBundle() {
       if (!isBuild) return;
-      // Copy root samples/ into dist/samples/
-      const rootSamples = path.join(rootDir, 'samples');
-      const distSamples = path.join(outDir, 'samples');
-      copyDirSync(rootSamples, distSamples);
 
-      // Copy root loops/ into dist/loops/
-      const rootLoops = path.join(rootDir, 'loops');
-      const distLoops = path.join(outDir, 'loops');
-      copyDirSync(rootLoops, distLoops);
+      const hasCdn = !!process.env.VITE_SAMPLE_CDN;
+
+      if (hasCdn) {
+        // CDN mode: only copy Default/ samples as fallback
+        const defaultSrc = path.join(rootDir, 'samples', 'Default');
+        const defaultDest = path.join(outDir, 'samples', 'Default');
+        copyDirSync(defaultSrc, defaultDest);
+      } else {
+        // No CDN: copy everything (local / dev builds)
+        const rootSamples = path.join(rootDir, 'samples');
+        const distSamples = path.join(outDir, 'samples');
+        copyDirSync(rootSamples, distSamples);
+
+        const rootLoops = path.join(rootDir, 'loops');
+        const distLoops = path.join(outDir, 'loops');
+        copyDirSync(rootLoops, distLoops);
+      }
     },
   };
 }

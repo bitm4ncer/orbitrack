@@ -2,6 +2,7 @@ import * as Tone from 'tone';
 import { samples, loadBuffer, getAudioContext as getSdAudioContext, loadWorklets } from 'superdough';
 import { initRoutingEngine } from './routingEngine';
 import { initSceneBusesFromState } from './sceneBus';
+import { SAMPLE_BASE_URL } from './sampleBaseUrl';
 
 let initialized = false;
 
@@ -35,7 +36,7 @@ console.log = (...args: unknown[]) => {
 // superdough looks up `s: 'kick'` etc. in its internal soundMap — without this
 // registration those sounds are never found and playback silently fails.
 samples({
-  _base: window.location.origin + import.meta.env.BASE_URL,
+  _base: SAMPLE_BASE_URL,
   kick: 'samples/Default/kick.wav',
   snare: 'samples/Default/snare.wav',
   hihat: 'samples/Default/hihat.wav',
@@ -83,7 +84,7 @@ export async function initAudio(): Promise<void> {
 
   // Pre-decode all default samples into superdough's buffer cache so the
   // first note plays immediately without a loading delay.
-  const base = window.location.origin + import.meta.env.BASE_URL;
+  const base = SAMPLE_BASE_URL;
   const ac = getSdAudioContext();
   await Promise.all(
     Object.entries(DEFAULT_SAMPLES).map(([name, path]) => loadBuffer(`${base}${path}`, ac, name, 0))
@@ -120,7 +121,7 @@ export function registerSampleForPlayback(pathOrUrl: string, blobUrl?: string): 
     samples({ _base: '', [key]: blobUrl });
   } else {
     samples({
-      _base: window.location.origin + import.meta.env.BASE_URL,
+      _base: SAMPLE_BASE_URL,
       [key]: pathOrUrl,
     });
   }

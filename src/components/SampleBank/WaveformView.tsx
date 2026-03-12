@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as Tone from 'tone';
+import { SAMPLE_BASE_URL } from '../../audio/sampleBaseUrl';
 
 interface WaveformViewProps {
   sampleUrl: string;
@@ -32,10 +33,9 @@ export function WaveformView({ sampleUrl, begin, end, attack = 0, color = '#7dd3
     setPeaks(null);
 
     const ctx = Tone.getContext().rawContext as AudioContext;
-    const baseUrl = (import.meta.env.BASE_URL as string) ?? '/';
     const url = sampleUrl.startsWith('blob:') || sampleUrl.startsWith('http')
       ? sampleUrl
-      : baseUrl.replace(/\/$/, '') + '/' + sampleUrl;
+      : SAMPLE_BASE_URL + sampleUrl;
 
     fetch(url)
       .then((r) => r.arrayBuffer())
