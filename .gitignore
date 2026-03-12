@@ -3,3 +3,7 @@ dist
 .vite
 *.local
 *.
+
+# Audio assets served from CDN
+loops/
+samples/
