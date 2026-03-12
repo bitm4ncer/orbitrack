@@ -9,7 +9,7 @@ import { FilesMenu } from './FilesMenu';
 import { SettingsPopup } from './SettingsPopup';
 import { encodeSetToUrl, buildShareUrl, exportSamplesZip, importSamplesZip } from '../../storage/urlShare';
 import { MidiLight } from './MidiLight';
-const orbeatLogo = `${import.meta.env.BASE_URL}ORBEAT_Logo.svg`;
+const orbeatLogo = `${import.meta.env.BASE_URL}orbitrack_logo.svg`;
 
 const SHORTCUTS = [
   { key: 'Space', action: 'Play / Stop' },
