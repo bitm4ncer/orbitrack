@@ -1,4 +1,4 @@
-import { useState, useMemo, useReducer } from 'react';
+import { useState, useMemo, useReducer, useEffect, useRef } from 'react';
 import { useStore } from '../../state/store';
 import { getSynthEngine } from '../../audio/synthManager';
 import type { SynthParams, LFODestination } from '../../audio/synth/types';
@@ -100,13 +100,31 @@ export function SynthPanel() {
   const engine = useMemo(() => {
     if (!instrument || instrument.type !== 'synth') return null;
     try { return getSynthEngine(instrument.id, instrument.orbitIndex, instrument.engineParams); }
-    catch { return null; }
+    catch (e) { console.error('[SynthPanel] Failed to create engine:', e); return null; }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instrument?.id, instrument?.orbitIndex]);
 
   // Force re-render when a param is mutated directly on the engine.
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
   const updateEngineParams = useStore((s) => s.updateEngineParams);
+
+  // Track the engineParams ref we last wrote, so we can detect external changes
+  // (undo/redo/preset load) and sync them back to the live engine.
+  const lastWrittenParams = useRef<SynthParams | null>(null);
+  const storeEngineParams = instrument?.type === 'synth' ? instrument.engineParams : undefined;
+
+  useEffect(() => {
+    if (!engine || !storeEngineParams) return;
+    // If the store's engineParams changed but we didn't write them, it's an external
+    // update (undo/redo/set load) — re-apply all params to the live engine.
+    if (storeEngineParams !== lastWrittenParams.current) {
+      for (const key of Object.keys(storeEngineParams) as (keyof SynthParams)[]) {
+        engine.setParam(key, storeEngineParams[key] as never);
+      }
+      lastWrittenParams.current = storeEngineParams;
+      forceUpdate();
+    }
+  }, [engine, storeEngineParams]);
 
   // Track selected preset name from presetStore
   const selectedPresetId = usePresetStore((s) => s.selectedPresetId);
@@ -120,7 +138,9 @@ export function SynthPanel() {
 
   const set = <K extends keyof SynthParams>(key: K, value: SynthParams[K]) => {
     engine.setParam(key, value);
-    updateEngineParams(instrument.id, engine.getParams());
+    const newParams = engine.getParams();
+    lastWrittenParams.current = newParams;
+    updateEngineParams(instrument.id, newParams);
     forceUpdate();
   };
 

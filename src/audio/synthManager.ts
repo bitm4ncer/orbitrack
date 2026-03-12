@@ -7,6 +7,7 @@ interface EngineEntry {
   engine: SynthEngine;
   orbitIndex: number;
   connected: boolean;
+  paramsApplied: boolean; // true once initialParams have been applied (avoid re-applying every note)
 }
 
 const engines: Map<string, EngineEntry> = new Map();
@@ -15,11 +16,12 @@ export function getSynthEngine(instrumentId: string, orbitIndex: number, initial
   const existing = engines.get(instrumentId);
 
   if (existing) {
-    // Re-apply params if provided (e.g. restore from autosave on page reload)
-    if (initialParams) {
+    // Apply saved params only once (first call with initialParams after engine creation)
+    if (initialParams && !existing.paramsApplied) {
       for (const key of Object.keys(initialParams) as (keyof SynthParams)[]) {
         existing.engine.setParam(key, initialParams[key] as never);
       }
+      existing.paramsApplied = true;
     }
     // Reconnect if not yet connected (audio wasn't ready at creation time) or orbit changed
     if (!existing.connected || existing.orbitIndex !== orbitIndex) {
@@ -28,9 +30,11 @@ export function getSynthEngine(instrumentId: string, orbitIndex: number, initial
         if (existing.connected) {
           try { existing.engine.getOutputNode().disconnect(); } catch { /* ignore */ }
         }
-        existing.engine.getOutputNode().connect(orbitInput);
-        existing.orbitIndex = orbitIndex;
-        existing.connected = true;
+        try {
+          existing.engine.getOutputNode().connect(orbitInput);
+          existing.orbitIndex = orbitIndex;
+          existing.connected = true;
+        } catch { /* cross-context or not-ready — will retry on next call */ }
       }
     }
     return existing.engine;
@@ -46,8 +50,12 @@ export function getSynthEngine(instrumentId: string, orbitIndex: number, initial
 
   // Restore saved params if provided (e.g. from autosave / set load)
   if (initialParams) {
-    for (const key of Object.keys(initialParams) as (keyof SynthParams)[]) {
-      engine.setParam(key, initialParams[key] as never);
+    try {
+      for (const key of Object.keys(initialParams) as (keyof SynthParams)[]) {
+        engine.setParam(key, initialParams[key] as never);
+      }
+    } catch (e) {
+      console.warn('[synthManager] Error restoring params:', e);
     }
   }
 
@@ -55,11 +63,15 @@ export function getSynthEngine(instrumentId: string, orbitIndex: number, initial
   const orbitInput = getSynthOrbitInput(orbitIndex);
   let connected = false;
   if (orbitInput) {
-    engine.getOutputNode().connect(orbitInput);
-    connected = true;
+    try {
+      engine.getOutputNode().connect(orbitInput);
+      connected = true;
+    } catch {
+      // Orbit node may be on a different context if audio isn't fully initialized
+    }
   }
 
-  engines.set(instrumentId, { engine, orbitIndex, connected });
+  engines.set(instrumentId, { engine, orbitIndex, connected, paramsApplied: !!initialParams });
   return engine;
 }
 
