@@ -26,6 +26,22 @@ let _instrRef: unknown = null;
 let _maxLoopSize = 1;
 let _anySolo = false;
 
+// Pre-allocated per-tick buffer — avoids creating a new object every tick.
+const _instProgress: Record<string, number> = {};
+
+// Per-instrument loopHits cache — recomputed only when hitPositions ref changes.
+const _loopHitsCache = new Map<string, { ref: readonly number[]; loopIn: number; loopOut: number; sorted: number[] }>();
+
+// Per-instrument sorted hitPositions cache (non-looper path).
+const _sortedHitsMap = new Map<string, { ref: readonly number[]; sorted: number[] }>();
+
+// Track Mode: cached active-scene instrument set — rebuilt when scenes/arrangement ref changes.
+let _trackSceneRef: unknown = null;
+let _trackArrangementRef: unknown = null;
+let _trackActiveSceneIdsCache: Set<string> | null = null;
+let _trackInAnySceneCache: Set<string> | null = null;
+let _trackCachedArrangementIdx = -1;
+
 // Track Mode variables — incremented each _tick to track arrangement progression
 let _currentArrangementIdx = 0;
 let _stepLoopCount = 0;  // full loops of _maxLoopSize elapsed in current arrangement step
@@ -179,7 +195,14 @@ export function stopTransport(): void {
   _lastApplied.clear();
   _lastSceneApplied.clear();
   _lastSceneState.clear();
+  _loopHitsCache.clear();
+  _sortedHitsMap.clear();
   _instrRef = null;
+  _trackSceneRef = null;
+  _trackArrangementRef = null;
+  _trackActiveSceneIdsCache = null;
+  _trackInAnySceneCache = null;
+  _trackCachedArrangementIdx = -1;
   _currentArrangementIdx = 0;
   _stepLoopCount = 0;
 
@@ -214,6 +237,14 @@ export function getGlobalStep(): number {
 
 export function getStepsPerBeat(): number {
   return useStore.getState().stepsPerBeat;
+}
+
+/** Remove cached data for a deleted instrument — prevents stale Map entries from leaking. */
+export function cleanupInstrumentCache(id: string): void {
+  _lastFired.delete(id);
+  _lastApplied.delete(id);
+  _loopHitsCache.delete(id);
+  _sortedHitsMap.delete(id);
 }
 
 function tick(time: number): void {
@@ -274,25 +305,51 @@ function _tick(time: number): void {
     _pos.dirty = true;
   }
 
-  // Per-instrument progress
-  const instProgress: Record<string, number> = {};
+  // Reuse pre-allocated instProgress — clear old keys, then fill.
+  for (const k in _instProgress) delete _instProgress[k];
+
+  // Track Mode: cache active-scene instrument sets (rebuilt only when refs change)
+  let activeSceneInstIds: Set<string> | null = null;
+  let inAnySceneIds: Set<string> | null = null;
+  if (state.trackMode && state.arrangement.length > 0) {
+    if (
+      state.scenes !== _trackSceneRef ||
+      state.arrangement !== _trackArrangementRef ||
+      _currentArrangementIdx !== _trackCachedArrangementIdx
+    ) {
+      _trackSceneRef = state.scenes;
+      _trackArrangementRef = state.arrangement;
+      _trackCachedArrangementIdx = _currentArrangementIdx;
+
+      const activeSceneId = state.arrangement[_currentArrangementIdx]?.sceneId;
+      const activeScene = state.scenes.find((s) => s.id === activeSceneId);
+      _trackActiveSceneIdsCache = activeScene
+        ? new Set(activeScene.instrumentIds)
+        : new Set();
+
+      const anySet = new Set<string>();
+      for (const s of state.scenes) {
+        for (const id of s.instrumentIds) anySet.add(id);
+      }
+      _trackInAnySceneCache = anySet;
+    }
+    activeSceneInstIds = _trackActiveSceneIdsCache;
+    inAnySceneIds = _trackInAnySceneCache;
+  }
 
   for (const instrument of state.instruments) {
     const loopSize = instrument.loopSize;
 
     // Per-instrument progress (0-1) within its own loop
-    instProgress[instrument.id] = (globalStep % loopSize) / loopSize;
+    _instProgress[instrument.id] = (globalStep % loopSize) / loopSize;
 
     if (_anySolo && !instrument.solo) continue;
     if (instrument.muted && !instrument.solo) continue;
 
-    // Track Mode: mute instruments not in the active scene
-    if (state.trackMode && state.arrangement.length > 0) {
-      const activeSceneId = state.arrangement[_currentArrangementIdx]?.sceneId;
-      const activeScene = state.scenes.find((s) => s.id === activeSceneId);
-      const inAnyScene = state.scenes.some((s) => s.instrumentIds.includes(instrument.id));
-      // Play if: in active scene, OR in no scene at all (global instrument)
-      if (inAnyScene && !activeScene?.instrumentIds.includes(instrument.id)) continue;
+    // Track Mode: mute instruments not in the active scene (O(1) Set lookup)
+    if (activeSceneInstIds && inAnySceneIds) {
+      const inAny = inAnySceneIds.has(instrument.id);
+      if (inAny && !activeSceneInstIds.has(instrument.id)) continue;
     }
 
     const { hitPositions, hits } = instrument;
@@ -316,17 +373,23 @@ function _tick(time: number): void {
       const hasLoopRegion = loopIn > 0 || loopOut < 1;
 
       if (hasLoopRegion) {
-        // Collect and sort hits within the loop region
-        const loopHits: number[] = [];
-        for (const hp of hitPositions) {
-          if (hp >= loopIn - 0.001 && hp <= loopOut + 0.001) {
-            loopHits.push(hp);
+        // Use cached loopHits — recompute only when hitPositions/loopIn/loopOut change.
+        const cached = _loopHitsCache.get(instrument.id);
+        let loopHits: number[];
+        if (cached && cached.ref === hitPositions && cached.loopIn === loopIn && cached.loopOut === loopOut) {
+          loopHits = cached.sorted;
+        } else {
+          loopHits = [];
+          for (const hp of hitPositions) {
+            if (hp >= loopIn - 0.001 && hp <= loopOut + 0.001) {
+              loopHits.push(hp);
+            }
           }
+          loopHits.sort((a, b) => a - b);
+          _loopHitsCache.set(instrument.id, { ref: hitPositions, loopIn, loopOut, sorted: loopHits });
         }
 
         if (loopHits.length > 0) {
-          loopHits.sort((a, b) => a - b);
-
           const regionSize = loopOut - loopIn;
           const regionSteps = Math.max(1, Math.round(regionSize * loopSize));
 
@@ -357,7 +420,7 @@ function _tick(time: number): void {
           }
 
           // Update progress to cycle the playhead within the loop region
-          instProgress[instrument.id] = loopIn + (loopRelStep / regionSteps) * regionSize;
+          _instProgress[instrument.id] = loopIn + (loopRelStep / regionSteps) * regionSize;
         }
 
         continue; // Skip normal hit iteration for this instrument
@@ -365,8 +428,6 @@ function _tick(time: number): void {
     }
 
     // ── Normal hit processing (non-loopers and loopers without loop region) ──
-    let sortedHitsCache: number[] | null = null;
-
     for (let i = 0; i < hitPositions.length; i++) {
       const hitPos = hitPositions[i];
       const hitStep = Math.round(hitPos * loopSize) % loopSize;
@@ -377,13 +438,18 @@ function _tick(time: number): void {
         fired.set(i, globalStep);
 
         if (instrument.type === 'looper') {
-          // No loop region — play all hits normally
-          if (sortedHitsCache === null) {
-            sortedHitsCache = [...hitPositions].sort((a, b) => a - b);
+          // Use cached sorted hits — recompute only when hitPositions ref changes.
+          const sc = _sortedHitsMap.get(instrument.id);
+          let sorted: number[];
+          if (sc && sc.ref === hitPositions) {
+            sorted = sc.sorted;
+          } else {
+            sorted = [...hitPositions].sort((a, b) => a - b);
+            _sortedHitsMap.set(instrument.id, { ref: hitPositions, sorted });
           }
-          const sortedIdx = sortedHitsCache.indexOf(hitPos);
+          const sortedIdx = sorted.indexOf(hitPos);
           if (sortedIdx >= 0) {
-            triggerLooperSlice(instrument, sortedIdx, sortedHitsCache, secondsPerStep, time, state);
+            triggerLooperSlice(instrument, sortedIdx, sorted, secondsPerStep, time, state);
           }
         } else {
           const notes = state.gridNotes[instrument.id]?.[i];
@@ -405,6 +471,6 @@ function _tick(time: number): void {
   // Write position to buffer — the rAF loop will flush to Zustand at ~60 fps.
   _pos.progress = progress;
   _pos.currentStep = currentStep;
-  _pos.instProgress = instProgress;
+  _pos.instProgress = _instProgress;
   _pos.dirty = true;
 }

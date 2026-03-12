@@ -143,9 +143,32 @@ export function bufferToWavBlob(buf: AudioBuffer): Blob {
   return new Blob([arrayBuffer], { type: 'audio/wav' });
 }
 
-/** Create a blob URL from an AudioBuffer (WAV encoded). */
-export function bufferToBlobUrl(buf: AudioBuffer): string {
-  return URL.createObjectURL(bufferToWavBlob(buf));
+// Track blob URLs per sample key so we can revoke old ones and prevent leaks.
+const _activeBlobUrls = new Map<string, string>();
+
+/**
+ * Create a blob URL from an AudioBuffer (WAV encoded).
+ * If `trackingKey` is provided, revokes the previous blob URL for that key.
+ */
+export function bufferToBlobUrl(buf: AudioBuffer, trackingKey?: string): string {
+  if (trackingKey) {
+    const prev = _activeBlobUrls.get(trackingKey);
+    if (prev) {
+      try { URL.revokeObjectURL(prev); } catch { /* ignore */ }
+    }
+  }
+  const url = URL.createObjectURL(bufferToWavBlob(buf));
+  if (trackingKey) _activeBlobUrls.set(trackingKey, url);
+  return url;
+}
+
+/** Revoke and forget a tracked blob URL (e.g. when instrument is removed). */
+export function revokeBlobUrl(trackingKey: string): void {
+  const url = _activeBlobUrls.get(trackingKey);
+  if (url) {
+    try { URL.revokeObjectURL(url); } catch { /* ignore */ }
+    _activeBlobUrls.delete(trackingKey);
+  }
 }
 
 function writeString(view: DataView, offset: number, str: string): void {

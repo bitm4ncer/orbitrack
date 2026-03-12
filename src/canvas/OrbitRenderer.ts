@@ -257,11 +257,22 @@ export class OrbitRenderer {
 
   // --- Hit detection for mouse interaction ---
 
+  private _layoutCacheRef: unknown = null;
+  private _layoutCacheSpacing = 0;
+  private _layoutCache: Array<{ inst: Instrument; radius: number }> = [];
+
   private getOrderedLayout(): Array<{ inst: Instrument; radius: number }> {
     const { instruments } = useStore.getState();
     const { ringSpacing } = this.layout;
+    // Recompute only when instruments ref or ringSpacing changes
+    if (instruments === this._layoutCacheRef && ringSpacing === this._layoutCacheSpacing) {
+      return this._layoutCache;
+    }
+    this._layoutCacheRef = instruments;
+    this._layoutCacheSpacing = ringSpacing;
     const sorted = [...instruments].sort((a, b) => a.loopSize - b.loopSize);
-    return sorted.map((inst, si) => ({ inst, radius: ringSpacing * (si + 1) }));
+    this._layoutCache = sorted.map((inst, si) => ({ inst, radius: ringSpacing * (si + 1) }));
+    return this._layoutCache;
   }
 
   getHitAt(mouseX: number, mouseY: number): { instrumentId: string; hitIndex: number } | null {

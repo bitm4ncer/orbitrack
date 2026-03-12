@@ -105,6 +105,9 @@ export function undo(): void {
   if (past.length === 0) return;
 
   future.push(currentSnapshot!);
+  if (future.length > MAX_HISTORY) {
+    future = future.slice(future.length - MAX_HISTORY);
+  }
   currentSnapshot = past.pop()!;
 
   isProgrammaticUpdate = true;
@@ -116,6 +119,9 @@ export function redo(): void {
   if (future.length === 0) return;
 
   past.push(currentSnapshot!);
+  if (past.length > MAX_HISTORY) {
+    past = past.slice(past.length - MAX_HISTORY);
+  }
   currentSnapshot = future.pop()!;
 
   isProgrammaticUpdate = true;

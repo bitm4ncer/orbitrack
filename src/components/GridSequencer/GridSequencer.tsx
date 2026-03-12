@@ -394,138 +394,211 @@ export function GridSequencer() {
       return;
     }
 
-    // If clicking an unselected note without Ctrl, clear selection first
+    // Multi-select drag: if note is part of a selection with >1 notes, drag them all
+    const isMultiDrag = isSelected && selectedNotes.size > 1;
+
+    // If clicking an unselected note without Ctrl, clear selection
     if (!isSelected) {
       setSelectedNotes(new Set());
     }
 
     const colWidth = gridBodyRef.current ? gridBodyRef.current.clientWidth / totalSteps : 1;
-    let currentStep = stepIndex;
-    const hitIdx = stepToHit.get(stepIndex);
-    if (hitIdx === undefined) return;
 
-    dragRef.current = {
-      mode: 'move',
-      hitIndex: hitIdx,
-      origHitIndex: hitIdx,
-      midiNote,
-      startY: e.clientY,
-      startNote: midiNote,
-      startX: e.clientX,
-      startLength: getNoteLength(hitIdx),
-      colWidth,
-    };
+    if (isMultiDrag) {
+      // ── Multi-note batch drag ──────────────────────────────────────
+      // Collect the notes in the current selection
+      const batchNotes = [...selectedNotes].map(parseNoteKey);
+      let cumStepDelta = 0;
+      let cumPitchDelta = 0;
 
-    const handleMouseMove = (ev: MouseEvent) => {
-      const drag = dragRef.current;
-      if (!drag) return;
-
-      // Vertical drag: change pitch (absolute from original start, scale-aware)
-      const dy = ev.clientY - drag.startY;
-      const rowDelta = Math.round(dy / ROW_H);
-      const startRowIdx = rows.indexOf(drag.startNote);
-      const targetRowIdx = startRowIdx === -1 ? -1 : Math.max(0, Math.min(rows.length - 1, startRowIdx + rowDelta));
-      const targetNote = targetRowIdx >= 0 ? rows[targetRowIdx] : undefined;
-      if (targetNote !== undefined && targetNote !== drag.midiNote) {
-        if (isSampler) {
-          const state = useStore.getState();
-          const inst = state.instruments.find((i) => i.id === instrument.id);
-          if (!inst) return;
-          const freshMap = new Map<number, number>();
-          for (let i = 0; i < inst.hitPositions.length; i++) {
-            const s = Math.round(inst.hitPositions[i] * totalSteps) % totalSteps;
-            freshMap.set(s, i);
-          }
-          const freshHitIdx = freshMap.get(currentStep);
-          if (freshHitIdx !== undefined) {
-            state.moveGridNote(instrument.id, freshHitIdx, drag.midiNote, targetNote);
-            drag.hitIndex = freshHitIdx;
-          }
-        } else {
-          useStore.getState().moveGridNote(instrument.id, drag.hitIndex, drag.midiNote, targetNote);
+      const handleMouseMove = (ev: MouseEvent) => {
+        // Step delta (horizontal)
+        const dx = ev.clientX - e.clientX;
+        let newStepDelta = Math.round(dx / colWidth);
+        if (snapEnabled && gridRes > 1) {
+          newStepDelta = Math.round(newStepDelta / gridRes) * gridRes;
         }
-        drag.midiNote = targetNote;
-      }
 
-      // Horizontal drag: move to different step
-      {
-        const dx = ev.clientX - drag.startX;
-        const stepDelta = Math.round(dx / drag.colWidth);
-        const rawStep = stepIndex + stepDelta;
-        const newStep = snapEnabled
-          ? snapStep(rawStep, gridRes, totalSteps - 1)
-          : Math.max(0, Math.min(totalSteps - 1, rawStep));
-        if (newStep !== currentStep) {
-          useStore.getState().moveSamplerNoteToStep(
-            instrument.id, currentStep, newStep, drag.midiNote,
-          );
-          currentStep = newStep;
+        // Pitch delta (vertical, scale-aware rows)
+        const dy = ev.clientY - e.clientY;
+        const rowDelta = Math.round(dy / ROW_H);
+        const anchorRowIdx = rows.indexOf(midiNote);
+        const targetRowIdx = anchorRowIdx === -1 ? anchorRowIdx : Math.max(0, Math.min(rows.length - 1, anchorRowIdx + rowDelta));
+        const newPitchDelta = targetRowIdx >= 0 ? rows[targetRowIdx] - midiNote : 0;
+
+        const dStep = newStepDelta - cumStepDelta;
+        const dPitch = newPitchDelta - cumPitchDelta;
+
+        if (dStep !== 0 || dPitch !== 0) {
+          // Update batch positions
+          const currentBatch = batchNotes.map((n) => ({ step: n.step, midi: n.midi }));
+          useStore.getState().moveNotesBatch(instrument.id, currentBatch, dStep, dPitch);
+
+          // Update tracked positions
+          for (const n of batchNotes) {
+            n.step = ((n.step + dStep) % totalSteps + totalSteps) % totalSteps;
+            n.midi = n.midi + dPitch;
+          }
+          cumStepDelta = newStepDelta;
+          cumPitchDelta = newPitchDelta;
+
+          // Update selection keys to match new positions
+          setSelectedNotes(new Set(batchNotes.map((n) => noteKey(n.step, n.midi))));
         }
-      }
-    };
+      };
 
-    const handleMouseUp = () => {
-      dragRef.current = null;
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
+      const handleMouseUp = () => {
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    } else {
+      // ── Single-note drag (original behavior) ──────────────────────
+      let currentStep = stepIndex;
+      const hitIdx = stepToHit.get(stepIndex);
+      if (hitIdx === undefined) return;
+
+      dragRef.current = {
+        mode: 'move',
+        hitIndex: hitIdx,
+        origHitIndex: hitIdx,
+        midiNote,
+        startY: e.clientY,
+        startNote: midiNote,
+        startX: e.clientX,
+        startLength: getNoteLength(hitIdx),
+        colWidth,
+      };
+
+      const handleMouseMove = (ev: MouseEvent) => {
+        const drag = dragRef.current;
+        if (!drag) return;
+
+        // Vertical drag: change pitch
+        const dy = ev.clientY - drag.startY;
+        const rowDelta = Math.round(dy / ROW_H);
+        const startRowIdx = rows.indexOf(drag.startNote);
+        const targetRowIdx = startRowIdx === -1 ? -1 : Math.max(0, Math.min(rows.length - 1, startRowIdx + rowDelta));
+        const targetNote = targetRowIdx >= 0 ? rows[targetRowIdx] : undefined;
+        if (targetNote !== undefined && targetNote !== drag.midiNote) {
+          if (isSampler) {
+            const state = useStore.getState();
+            const inst = state.instruments.find((i) => i.id === instrument.id);
+            if (!inst) return;
+            const freshMap = new Map<number, number>();
+            for (let i = 0; i < inst.hitPositions.length; i++) {
+              const s = Math.round(inst.hitPositions[i] * totalSteps) % totalSteps;
+              freshMap.set(s, i);
+            }
+            const freshHitIdx = freshMap.get(currentStep);
+            if (freshHitIdx !== undefined) {
+              state.moveGridNote(instrument.id, freshHitIdx, drag.midiNote, targetNote);
+              drag.hitIndex = freshHitIdx;
+            }
+          } else {
+            useStore.getState().moveGridNote(instrument.id, drag.hitIndex, drag.midiNote, targetNote);
+          }
+          drag.midiNote = targetNote;
+        }
+
+        // Horizontal drag: move to different step
+        {
+          const dx = ev.clientX - drag.startX;
+          const stepDelta = Math.round(dx / drag.colWidth);
+          const rawStep = stepIndex + stepDelta;
+          const newStep = snapEnabled
+            ? snapStep(rawStep, gridRes, totalSteps - 1)
+            : Math.max(0, Math.min(totalSteps - 1, rawStep));
+          if (newStep !== currentStep) {
+            useStore.getState().moveSamplerNoteToStep(
+              instrument.id, currentStep, newStep, drag.midiNote,
+            );
+            currentStep = newStep;
+          }
+        }
+      };
+
+      const handleMouseUp = () => {
+        dragRef.current = null;
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', handleMouseUp);
+      };
+
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
   };
 
-  // ── Rubber-band selection ────────────────────────────────────────────
+  // ── Grid mousedown: rubber-band selection OR click-to-place note ─────
   const handleGridMouseDown = (e: React.MouseEvent) => {
-    // Only start selection on the grid background (not on notes)
-    if (e.target !== e.currentTarget) return;
     if (e.button !== 0) return;
+    // Note blocks call stopPropagation, so this only fires on the grid background / cells
+    e.preventDefault();
 
     const rect = gridBodyRef.current?.getBoundingClientRect();
     if (!rect) return;
 
     const startX = e.clientX - rect.left;
     const startY = e.clientY - rect.top;
-
-    const newRect: SelectionRect = { startX, startY, currentX: startX, currentY: startY };
-    selRectRef.current = newRect;
-    setSelectionRect(newRect);
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    let didDrag = false;
 
     if (!e.ctrlKey && !e.metaKey) {
       setSelectedNotes(new Set());
     }
 
     const handleMouseMove = (ev: MouseEvent) => {
-      if (!selRectRef.current || !rect) return;
-      const updated = {
-        ...selRectRef.current,
-        currentX: ev.clientX - rect.left,
-        currentY: ev.clientY - rect.top,
-      };
-      selRectRef.current = updated;
-      setSelectionRect(updated);
+      const dx = ev.clientX - startClientX;
+      const dy = ev.clientY - startClientY;
+      if (!didDrag && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+        didDrag = true;
+        // Start rubber-band rect
+        const newRect: SelectionRect = { startX, startY, currentX: startX, currentY: startY };
+        selRectRef.current = newRect;
+        setSelectionRect(newRect);
+      }
+      if (didDrag && selRectRef.current) {
+        const updated = {
+          ...selRectRef.current,
+          currentX: ev.clientX - rect.left,
+          currentY: ev.clientY - rect.top,
+        };
+        selRectRef.current = updated;
+        setSelectionRect(updated);
+      }
     };
 
     const handleMouseUp = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
 
-      const sr = selRectRef.current;
-      if (!sr || !gridBodyRef.current) {
+      if (!didDrag) {
+        // Short click — add/toggle note at the clicked cell position
+        const colWidth = gridBodyRef.current ? gridBodyRef.current.clientWidth / totalSteps : 1;
+        const topOffset = isSynth ? 14 : 0;
+        const clickedStep = Math.floor(startX / colWidth);
+        const clickedRowIdx = Math.floor((startY - topOffset) / ROW_H);
+        if (clickedStep >= 0 && clickedStep < totalSteps && clickedRowIdx >= 0 && clickedRowIdx < rows.length) {
+          handleCellClick(clickedStep, rows[clickedRowIdx]);
+        }
         setSelectionRect(null);
         selRectRef.current = null;
         return;
       }
 
-      // Calculate selection bounds
-      const rx1 = Math.min(sr.startX, sr.currentX);
-      const rx2 = Math.max(sr.startX, sr.currentX);
-      const ry1 = Math.min(sr.startY, sr.currentY);
-      const ry2 = Math.max(sr.startY, sr.currentY);
+      // Rubber-band selection — find notes inside the rect
+      const sr = selRectRef.current;
+      if (sr && gridBodyRef.current) {
+        const rx1 = Math.min(sr.startX, sr.currentX);
+        const rx2 = Math.max(sr.startX, sr.currentX);
+        const ry1 = Math.min(sr.startY, sr.currentY);
+        const ry2 = Math.max(sr.startY, sr.currentY);
 
-      // Only select if dragged more than 4px
-      if (rx2 - rx1 > 4 || ry2 - ry1 > 4) {
         const colWidth = gridBodyRef.current.clientWidth / totalSteps;
-        const topOffset = isSynth ? 14 : 0; // glide row offset for synth
+        const topOffset = isSynth ? 14 : 0;
         const newSelected = new Set<string>(e.ctrlKey || e.metaKey ? selectedNotes : undefined);
 
         for (const [step, hitIdx] of stepToHit.entries()) {
@@ -534,12 +607,10 @@ export function GridSequencer() {
           for (const midi of hitNotes) {
             const rowIdx = rows.indexOf(midi);
             if (rowIdx === -1) continue;
-            // Note pixel bounds
             const nx1 = step * colWidth;
             const ny1 = topOffset + rowIdx * ROW_H;
             const nx2 = nx1 + colWidth * noteLen;
             const ny2 = ny1 + ROW_H;
-            // AABB intersection
             if (nx1 < rx2 && nx2 > rx1 && ny1 < ry2 && ny2 > ry1) {
               newSelected.add(noteKey(step, midi));
             }
@@ -641,34 +712,39 @@ export function GridSequencer() {
   // ── Velocity lane renderer ──────────────────────────────────────
   const renderVelocityLane = () => {
     if (!showVelocity) return null;
-    const colPercent = 100 / totalSteps;
     return (
       <div className="flex shrink-0 border-t border-border" style={{ height: 64 }}>
         <div className="w-10 shrink-0 flex items-center justify-center">
           <span className="text-[8px] text-white/30 uppercase tracking-wider">vel</span>
         </div>
-        <div className="flex-1 relative">
-          {Array.from(stepToHit.entries()).map(([stepIndex, hitIdx]) => {
-            const vel = gridVelocities[instrument.id]?.[hitIdx] ?? 100;
-            const barH = (vel / 127) * 56;
+        <div className="flex flex-1">
+          {Array.from({ length: totalSteps }, (_, stepIndex) => {
+            const hitIdx = stepToHit.get(stepIndex);
+            const hasNote = hitIdx !== undefined;
+            const vel = hasNote ? (gridVelocities[instrument.id]?.[hitIdx] ?? 100) : 0;
+            const barH = hasNote ? (vel / 127) * 56 : 0;
             return (
               <div
                 key={`vel-${stepIndex}`}
-                className="absolute bottom-0"
-                style={{
-                  left: `${stepIndex * colPercent}%`,
-                  width: `calc(${colPercent}% - 2px)`,
-                  height: barH,
-                  background: instrument.color,
-                  opacity: 0.7,
-                  borderRadius: '2px 2px 0 0',
-                  cursor: 'ns-resize',
-                }}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  velDragRef.current = { hitIndex: hitIdx, startY: e.clientY, startVel: vel };
-                }}
-              />
+                className="flex-1 min-w-[28px] relative"
+              >
+                {hasNote && (
+                  <div
+                    className="absolute bottom-0 left-px right-px"
+                    style={{
+                      height: barH,
+                      background: instrument.color,
+                      opacity: 0.7,
+                      borderRadius: '2px 2px 0 0',
+                      cursor: 'ns-resize',
+                    }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      velDragRef.current = { hitIndex: hitIdx, startY: e.clientY, startVel: vel };
+                    }}
+                  />
+                )}
+              </div>
             );
           })}
         </div>
@@ -804,7 +880,6 @@ export function GridSequencer() {
               return (
                 <div
                   key={midiNote}
-                  onClick={() => handleCellClick(stepIndex, midiNote)}
                   className={`border-b cursor-pointer transition-colors
                     ${isC ? 'border-border/60' : 'border-border/20'}
                     ${isBlackKey ? 'bg-white/[0.02] hover:bg-white/5' : 'hover:bg-white/5'}`}
@@ -910,17 +985,19 @@ export function GridSequencer() {
               </div>
             </>
           )}
-          <div className="grid-body flex flex-col flex-1 overflow-x-auto overflow-y-auto" ref={scrollContainerRef}>
-            <div className="flex flex-1 min-h-0">
-              {noteLabels}
-              <div
-                ref={gridBodyRef}
-                className="grid-cells flex-1 relative"
-                onMouseDown={handleGridMouseDown}
-              >
-                {renderGridCells(false)}
-                {renderNoteBlocks(0)}
-                {selectionOverlay}
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="grid-body flex-1 overflow-x-auto overflow-y-auto" ref={scrollContainerRef}>
+              <div className="flex min-h-full">
+                {noteLabels}
+                <div
+                  ref={gridBodyRef}
+                  className="grid-cells flex-1 relative"
+                  onMouseDown={handleGridMouseDown}
+                >
+                  {renderGridCells(false)}
+                  {renderNoteBlocks(0)}
+                  {selectionOverlay}
+                </div>
               </div>
             </div>
             {renderVelocityLane()}
@@ -1029,34 +1106,36 @@ export function GridSequencer() {
             </div>
           </>
         )}
-        <div className="grid-body flex flex-col flex-1 overflow-x-auto overflow-y-auto" ref={scrollContainerRef}>
-          <div className="flex flex-1 min-h-0">
-            {/* Synth note labels need extra top padding for glide row */}
-            <div className="grid-note-labels shrink-0 w-10">
-              <div style={{ height: 14 }} />
-              {rows.map((midiNote) => {
-                const isBlackKey = [1, 3, 6, 8, 10].includes(midiNote % 12);
-                return (
-                  <div
-                    key={midiNote}
-                    className={`flex items-center justify-end pr-1 text-[9px]
-                      ${isBlackKey ? 'text-text-secondary/50' : 'text-text-secondary'}`}
-                    style={{ height: ROW_H }}
-                  >
-                    {noteNameWithOctave(midiNote)}
-                  </div>
-                );
-              })}
-            </div>
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="grid-body flex-1 overflow-x-auto overflow-y-auto" ref={scrollContainerRef}>
+            <div className="flex min-h-full">
+              {/* Synth note labels need extra top padding for glide row */}
+              <div className="grid-note-labels shrink-0 w-10">
+                <div style={{ height: 14 }} />
+                {rows.map((midiNote) => {
+                  const isBlackKey = [1, 3, 6, 8, 10].includes(midiNote % 12);
+                  return (
+                    <div
+                      key={midiNote}
+                      className={`flex items-center justify-end pr-1 text-[9px]
+                        ${isBlackKey ? 'text-text-secondary/50' : 'text-text-secondary'}`}
+                      style={{ height: ROW_H }}
+                    >
+                      {noteNameWithOctave(midiNote)}
+                    </div>
+                  );
+                })}
+              </div>
 
-            <div
-              ref={gridBodyRef}
-              className="grid-cells flex-1 relative"
-              onMouseDown={handleGridMouseDown}
-            >
-              {renderGridCells(true)}
-              {renderNoteBlocks(14)}
-              {selectionOverlay}
+              <div
+                ref={gridBodyRef}
+                className="grid-cells flex-1 relative"
+                onMouseDown={handleGridMouseDown}
+              >
+                {renderGridCells(true)}
+                {renderNoteBlocks(14)}
+                {selectionOverlay}
+              </div>
             </div>
           </div>
           {renderVelocityLane()}

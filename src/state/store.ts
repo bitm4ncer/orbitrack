@@ -15,7 +15,7 @@ import { registerSampleForPlayback } from '../audio/engine';
 import { preloadSample, preloadCustomSample } from '../audio/sampleCache';
 import type { LooperParams, LooperEditorState } from '../types/looper';
 import { DEFAULT_LOOPER_PARAMS, createLooperEditorState } from '../types/looper';
-import { sliceBuffer, deleteRange, silenceRange, insertBuffer, extractPeaks, bufferToBlobUrl } from '../audio/bufferOps';
+import { sliceBuffer, deleteRange, silenceRange, insertBuffer, extractPeaks, bufferToBlobUrl, revokeBlobUrl } from '../audio/bufferOps';
 import { detectTransients, detectTransientTails, mapTransientsToGrid, estimateLoopSize, detectBpm } from '../audio/transientDetector';
 import { getCachedBpm, setCachedBpm } from '../audio/bpmCache';
 import type { OrbeatSet } from '../types/storage';
@@ -245,6 +245,8 @@ export interface StoreState {
   moveGridNoteToStep: (instrumentId: string, fromHitIndex: number, toHitIndex: number, midiNote: number) => void;
   setOctaveOffset: (offset: number) => void;
   applyChordPreset: (instrumentId: string, chords: number[][], steps: number) => void;
+  /** Move a batch of notes by a step/pitch delta atomically (for multi-select drag). */
+  moveNotesBatch: (id: string, notes: { step: number; midi: number }[], stepDelta: number, pitchDelta: number) => void;
 
   // Per-instrument progress (0-1) for polyrhythm
   instrumentProgress: Record<string, number>;
@@ -708,6 +710,11 @@ export const useStore = create<StoreState>((set, get) => ({
       const otherOnSameOrbit = s.instruments.some((i) => i.id !== id && i.orbitIndex === inst.orbitIndex);
       if (!otherOnSameOrbit) destroyOrbitChain(inst.orbitIndex);
     }
+    // Clean up transport caches for this instrument (prevents stale Map entries)
+    // Lazy import to avoid circular dependency (store ↔ transport)
+    import('../audio/transport').then(({ cleanupInstrumentCache }) => cleanupInstrumentCache(id));
+    // Revoke tracked blob URL for looper instruments to free memory
+    if (inst?.sampleName) revokeBlobUrl(inst.samplePath ?? inst.sampleName);
     // Unroute from group bus if grouped
     if (inst) unrouteOrbitFromScene(inst.orbitIndex);
     const instruments = s.instruments.filter((i) => i.id !== id);
@@ -939,6 +946,105 @@ export const useStore = create<StoreState>((set, get) => ({
       };
     }),
 
+  moveNotesBatch: (id, notes, stepDelta, pitchDelta) =>
+    set((s) => {
+      const inst = s.instruments.find((i) => i.id === id);
+      if (!inst || (stepDelta === 0 && pitchDelta === 0)) return s;
+
+      const totalSteps = inst.loopSize;
+
+      // Build step→hitIndex map
+      const stepToHit = new Map<number, number>();
+      for (let i = 0; i < inst.hitPositions.length; i++) {
+        const step = Math.round(inst.hitPositions[i] * totalSteps) % totalSteps;
+        stepToHit.set(step, i);
+      }
+
+      // Check all target positions are valid before making changes
+      for (const n of notes) {
+        const newMidi = n.midi + pitchDelta;
+        if (newMidi < 0 || newMidi > 127) return s; // out of range, abort
+      }
+
+      // Clone mutable state
+      let positions = [...inst.hitPositions];
+      const grid: number[][] = [...(s.gridNotes[id] || [])].map((a) => [...a]);
+      const gLen: number[] = [...(s.gridLengths[id] || [])];
+      const gVel: number[] = [...(s.gridVelocities[id] || [])];
+      const gGlide: boolean[] = [...(s.gridGlide[id] || [])];
+
+      // Collect source info for each note, then remove them all
+      interface NoteInfo { hitIdx: number; midi: number; step: number; vel: number; len: number; glide: boolean; }
+      const infos: NoteInfo[] = [];
+      for (const n of notes) {
+        const hitIdx = stepToHit.get(n.step);
+        if (hitIdx === undefined) continue;
+        infos.push({
+          hitIdx, midi: n.midi, step: n.step,
+          vel: gVel[hitIdx] ?? 100,
+          len: gLen[hitIdx] ?? 1,
+          glide: gGlide[hitIdx] ?? false,
+        });
+      }
+
+      // Remove source notes (process in reverse hitIdx order to keep indices stable)
+      const sortedByHit = [...infos].sort((a, b) => b.hitIdx - a.hitIdx);
+      for (const info of sortedByHit) {
+        const hitNotes = grid[info.hitIdx];
+        if (!hitNotes) continue;
+        const filtered = hitNotes.filter((m) => m !== info.midi);
+        if (filtered.length === 0) {
+          // Remove the entire hit
+          grid.splice(info.hitIdx, 1);
+          positions.splice(info.hitIdx, 1);
+          gLen.splice(info.hitIdx, 1);
+          gVel.splice(info.hitIdx, 1);
+          gGlide.splice(info.hitIdx, 1);
+        } else {
+          grid[info.hitIdx] = filtered;
+        }
+      }
+
+      // Re-add notes at new positions
+      for (const info of infos) {
+        const newStep = ((info.step + stepDelta) % totalSteps + totalSteps) % totalSteps;
+        const newMidi = info.midi + pitchDelta;
+
+        // Rebuild step→hit map after removals
+        const curMap = new Map<number, number>();
+        for (let i = 0; i < positions.length; i++) {
+          const st = Math.round(positions[i] * totalSteps) % totalSteps;
+          curMap.set(st, i);
+        }
+
+        let targetHit = curMap.get(newStep);
+        if (targetHit !== undefined) {
+          // Add note to existing hit
+          if (!grid[targetHit].includes(newMidi)) {
+            grid[targetHit] = [...grid[targetHit], newMidi];
+          }
+        } else {
+          // Create new hit
+          targetHit = positions.length;
+          positions.push(newStep / totalSteps);
+          grid[targetHit] = [newMidi];
+          gLen[targetHit] = info.len;
+          gVel[targetHit] = info.vel;
+          gGlide[targetHit] = info.glide;
+        }
+      }
+
+      return {
+        instruments: s.instruments.map((i) =>
+          i.id !== id ? i : { ...i, hits: positions.length, hitPositions: positions },
+        ),
+        gridNotes: { ...s.gridNotes, [id]: grid },
+        gridLengths: { ...s.gridLengths, [id]: gLen },
+        gridVelocities: { ...s.gridVelocities, [id]: gVel },
+        gridGlide: { ...s.gridGlide, [id]: gGlide },
+      };
+    }),
+
   setOctaveOffset: (offset) => set({ octaveOffset: offset }),
 
   applyChordPreset: (instrumentId, chords, _steps) =>
@@ -1086,8 +1192,13 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({ customSamples: [...s.customSamples, sample] }));
   },
 
-  removeCustomSample: (key) =>
-    set((s) => ({ customSamples: s.customSamples.filter((cs) => cs.key !== key) })),
+  removeCustomSample: (key) => {
+    const existing = get().customSamples.find((cs) => cs.key === key);
+    if (existing) {
+      try { URL.revokeObjectURL(existing.url); } catch { /* ignore */ }
+    }
+    set((s) => ({ customSamples: s.customSamples.filter((cs) => cs.key !== key) }));
+  },
 
   // Per-instrument effects actions
   addEffect: (instrumentId, type) =>
@@ -1923,8 +2034,9 @@ export const useStore = create<StoreState>((set, get) => ({
     // Re-register with superdough
     const inst = get().instruments.find((i) => i.id === instrumentId);
     if (inst?.sampleName) {
-      const blobUrl = bufferToBlobUrl(newBuffer);
-      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+      const sampleKey = inst.samplePath ?? inst.sampleName;
+      const blobUrl = bufferToBlobUrl(newBuffer, sampleKey);
+      registerSampleForPlayback(sampleKey, blobUrl);
     }
 
     // Re-detect transients
@@ -1993,8 +2105,9 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const inst = get().instruments.find((i) => i.id === instrumentId);
     if (inst?.sampleName) {
-      const blobUrl = bufferToBlobUrl(newBuffer);
-      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+      const sampleKey = inst.samplePath ?? inst.sampleName;
+      const blobUrl = bufferToBlobUrl(newBuffer, sampleKey);
+      registerSampleForPlayback(sampleKey, blobUrl);
     }
 
     const transients = detectTransients(newBuffer, 0.5, 16);
@@ -2040,8 +2153,9 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const inst = get().instruments.find((i) => i.id === instrumentId);
     if (inst?.sampleName) {
-      const blobUrl = bufferToBlobUrl(newBuffer);
-      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+      const sampleKey = inst.samplePath ?? inst.sampleName;
+      const blobUrl = bufferToBlobUrl(newBuffer, sampleKey);
+      registerSampleForPlayback(sampleKey, blobUrl);
     }
 
     const transients = detectTransients(newBuffer, 0.5, 16);
@@ -2087,8 +2201,9 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const inst = get().instruments.find((i) => i.id === instrumentId);
     if (inst?.sampleName) {
-      const blobUrl = bufferToBlobUrl(newBuffer);
-      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+      const sampleKey = inst.samplePath ?? inst.sampleName;
+      const blobUrl = bufferToBlobUrl(newBuffer, sampleKey);
+      registerSampleForPlayback(sampleKey, blobUrl);
     }
 
     const transients = detectTransients(newBuffer, 0.5, 16);
@@ -2132,8 +2247,9 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const inst = get().instruments.find((i) => i.id === instrumentId);
     if (inst?.sampleName) {
-      const blobUrl = bufferToBlobUrl(newBuffer);
-      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+      const sampleKey = inst.samplePath ?? inst.sampleName;
+      const blobUrl = bufferToBlobUrl(newBuffer, sampleKey);
+      registerSampleForPlayback(sampleKey, blobUrl);
     }
 
     const transients = detectTransients(newBuffer, 0.5, 16);
@@ -2174,8 +2290,9 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const inst = get().instruments.find((i) => i.id === instrumentId);
     if (inst?.sampleName) {
-      const blobUrl = bufferToBlobUrl(buffer);
-      registerSampleForPlayback(inst.samplePath ?? inst.sampleName, blobUrl);
+      const sampleKey = inst.samplePath ?? inst.sampleName;
+      const blobUrl = bufferToBlobUrl(buffer, sampleKey);
+      registerSampleForPlayback(sampleKey, blobUrl);
     }
 
     const transients = detectTransients(buffer, 0.5, 16);
@@ -2320,6 +2437,11 @@ export const useStore = create<StoreState>((set, get) => ({
   loadSet: (orbeatSet: OrbeatSet) => {
     // Tear down existing group buses before loading new state
     destroyAllSceneBuses();
+
+    // Revoke old blob URLs to free memory before creating new ones
+    for (const cs of get().customSamples) {
+      try { URL.revokeObjectURL(cs.url); } catch { /* ignore */ }
+    }
 
     // Re-register custom samples from embedded data and pre-decode into superdough's buffer cache
     const customSamples: { key: string; url: string; name: string }[] = [];

@@ -38,11 +38,18 @@ export function LUFSMeter() {
   // VU meter state
   const vuState = useRef({ level: 0, peakLevel: 0, peakHoldFrames: 0, clipFlashFrames: 0 });
 
-  // LUFS state
+  // LUFS state — ring buffers avoid O(n) shift() on every block
   const lufsState = useRef({
-    momentaryBlocks: [] as number[],  // ring buffer of 100ms block powers
-    shortTermBlocks: [] as number[],
-    gatedBlocks: [] as number[],      // for integrated LUFS
+    // Ring buffer storage: fixed-size Float64Arrays + write head + count
+    momentaryData: new Float64Array(MOMENTARY_BLOCKS),
+    momentaryHead: 0,
+    momentaryCount: 0,
+    shortTermData: new Float64Array(SHORT_TERM_BLOCKS),
+    shortTermHead: 0,
+    shortTermCount: 0,
+    gatedData: new Float64Array(600),
+    gatedHead: 0,
+    gatedCount: 0,
     momentaryLUFS: -Infinity,
     integratedLUFS: -Infinity,
     lastBlockTime: 0,
@@ -188,7 +195,9 @@ export function LUFSMeter() {
       // ── LUFS metering ────────────────────────────────────────────────────
       if (ls.lufsAnalyser && ls.lufsBuffer) {
         if (resetRef.current) {
-          ls.momentaryBlocks = []; ls.shortTermBlocks = []; ls.gatedBlocks = [];
+          ls.momentaryHead = 0; ls.momentaryCount = 0;
+          ls.shortTermHead = 0; ls.shortTermCount = 0;
+          ls.gatedHead = 0; ls.gatedCount = 0;
           ls.momentaryLUFS = -Infinity; ls.integratedLUFS = -Infinity;
           ls.silenceBlocks = 0;
           ls.lastBlockTime = timestamp;
@@ -204,15 +213,20 @@ export function LUFSMeter() {
           for (let i = 0; i < ls.lufsBuffer.length; i++) blockPower += ls.lufsBuffer[i] * ls.lufsBuffer[i];
           blockPower /= ls.lufsBuffer.length;
 
-          ls.momentaryBlocks.push(blockPower);
-          if (ls.momentaryBlocks.length > MOMENTARY_BLOCKS) ls.momentaryBlocks.shift();
+          // Ring buffer push helper (O(1) instead of shift's O(n))
+          ls.momentaryData[ls.momentaryHead] = blockPower;
+          ls.momentaryHead = (ls.momentaryHead + 1) % MOMENTARY_BLOCKS;
+          if (ls.momentaryCount < MOMENTARY_BLOCKS) ls.momentaryCount++;
 
-          ls.shortTermBlocks.push(blockPower);
-          if (ls.shortTermBlocks.length > SHORT_TERM_BLOCKS) ls.shortTermBlocks.shift();
+          ls.shortTermData[ls.shortTermHead] = blockPower;
+          ls.shortTermHead = (ls.shortTermHead + 1) % SHORT_TERM_BLOCKS;
+          if (ls.shortTermCount < SHORT_TERM_BLOCKS) ls.shortTermCount++;
 
           // Momentary LUFS (400ms window)
-          if (ls.momentaryBlocks.length >= MOMENTARY_BLOCKS) {
-            const avgPower = ls.momentaryBlocks.reduce((a, b) => a + b, 0) / ls.momentaryBlocks.length;
+          if (ls.momentaryCount >= MOMENTARY_BLOCKS) {
+            let sum = 0;
+            for (let i = 0; i < MOMENTARY_BLOCKS; i++) sum += ls.momentaryData[i];
+            const avgPower = sum / MOMENTARY_BLOCKS;
             ls.momentaryLUFS = avgPower > 0 ? -0.691 + 10 * Math.log10(avgPower) : -Infinity;
           }
 
@@ -220,18 +234,24 @@ export function LUFSMeter() {
           // After 2s of consecutive silence, drain one old block per tick so the reading falls
           if (ls.momentaryLUFS > -70) {
             ls.silenceBlocks = 0;
-            ls.gatedBlocks.push(blockPower);
-            if (ls.gatedBlocks.length > 600) ls.gatedBlocks.shift(); // cap at 60s
+            ls.gatedData[ls.gatedHead] = blockPower;
+            ls.gatedHead = (ls.gatedHead + 1) % 600;
+            if (ls.gatedCount < 600) ls.gatedCount++;
           } else {
             ls.silenceBlocks++;
-            if (ls.silenceBlocks > 20 && ls.gatedBlocks.length > 0) {
-              ls.gatedBlocks.shift(); // drain oldest block → reading descends toward -∞
+            if (ls.silenceBlocks > 20 && ls.gatedCount > 0) {
+              ls.gatedCount--; // drain oldest block → reading descends toward -∞
             }
           }
 
           // Integrated LUFS (gated average since reset)
-          if (ls.gatedBlocks.length > 0) {
-            const intAvg = ls.gatedBlocks.reduce((a, b) => a + b, 0) / ls.gatedBlocks.length;
+          if (ls.gatedCount > 0) {
+            let sum = 0;
+            for (let i = 0; i < ls.gatedCount; i++) {
+              const idx = (ls.gatedHead - ls.gatedCount + i + 600) % 600;
+              sum += ls.gatedData[idx];
+            }
+            const intAvg = sum / ls.gatedCount;
             ls.integratedLUFS = intAvg > 0 ? -0.691 + 10 * Math.log10(intAvg) : -Infinity;
           }
         }

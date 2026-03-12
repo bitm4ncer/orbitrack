@@ -192,17 +192,19 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
 
   const isSelected = useStore((s) => s.selectedInstrumentId === instrumentId);
   const isMultiSelected = useStore((s) => s.selectedInstrumentIds.includes(instrumentId));
-  const sceneColor = useStore((s) => {
+  const sceneColorSelector = useCallback((s: { scenes: { instrumentIds: string[]; color: string }[] }) => {
     for (const g of s.scenes) {
       if (g.instrumentIds.includes(instrumentId)) return g.color;
     }
     return null;
-  });
-  const isInHighlightedScene = useStore((s) => {
+  }, [instrumentId]);
+  const sceneColor = useStore(sceneColorSelector);
+  const highlightSelector = useCallback((s: { selectedSceneId: string | null; scenes: { id: string; instrumentIds: string[] }[] }) => {
     if (!s.selectedSceneId) return false;
     const scene = s.scenes.find((sc) => sc.id === s.selectedSceneId);
     return scene?.instrumentIds.includes(instrumentId) ?? false;
-  });
+  }, [instrumentId]);
+  const isInHighlightedScene = useStore(highlightSelector);
   const inst = useStore((s) => s.instruments.find((i) => i.id === instrumentId));
 
   useEffect(() => {

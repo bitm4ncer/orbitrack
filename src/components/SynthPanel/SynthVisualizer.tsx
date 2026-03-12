@@ -262,16 +262,6 @@ export function SynthVisualizer({ orbitIndex, color }: Props) {
           }
         }
 
-        // Layer 1 — outer blurry halo
-        ctx.save();
-        ctx.filter = 'blur(10px)';
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, RX * 1.1, RY * 1.1, 0, 0, Math.PI * 2);
-        ctx.fillStyle = `${color}28`;
-        ctx.fill();
-        ctx.restore();
-        ctx.filter = 'none';
-
         // Layer 2 — iris (dark, semi-transparent ring)
         ctx.beginPath();
         ctx.ellipse(cx, cy, RX * 0.55, RY * 0.55, 0, 0, Math.PI * 2);

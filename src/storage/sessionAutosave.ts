@@ -10,6 +10,7 @@
  *   orbeat:autosave:interval — ms string (default: "3000")
  */
 
+import { getAudioContext as getSdAudioContext } from 'superdough';
 import { useStore, setOrbitCounter } from '../state/store';
 import { put, get, del } from './idb';
 import type { Instrument } from '../types/instrument';
@@ -303,7 +304,9 @@ export async function restoreLegacyAutosave(): Promise<boolean> {
         }
         if (!url) continue;
         try {
-          const ctx = new AudioContext();
+          // Prefer the shared superdough AudioContext; fall back to a temporary
+          // one if the audio engine hasn't initialised yet (early autosave restore).
+          const ctx = (getSdAudioContext() as AudioContext | null) ?? new AudioContext();
           fetch(url)
             .then((r) => {
               if (!r.ok) throw new Error(`fetch failed: ${r.status} ${r.statusText}`);
