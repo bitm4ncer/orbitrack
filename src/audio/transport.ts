@@ -344,12 +344,20 @@ function _tick(time: number): void {
     _instProgress[instrument.id] = (globalStep % loopSize) / loopSize;
 
     if (_anySolo && !instrument.solo) continue;
-    if (instrument.muted && !instrument.solo) continue;
 
-    // Track Mode: mute instruments not in the active scene (O(1) Set lookup)
+    // Track Mode: scene membership overrides manual mute
     if (activeSceneInstIds && inAnySceneIds) {
       const inAny = inAnySceneIds.has(instrument.id);
-      if (inAny && !activeSceneInstIds.has(instrument.id)) continue;
+      if (inAny) {
+        // In the active scene → play (override manual mute); not in active → skip
+        if (!activeSceneInstIds.has(instrument.id)) continue;
+        // falls through to trigger — manual mute ignored for scene members
+      } else {
+        // Not in any scene — normal mute applies
+        if (instrument.muted && !instrument.solo) continue;
+      }
+    } else {
+      if (instrument.muted && !instrument.solo) continue;
     }
 
     const { hitPositions, hits } = instrument;
@@ -471,6 +479,6 @@ function _tick(time: number): void {
   // Write position to buffer — the rAF loop will flush to Zustand at ~60 fps.
   _pos.progress = progress;
   _pos.currentStep = currentStep;
-  _pos.instProgress = _instProgress;
+  _pos.instProgress = { ..._instProgress };
   _pos.dirty = true;
 }

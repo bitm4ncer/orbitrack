@@ -3,8 +3,10 @@
 import { useStore } from '../state/store';
 import { onMidiCC, onMidiNote, isMidiEnabled } from './midiController';
 import { getSynthEngine } from './synthManager';
-import { triggerSample, loadSamples } from './sampler';
+import { loadSamples } from './sampler';
 import { initAudio } from './engine';
+import { superdough, getAudioContext } from 'superdough';
+import { DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
 import type { MidiCCMapping, MidiNoteMapping } from '../types/midi';
 
 let unsubscribeCC: (() => void) | null = null;
@@ -13,7 +15,16 @@ const heldMidiNotes = new Map<number, number>();
 
 let audioReady = false;
 async function ensureAudioReady(): Promise<boolean> {
-  if (audioReady) return true;
+  if (audioReady) {
+    // Audio was initialized, but context may be suspended after inactivity
+    try {
+      const ctx = getAudioContext() as AudioContext;
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+    } catch { /* ignore */ }
+    return true;
+  }
   try {
     await initAudio();
     await loadSamples();
@@ -94,16 +105,26 @@ function routeMidiNote(noteNumber: number, velocity: number): void {
       }
     } else if (inst.type === 'sampler' && inst.sampleName) {
       if (velocity > 0) {
-        // Note on — pitch-shift from MIDI note, velocity as dB attenuation
         heldMidiNotes.set(noteNumber, noteNumber);
-        const rootNote = inst.samplerParams?.rootNote ?? 60;
-        const speed = (inst.samplerParams?.speed ?? 1) * Math.pow(2, (noteNumber - rootNote) / 12);
-        // velocity 0-1 → dB: 1.0 = 0dB, 0.5 ≈ -6dB, 0.1 ≈ -20dB
-        const velocityDb = 20 * Math.log10(Math.max(0.001, velocity));
-        const volume = inst.volume + velocityDb;
-        triggerSample(inst.sampleName, undefined, volume, speed);
+        const sp = inst.samplerParams ?? DEFAULT_SAMPLER_PARAMS;
+        const rootNote = sp.rootNote ?? 60;
+        const speed = (sp.speed ?? 1) * Math.pow(2, (noteNumber - rootNote) / 12);
+        const instGain = Math.pow(10, inst.volume / 20);
+
+        superdough({
+          s: inst.sampleName,
+          gain: sp.gain * instGain * velocity,
+          speed,
+          begin: sp.begin,
+          end: sp.end,
+          attack: sp.attack,
+          release: Math.max(sp.release, 0.005),
+          cutoff: sp.cutoff,
+          resonance: sp.resonance,
+          pan: (sp.pan + 1) / 2,
+          orbit: inst.orbitIndex,
+        }, getAudioContext().currentTime, 1);
       } else {
-        // Note off - just remove from tracking (sample plays to completion)
         heldMidiNotes.delete(noteNumber);
       }
     }

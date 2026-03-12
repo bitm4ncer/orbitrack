@@ -263,6 +263,8 @@ export interface StoreState {
   snapEnabled: boolean;
   setSnapEnabled: (enabled: boolean) => void;
   spinMode?: boolean;
+  orbitDisplayMode: 'classic' | 'led' | 'rotate' | 'chase';
+  setOrbitDisplayMode: (mode: 'classic' | 'led' | 'rotate' | 'chase') => void;
 
   // Grid resolution: 1 = every step (1/16), 2 = 1/8, 4 = 1/4, 8 = 1/2
   gridResolution: number;
@@ -483,6 +485,17 @@ export const useStore = create<StoreState>((set, get) => ({
   // Snap
   snapEnabled: true,
   gridResolution: 1,
+
+  // Orbit display — persisted to localStorage
+  orbitDisplayMode: ((): 'classic' | 'led' | 'rotate' | 'chase' => {
+    const stored = localStorage.getItem('orbeat:orbitDisplayMode');
+    if (stored === 'classic' || stored === 'led' || stored === 'rotate' || stored === 'chase') return stored;
+    return 'led';
+  })(),
+  setOrbitDisplayMode: (mode: 'classic' | 'led' | 'rotate' | 'chase') => {
+    localStorage.setItem('orbeat:orbitDisplayMode', mode);
+    set({ orbitDisplayMode: mode });
+  },
 
   // Scale filter
   scaleRoot: 0,         // C

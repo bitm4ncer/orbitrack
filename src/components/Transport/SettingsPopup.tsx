@@ -422,29 +422,7 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
               )}
 
               {activeTab === 'display' && (
-                <div className="p-6 space-y-6">
-                  <div>
-                    <h3 className="text-sm font-semibold text-text-primary mb-4">Display Settings</h3>
-
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between p-3 bg-bg-tertiary/50 rounded border border-border/30">
-                        <div>
-                          <p className="text-xs font-medium text-text-primary">Dark Theme</p>
-                          <p className="text-xs text-text-secondary/60 mt-0.5">Always enabled</p>
-                        </div>
-                        <span className="text-sm text-accent">●</span>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-xs font-medium text-text-secondary">Canvas Resolution</label>
-                        <div className="p-3 bg-bg-tertiary/50 rounded border border-border/30 text-xs text-text-secondary/70 font-mono">
-                          <p>Canvas resolution automatically adapts to your screen DPI</p>
-                          <p className="mt-1">Current: {window.devicePixelRatio.toFixed(2)}x</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <DisplaySettings />
               )}
 
               {activeTab === 'shortcuts' && (
@@ -506,6 +484,206 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </>
+  );
+}
+
+// ── Display Settings Tab ─────────────────────────────────────────────────────
+
+const ORB_MODES: { id: 'classic' | 'led' | 'rotate' | 'chase'; label: string; desc: string }[] = [
+  { id: 'classic', label: 'Classic', desc: 'Smooth dots on a ring with trigger line' },
+  { id: 'led', label: 'LED', desc: 'Fixed grid of LED dots that light up on hits' },
+  { id: 'rotate', label: 'Dot Ring', desc: 'Fixed circle of dots — colored hits rotate past bottom indicator' },
+  { id: 'chase', label: 'Chase', desc: 'Fixed dot ring — colored hits chase clockwise through the grid' },
+];
+
+function DisplaySettings() {
+  const orbitDisplayMode = useStore((s) => s.orbitDisplayMode);
+  const setOrbitDisplayMode = useStore((s) => s.setOrbitDisplayMode);
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Orb Appearance */}
+      <div>
+        <h3 className="text-sm font-semibold text-text-primary mb-1">Orb Display Mode</h3>
+        <p className="text-xs text-text-secondary/50 mb-4">Choose how instrument orbs render hits</p>
+
+        <div className="grid grid-cols-4 gap-3">
+          {ORB_MODES.map((mode) => (
+            <button
+              key={mode.id}
+              onClick={() => setOrbitDisplayMode(mode.id)}
+              className={`p-4 rounded-lg border text-left transition-all cursor-pointer ${
+                orbitDisplayMode === mode.id
+                  ? 'border-accent bg-accent/10'
+                  : 'border-border/50 bg-bg-tertiary/30 hover:bg-bg-tertiary/60'
+              }`}
+            >
+              {/* Preview icon */}
+              <div className="mb-3 flex justify-center">
+                <OrbPreview mode={mode.id} active={orbitDisplayMode === mode.id} />
+              </div>
+              <p className={`text-xs font-medium ${orbitDisplayMode === mode.id ? 'text-accent' : 'text-text-primary'}`}>
+                {mode.label}
+              </p>
+              <p className="text-[10px] text-text-secondary/50 mt-0.5 leading-snug">{mode.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Theme */}
+      <div className="border-t border-border/30 pt-4">
+        <h3 className="text-sm font-semibold text-text-primary mb-4">Theme</h3>
+        <div className="flex items-center justify-between p-3 bg-bg-tertiary/50 rounded border border-border/30">
+          <div>
+            <p className="text-xs font-medium text-text-primary">Dark Theme</p>
+            <p className="text-xs text-text-secondary/60 mt-0.5">Always enabled</p>
+          </div>
+          <span className="text-sm text-accent">●</span>
+        </div>
+      </div>
+
+      {/* Canvas */}
+      <div className="border-t border-border/30 pt-4">
+        <h3 className="text-sm font-semibold text-text-primary mb-4">Canvas</h3>
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-text-secondary">Resolution</label>
+          <div className="p-3 bg-bg-tertiary/50 rounded border border-border/30 text-xs text-text-secondary/70 font-mono">
+            <p>Canvas resolution automatically adapts to your screen DPI</p>
+            <p className="mt-1">Current: {window.devicePixelRatio.toFixed(2)}x</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Tiny canvas-like SVG preview of the orb mode */
+function OrbPreview({ mode, active }: { mode: 'classic' | 'led' | 'rotate' | 'chase'; active: boolean }) {
+  const accent = active ? '#6d8cff' : '#64748b';
+  const dim = active ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)';
+  const r = 22; // ring radius
+  const cx = 28;
+  const cy = 28;
+  const steps = 12;
+
+  if (mode === 'led') {
+    // LED mode: fixed grid of dots, some lit
+    const litSteps = new Set([0, 3, 5, 8, 11]);
+    const triggeredStep = 3;
+    return (
+      <svg width="56" height="56" viewBox="0 0 56 56">
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={dim} strokeWidth="1" />
+        {Array.from({ length: steps }, (_, i) => {
+          const angle = (i / steps) * Math.PI * 2 - Math.PI / 2;
+          const x = cx + Math.cos(angle) * r;
+          const y = cy + Math.sin(angle) * r;
+          const isLit = litSteps.has(i);
+          const isTriggered = i === triggeredStep;
+          return (
+            <circle
+              key={i}
+              cx={x}
+              cy={y}
+              r={isTriggered ? 3.5 : isLit ? 3 : 2}
+              fill={isTriggered ? '#ffffff' : isLit ? accent : dim}
+            />
+          );
+        })}
+      </svg>
+    );
+  }
+
+  if (mode === 'rotate') {
+    // Rotate mode: fixed dots, colored ones shifted, indicator at bottom
+    const litDisplaySteps = new Set([1, 4, 6, 9]);
+    return (
+      <svg width="56" height="56" viewBox="0 0 56 56">
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={dim} strokeWidth="1" />
+        {Array.from({ length: steps }, (_, i) => {
+          const angle = (i / steps) * Math.PI * 2 - Math.PI / 2;
+          const x = cx + Math.cos(angle) * r;
+          const y = cy + Math.sin(angle) * r;
+          const isLit = litDisplaySteps.has(i);
+          return (
+            <circle
+              key={i}
+              cx={x}
+              cy={y}
+              r={isLit ? 3 : 2}
+              fill={isLit ? accent : dim}
+            />
+          );
+        })}
+        {/* Fixed indicator line at bottom (6 o'clock) */}
+        <line
+          x1={cx}
+          y1={cy + r + 2}
+          x2={cx}
+          y2={cy + r + 8}
+          stroke={active ? '#ffffff' : '#94a3b8'}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+
+  if (mode === 'chase') {
+    // Chase mode: all dots visible as gray, hits colored
+    const litDisplaySteps = new Set([1, 4, 6, 9]);
+    return (
+      <svg width="56" height="56" viewBox="0 0 56 56">
+        {Array.from({ length: steps }, (_, i) => {
+          const angle = (i / steps) * Math.PI * 2 - Math.PI / 2;
+          const x = cx + Math.cos(angle) * r;
+          const y = cy + Math.sin(angle) * r;
+          const isLit = litDisplaySteps.has(i);
+          return (
+            <circle
+              key={i}
+              cx={x}
+              cy={y}
+              r={isLit ? 3 : 2.5}
+              fill={isLit ? accent : (active ? 'rgba(180,180,190,0.35)' : 'rgba(140,140,150,0.25)')}
+            />
+          );
+        })}
+        <line
+          x1={cx}
+          y1={cy + r + 2}
+          x2={cx}
+          y2={cy + r + 8}
+          stroke={active ? '#ffffff' : '#94a3b8'}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  }
+
+  // Classic mode: smooth dots on ring
+  const hitAngles = [0, 0.25, 0.42, 0.67, 0.92];
+  return (
+    <svg width="56" height="56" viewBox="0 0 56 56">
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={dim} strokeWidth="1" />
+      {hitAngles.map((frac, i) => {
+        const angle = frac * Math.PI * 2 - Math.PI / 2;
+        const x = cx + Math.cos(angle) * r;
+        const y = cy + Math.sin(angle) * r;
+        return <circle key={i} cx={x} cy={y} r={2.5} fill={accent} />;
+      })}
+      {/* Trigger line */}
+      <line
+        x1={cx}
+        y1={cy - r + 5}
+        x2={cx}
+        y2={cy - r - 3}
+        stroke={accent}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 

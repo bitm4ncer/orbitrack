@@ -1,5 +1,6 @@
 import * as Tone from 'tone';
 import { useStore } from '../state/store';
+import { isInstrumentEffectivelyMuted } from './renderUtils';
 
 const TWO_PI = Math.PI * 2;
 const TRIGGER_ANGLE = Math.PI / 2; // 6 o'clock (bottom)
@@ -79,8 +80,27 @@ export class KnobRenderer {
     return { cx, cy, radius };
   }
 
+  // Cached hit step set for LED mode — rebuilt only when hitPositions ref changes
+  private _ledHitRef: unknown = null;
+  private _ledHitSteps = new Set<number>();
+  // Chase mode: reuse set to avoid GC pressure
+  private _chaseRotated = new Set<number>();
+  private _chaseLastStep = -1;
+
   private render(): void {
     const state = useStore.getState();
+    if (state.orbitDisplayMode === 'led') {
+      this.renderLED(state);
+      return;
+    }
+    if (state.orbitDisplayMode === 'rotate') {
+      this.renderRotate(state);
+      return;
+    }
+    if (state.orbitDisplayMode === 'chase') {
+      this.renderChase(state);
+      return;
+    }
     // Only re-find when instruments array reference changes (immutable updates)
     if (state.instruments !== this._lastInstrRef) {
       this._lastInstrRef = state.instruments;
@@ -105,9 +125,8 @@ export class KnobRenderer {
     const totalSteps = state.isPlaying ? transport.seconds / secondsPerStep : 0;
 
     const isSelected = state.selectedInstrumentId === this.instrumentId;
-    const isMuted = inst.muted;
-    const anySolo = state.instruments.some((i) => i.solo);
-    const effectivelyMuted = isMuted && !inst.solo || (anySolo && !inst.solo);
+    const effectivelyMuted = isInstrumentEffectivelyMuted(state, this.instrumentId, inst.muted, inst.solo);
+    const isMuted = effectivelyMuted;
 
     // Muted orbits don't rotate unless soloed
     const instProg = state.isPlaying && !effectivelyMuted
@@ -121,21 +140,26 @@ export class KnobRenderer {
     ctx.fillStyle = isSelected ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.35)';
     ctx.fill();
 
-    // --- 2. Step tick marks on the ring (one per step, fixed/not rotating) ---
+    // --- 2. Step tick marks on the ring — batched by style (3 passes) ---
     const stepCount = inst.loopSize;
     const stepsPerBeat = Math.round(stepCount / 4); // beats every quarter note
-    for (let g = 0; g < stepCount; g++) {
-      const tickAngle = (g / stepCount) * TWO_PI + TRIGGER_ANGLE + dotRotation;
-      const cos = Math.cos(tickAngle);
-      const sin = Math.sin(tickAngle);
-      const isBeat = g % stepsPerBeat === 0;
-      const innerLen = isBeat ? 10 : 5;
-      const outerLen = isBeat ? 5 : 3;
+    const tickStyles: [string, number, (g: number) => boolean, number, number][] = [
+      [inst.color, 2, (g) => g === 0, 10, 5],                        // first tick
+      [rgba(inst.color, 0.7), 1.5, (g) => g !== 0 && g % stepsPerBeat === 0, 10, 5],  // beats
+      [rgba(inst.color, 0.5), 1.25, (g) => g % stepsPerBeat !== 0, 5, 3],              // subdivisions
+    ];
+    for (const [style, lw, match, innerLen, outerLen] of tickStyles) {
       ctx.beginPath();
-      ctx.moveTo(cx + cos * (radius - innerLen), cy + sin * (radius - innerLen));
-      ctx.lineTo(cx + cos * (radius + outerLen), cy + sin * (radius + outerLen));
-      ctx.strokeStyle = g === 0 ? inst.color : rgba(inst.color, isBeat ? 0.7 : 0.5);
-      ctx.lineWidth = g === 0 ? 2 : isBeat ? 1.5 : 1.25;
+      for (let g = 0; g < stepCount; g++) {
+        if (!match(g)) continue;
+        const tickAngle = (g / stepCount) * TWO_PI + TRIGGER_ANGLE + dotRotation;
+        const cos = Math.cos(tickAngle);
+        const sin = Math.sin(tickAngle);
+        ctx.moveTo(cx + cos * (radius - innerLen), cy + sin * (radius - innerLen));
+        ctx.lineTo(cx + cos * (radius + outerLen), cy + sin * (radius + outerLen));
+      }
+      ctx.strokeStyle = style;
+      ctx.lineWidth = lw;
       ctx.stroke();
     }
 
@@ -208,10 +232,7 @@ export class KnobRenderer {
 
       if (isTriggered) {
         ctx.fillStyle = '#ffffff';
-        ctx.shadowColor = inst.color;
-        ctx.shadowBlur = 18;
         ctx.fill();
-        ctx.shadowBlur = 0;
       } else {
         ctx.fillStyle = rgba(inst.color, outsideLoop ? 0.15 : isMuted ? 0.25 : 0.9);
         ctx.fill();
@@ -227,18 +248,411 @@ export class KnobRenderer {
     // --- 6. Fixed trigger notch at 12 o'clock ---
     const notchCos = Math.cos(TRIGGER_ANGLE);
     const notchSin = Math.sin(TRIGGER_ANGLE);
-    ctx.save();
     ctx.beginPath();
     ctx.moveTo(cx + notchCos * (radius - 10), cy + notchSin * (radius - 10));
     ctx.lineTo(cx + notchCos * (radius + RING_PADDING - 6), cy + notchSin * (radius + RING_PADDING - 6));
     ctx.strokeStyle = 'rgba(255,255,255,0.75)';
     ctx.lineWidth = 2;
-    ctx.shadowColor = 'rgba(255,255,255,0.4)';
-    ctx.shadowBlur = 6;
     ctx.stroke();
-    ctx.restore();
 
     // --- 7. Center text: hit count + loop size ---
+    const fontSize = Math.max(14, Math.floor(radius * 0.45));
+    ctx.fillStyle = rgba(inst.color, isMuted ? 0.3 : 0.8);
+    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(inst.hits), cx, cy - fontSize * 0.25);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.font = `${Math.floor(fontSize * 0.5)}px monospace`;
+    ctx.fillText(`/${inst.loopSize}`, cx, cy + fontSize * 0.6);
+  }
+
+  // --- LED mode render ---
+
+  private renderLED(state: ReturnType<typeof useStore.getState>): void {
+    if (state.instruments !== this._lastInstrRef) {
+      this._lastInstrRef = state.instruments;
+      this._cachedInst = state.instruments.find((i) => i.id === this.instrumentId) ?? null;
+    }
+    const inst = this._cachedInst;
+    if (!inst) return;
+
+    const w = this._rectW;
+    const h = this._rectH;
+    if (w <= 0 || h <= 0) return;
+    const ctx = this.ctx;
+    const { cx, cy, radius } = this.getLayout();
+    if (radius <= 0) return;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Transport
+    const transport = Tone.getTransport();
+    const stepsPerBeatGlobal = state.stepsPerBeat ?? 8;
+    const secondsPerStep = 60 / state.bpm / stepsPerBeatGlobal;
+    const totalSteps = state.isPlaying ? transport.seconds / secondsPerStep : 0;
+
+    const isSelected = state.selectedInstrumentId === this.instrumentId;
+    const effectivelyMuted = isInstrumentEffectivelyMuted(state, this.instrumentId, inst.muted, inst.solo);
+    const isMuted = effectivelyMuted;
+
+    const instProg = state.isPlaying && !effectivelyMuted
+      ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
+    const currentStep = Math.floor(instProg * inst.loopSize) % inst.loopSize;
+
+    // Background
+    const bgRadius = Math.min(cx, cy) - 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, bgRadius, 0, TWO_PI);
+    ctx.fillStyle = isSelected ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.35)';
+    ctx.fill();
+
+    // Ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, TWO_PI);
+    ctx.strokeStyle = rgba(inst.color, isMuted ? 0.15 : 0.25);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Build hit step set (cached)
+    if (inst.hitPositions !== this._ledHitRef) {
+      this._ledHitRef = inst.hitPositions;
+      this._ledHitSteps.clear();
+      for (const hp of inst.hitPositions) {
+        this._ledHitSteps.add(Math.round(hp * inst.loopSize) % inst.loopSize);
+      }
+    }
+
+    // LED dots — one per step, 3 passes: empty, active, triggered
+    const loopSize = inst.loopSize;
+    const stepsPerBeat = Math.round(loopSize / 4);
+
+    // Pass 1: empty steps (dim dots)
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.beginPath();
+    for (let g = 0; g < loopSize; g++) {
+      if (this._ledHitSteps.has(g)) continue;
+      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      ctx.moveTo(cx + Math.cos(angle) * radius + 2.5, cy + Math.sin(angle) * radius);
+      ctx.arc(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius, 2.5, 0, TWO_PI);
+    }
+    ctx.fill();
+
+    // Pass 2: active hits (colored dots)
+    const activeColor = rgba(inst.color, isMuted ? 0.3 : 0.85);
+    ctx.fillStyle = activeColor;
+    ctx.beginPath();
+    for (let g = 0; g < loopSize; g++) {
+      if (!this._ledHitSteps.has(g)) continue;
+      if (state.isPlaying && g === currentStep) continue; // skip triggered — drawn in pass 3
+      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      ctx.moveTo(x + 4.5, y);
+      ctx.arc(x, y, 4.5, 0, TWO_PI);
+    }
+    ctx.fill();
+
+    // Pass 3: triggered step (white)
+    if (state.isPlaying && this._ledHitSteps.has(currentStep)) {
+      const angle = (currentStep / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      ctx.beginPath();
+      ctx.arc(x, y, 5.5, 0, TWO_PI);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+    }
+
+    // Playhead indicator (small moving dot on the ring when playing)
+    if (state.isPlaying) {
+      const playAngle = instProg * TWO_PI + TRIGGER_ANGLE;
+      const px = cx + Math.cos(playAngle) * (radius + 12);
+      const py = cy + Math.sin(playAngle) * (radius + 12);
+      ctx.beginPath();
+      ctx.arc(px, py, 2, 0, TWO_PI);
+      ctx.fillStyle = rgba(inst.color, 0.6);
+      ctx.fill();
+    }
+
+    // Beat markers (thin ticks at beat positions)
+    ctx.beginPath();
+    for (let g = 0; g < loopSize; g += stepsPerBeat) {
+      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      ctx.moveTo(cx + cos * (radius - 8), cy + sin * (radius - 8));
+      ctx.lineTo(cx + cos * (radius + 8), cy + sin * (radius + 8));
+    }
+    ctx.strokeStyle = rgba(inst.color, 0.2);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Center text
+    const fontSize = Math.max(14, Math.floor(radius * 0.45));
+    ctx.fillStyle = rgba(inst.color, isMuted ? 0.3 : 0.8);
+    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(inst.hits), cx, cy - fontSize * 0.25);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.font = `${Math.floor(fontSize * 0.5)}px monospace`;
+    ctx.fillText(`/${inst.loopSize}`, cx, cy + fontSize * 0.6);
+  }
+
+  // --- Rotate mode render: fixed dots, pattern rotates clockwise past bottom indicator ---
+
+  private renderRotate(state: ReturnType<typeof useStore.getState>): void {
+    if (state.instruments !== this._lastInstrRef) {
+      this._lastInstrRef = state.instruments;
+      this._cachedInst = state.instruments.find((i) => i.id === this.instrumentId) ?? null;
+    }
+    const inst = this._cachedInst;
+    if (!inst) return;
+
+    const w = this._rectW;
+    const h = this._rectH;
+    if (w <= 0 || h <= 0) return;
+    const ctx = this.ctx;
+    const { cx, cy, radius } = this.getLayout();
+    if (radius <= 0) return;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Transport
+    const transport = Tone.getTransport();
+    const stepsPerBeatGlobal = state.stepsPerBeat ?? 8;
+    const secondsPerStep = 60 / state.bpm / stepsPerBeatGlobal;
+    const totalSteps = state.isPlaying ? transport.seconds / secondsPerStep : 0;
+
+    const isSelected = state.selectedInstrumentId === this.instrumentId;
+    const effectivelyMuted = isInstrumentEffectivelyMuted(state, this.instrumentId, inst.muted, inst.solo);
+    const isMuted = effectivelyMuted;
+
+    const instProg = state.isPlaying && !effectivelyMuted
+      ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
+    const currentStep = Math.floor(instProg * inst.loopSize) % inst.loopSize;
+
+    // Build hit step set (cached)
+    if (inst.hitPositions !== this._ledHitRef) {
+      this._ledHitRef = inst.hitPositions;
+      this._ledHitSteps.clear();
+      for (const hp of inst.hitPositions) {
+        this._ledHitSteps.add(Math.round(hp * inst.loopSize) % inst.loopSize);
+      }
+    }
+
+    const loopSize = inst.loopSize;
+
+    // Background
+    const bgRadius = Math.min(cx, cy) - 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, bgRadius, 0, TWO_PI);
+    ctx.fillStyle = isSelected ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.35)';
+    ctx.fill();
+
+    // Ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, TWO_PI);
+    ctx.strokeStyle = rgba(inst.color, isMuted ? 0.15 : 0.25);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Rotated hit set: shift hit positions by currentStep
+    // A hit at original step `s` appears at display step `(s + currentStep) % loopSize`
+    const rotatedHits = new Set<number>();
+    for (const s of this._ledHitSteps) {
+      rotatedHits.add((s + currentStep) % loopSize);
+    }
+
+    // The step at the indicator (bottom) that is currently being triggered
+    const triggerDisplayStep = 0; // step 0 is at the indicator (TRIGGER_ANGLE)
+    const isTriggerHit = state.isPlaying && rotatedHits.has(triggerDisplayStep);
+
+    // Pass 1: empty steps (dim dots) — fixed positions
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.beginPath();
+    for (let g = 0; g < loopSize; g++) {
+      if (rotatedHits.has(g)) continue;
+      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      ctx.moveTo(x + 2.5, y);
+      ctx.arc(x, y, 2.5, 0, TWO_PI);
+    }
+    ctx.fill();
+
+    // Pass 2: active hits (colored dots) — skip the one at trigger position
+    ctx.fillStyle = rgba(inst.color, isMuted ? 0.3 : 0.85);
+    ctx.beginPath();
+    for (let g = 0; g < loopSize; g++) {
+      if (!rotatedHits.has(g)) continue;
+      if (state.isPlaying && g === triggerDisplayStep) continue;
+      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      ctx.moveTo(x + 4.5, y);
+      ctx.arc(x, y, 4.5, 0, TWO_PI);
+    }
+    ctx.fill();
+
+    // Pass 3: triggered dot at indicator (white flash)
+    if (isTriggerHit) {
+      const angle = TRIGGER_ANGLE;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      ctx.beginPath();
+      ctx.arc(x, y, 5.5, 0, TWO_PI);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+    }
+
+    // Fixed indicator notch at bottom
+    const notchCos = Math.cos(TRIGGER_ANGLE);
+    const notchSin = Math.sin(TRIGGER_ANGLE);
+    ctx.beginPath();
+    ctx.moveTo(cx + notchCos * (radius + 4), cy + notchSin * (radius + 4));
+    ctx.lineTo(cx + notchCos * (radius + RING_PADDING - 6), cy + notchSin * (radius + RING_PADDING - 6));
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Beat markers
+    const stepsPerBeat = Math.round(loopSize / 4);
+    ctx.beginPath();
+    for (let g = 0; g < loopSize; g += stepsPerBeat) {
+      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      ctx.moveTo(cx + cos * (radius - 8), cy + sin * (radius - 8));
+      ctx.lineTo(cx + cos * (radius + 8), cy + sin * (radius + 8));
+    }
+    ctx.strokeStyle = rgba(inst.color, 0.2);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Center text
+    const fontSize = Math.max(14, Math.floor(radius * 0.45));
+    ctx.fillStyle = rgba(inst.color, isMuted ? 0.3 : 0.8);
+    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(inst.hits), cx, cy - fontSize * 0.25);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.font = `${Math.floor(fontSize * 0.5)}px monospace`;
+    ctx.fillText(`/${inst.loopSize}`, cx, cy + fontSize * 0.6);
+  }
+
+  private renderChase(state: ReturnType<typeof useStore.getState>): void {
+    if (state.instruments !== this._lastInstrRef) {
+      this._lastInstrRef = state.instruments;
+      this._cachedInst = state.instruments.find((i) => i.id === this.instrumentId) ?? null;
+    }
+    const inst = this._cachedInst;
+    if (!inst) return;
+
+    const w = this._rectW;
+    const h = this._rectH;
+    if (w <= 0 || h <= 0) return;
+    const ctx = this.ctx;
+    const { cx, cy, radius } = this.getLayout();
+    if (radius <= 0) return;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const transport = Tone.getTransport();
+    const stepsPerBeatGlobal = state.stepsPerBeat ?? 8;
+    const secondsPerStep = 60 / state.bpm / stepsPerBeatGlobal;
+    const totalSteps = state.isPlaying ? transport.seconds / secondsPerStep : 0;
+
+    const effectivelyMuted = isInstrumentEffectivelyMuted(state, this.instrumentId, inst.muted, inst.solo);
+    const isMuted = effectivelyMuted;
+
+    const instProg = state.isPlaying && !effectivelyMuted
+      ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
+    const currentStep = Math.floor(instProg * inst.loopSize) % inst.loopSize;
+
+    // Build hit step set (cached)
+    const hitsChanged = inst.hitPositions !== this._ledHitRef;
+    if (hitsChanged) {
+      this._ledHitRef = inst.hitPositions;
+      this._ledHitSteps.clear();
+      for (const hp of inst.hitPositions) {
+        this._ledHitSteps.add(Math.round(hp * inst.loopSize) % inst.loopSize);
+      }
+    }
+
+    const loopSize = inst.loopSize;
+
+    // Rotated hit set: reuse cached set, only rebuild when step or hits change
+    if (currentStep !== this._chaseLastStep || hitsChanged) {
+      this._chaseRotated.clear();
+      for (const s of this._ledHitSteps) {
+        this._chaseRotated.add((s + currentStep) % loopSize);
+      }
+      this._chaseLastStep = currentStep;
+    }
+    const rotatedHits = this._chaseRotated;
+
+    const triggerDisplayStep = 0;
+    const isTriggerHit = state.isPlaying && rotatedHits.has(triggerDisplayStep);
+
+    // Dot sizing — all dots are visible, hits slightly larger
+    const baseDotR = Math.max(3, radius * 0.065);
+    const hitDotR = baseDotR * 1.35;
+    const triggerDotR = baseDotR * 1.55;
+
+    // Pass 1: non-hit dots (visible gray)
+    ctx.fillStyle = 'rgba(180,180,190,0.35)';
+    ctx.beginPath();
+    for (let g = 0; g < loopSize; g++) {
+      if (rotatedHits.has(g)) continue;
+      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      ctx.moveTo(x + baseDotR, y);
+      ctx.arc(x, y, baseDotR, 0, TWO_PI);
+    }
+    ctx.fill();
+
+    // Pass 2: hit dots (instrument color)
+    ctx.fillStyle = rgba(inst.color, isMuted ? 0.35 : 0.9);
+    ctx.beginPath();
+    for (let g = 0; g < loopSize; g++) {
+      if (!rotatedHits.has(g)) continue;
+      if (state.isPlaying && g === triggerDisplayStep) continue;
+      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      ctx.moveTo(x + hitDotR, y);
+      ctx.arc(x, y, hitDotR, 0, TWO_PI);
+    }
+    ctx.fill();
+
+    // Pass 3: triggered dot (white)
+    if (isTriggerHit) {
+      const x = cx + Math.cos(TRIGGER_ANGLE) * radius;
+      const y = cy + Math.sin(TRIGGER_ANGLE) * radius;
+      ctx.beginPath();
+      ctx.arc(x, y, triggerDotR, 0, TWO_PI);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+    }
+
+    // Indicator notch at bottom
+    const notchCos = Math.cos(TRIGGER_ANGLE);
+    const notchSin = Math.sin(TRIGGER_ANGLE);
+    ctx.beginPath();
+    ctx.moveTo(cx + notchCos * (radius + 4), cy + notchSin * (radius + 4));
+    ctx.lineTo(cx + notchCos * (radius + RING_PADDING - 6), cy + notchSin * (radius + RING_PADDING - 6));
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Center text: hits
     const fontSize = Math.max(14, Math.floor(radius * 0.45));
     ctx.fillStyle = rgba(inst.color, isMuted ? 0.3 : 0.8);
     ctx.font = `bold ${fontSize}px monospace`;
@@ -263,8 +677,7 @@ export class KnobRenderer {
     const stepsPerBeatGlobal = state.stepsPerBeat ?? 8;
     const secondsPerStep = 60 / state.bpm / stepsPerBeatGlobal;
     const totalSteps = state.isPlaying ? transport.seconds / secondsPerStep : 0;
-    const anySolo = state.instruments.some((i) => i.solo);
-    const effectivelyMuted = (inst.muted && !inst.solo) || (anySolo && !inst.solo);
+    const effectivelyMuted = isInstrumentEffectivelyMuted(state, this.instrumentId, inst.muted, inst.solo);
     const instProg = state.isPlaying && !effectivelyMuted
       ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
     const dotRotation = instProg * TWO_PI;
@@ -297,8 +710,7 @@ export class KnobRenderer {
     const stepsPerBeatGlobal = state.stepsPerBeat ?? 8;
     const secondsPerStep = 60 / state.bpm / stepsPerBeatGlobal;
     const totalSteps = state.isPlaying ? transport.seconds / secondsPerStep : 0;
-    const anySolo = state.instruments.some((i) => i.solo);
-    const effectivelyMuted = inst ? (inst.muted && !inst.solo) || (anySolo && !inst.solo) : false;
+    const effectivelyMuted = inst ? isInstrumentEffectivelyMuted(state, this.instrumentId, inst.muted, inst.solo) : false;
     const instProg = state.isPlaying && inst && !effectivelyMuted
       ? (totalSteps % inst.loopSize) / inst.loopSize : 0;
     const dotRotation = instProg * TWO_PI;

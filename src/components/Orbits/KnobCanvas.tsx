@@ -9,6 +9,7 @@ import { SamplePickerPopup } from '../SampleBank/SamplePickerPopup';
 import { EFFECT_PARAM_DEFS, QUICK_PARAM_KEYS } from '../../audio/effectParams';
 import { EFFECT_COLORS, EFFECT_ICONS } from '../EffectsSidebar/EffectBlock';
 import { EffectKnob } from '../EffectsSidebar/EffectKnob';
+import { DotRingOrb } from './DotRingOrb';
 import type { Effect } from '../../types/effects';
 
 // ── EffectPill ───────────────────────────────────────────────────────────────
@@ -192,6 +193,8 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
 
   const isSelected = useStore((s) => s.selectedInstrumentId === instrumentId);
   const isMultiSelected = useStore((s) => s.selectedInstrumentIds.includes(instrumentId));
+  const displayMode = useStore((s) => s.orbitDisplayMode);
+  const isDotRing = displayMode === 'rotate';
   const sceneColorSelector = useCallback((s: { scenes: { instrumentIds: string[]; color: string }[] }) => {
     for (const g of s.scenes) {
       if (g.instrumentIds.includes(instrumentId)) return g.color;
@@ -208,6 +211,7 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
   const inst = useStore((s) => s.instruments.find((i) => i.id === instrumentId));
 
   useEffect(() => {
+    if (isDotRing) return; // DotRingOrb handles its own rendering
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -233,7 +237,7 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
       renderer.stop();
       observer.disconnect();
     };
-  }, [instrumentId]);
+  }, [instrumentId, isDotRing]);
 
   // Stop/start RAF loops during panel resize to prevent layout thrashing
   useEffect(() => {
@@ -521,16 +525,20 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
       >
         <span className="text-[11px] font-bold text-white/70 leading-none select-none">+</span>
       </button>
-      <canvas
-        ref={canvasRef}
-        className="w-full aspect-square cursor-pointer my-1"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
-      />
+      {isDotRing ? (
+        <DotRingOrb instrumentId={instrumentId} size={160} />
+      ) : (
+        <canvas
+          ref={canvasRef}
+          className="w-full aspect-square cursor-pointer my-1"
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
+        />
+      )}
       {/* Sample selector — bordered, analogue synth style */}
       <span
         ref={nameSpanRef}

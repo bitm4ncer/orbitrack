@@ -53,6 +53,14 @@ function StarIcon({ filled, onClick }: { filled: boolean; onClick: (e: React.Mou
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
+function collectAllPresets(node: FolderNode): SynthPreset[] {
+  const result = [...node.presets];
+  for (const child of node.children.values()) {
+    result.push(...collectAllPresets(child));
+  }
+  return result;
+}
+
 function FolderTreeNode({
   node, depth, color, selectedId, expanded, onToggle, onSelect, onAction, onToggleStar,
 }: {
@@ -64,8 +72,8 @@ function FolderTreeNode({
 }) {
   const isOpen = expanded.has(node.path);
 
-  // Extract starred presets for Favorites folder
-  const starredPresets = node.presets.filter(p => p.starred);
+  // At root level, collect starred presets from the entire tree
+  const allStarred = !node.name ? collectAllPresets(node).filter(p => p.starred) : [];
   const unstarredPresets = node.presets.filter(p => !p.starred);
 
   return (
@@ -89,7 +97,7 @@ function FolderTreeNode({
       {(isOpen || !node.name) && (
         <>
           {/* Favorites folder at top (root only) */}
-          {!node.name && starredPresets.length > 0 && (
+          {!node.name && allStarred.length > 0 && (
             <div>
               <button
                 onClick={() => onToggle('Favorites')}
@@ -101,11 +109,11 @@ function FolderTreeNode({
                   <polygon points="12 2 15.09 10.26 24 10.35 17.77 16.01 20.16 24.02 12 18.35 3.84 24.02 6.23 16.01 0 10.35 8.91 10.26" />
                 </svg>
                 <span className="text-[10px] text-text-secondary/80 font-medium">Favorites</span>
-                <span className="text-[8px] text-text-secondary/30 ml-auto">{starredPresets.length}</span>
+                <span className="text-[8px] text-text-secondary/30 ml-auto">{allStarred.length}</span>
               </button>
               {expanded.has('Favorites') && (
                 <div>
-                  {starredPresets
+                  {allStarred
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map((p) => (
                       <PresetRow

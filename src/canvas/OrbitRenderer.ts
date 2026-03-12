@@ -1,5 +1,6 @@
 import * as Tone from 'tone';
 import { useStore } from '../state/store';
+import { isInstrumentEffectivelyMuted } from './renderUtils';
 import type { Instrument } from '../types/instrument';
 
 const TRIGGER_ANGLE = Math.PI / 2; // Bottom (6 o'clock)
@@ -91,11 +92,28 @@ export class OrbitRenderer {
     this.animationId = requestAnimationFrame(this.loop);
   };
 
+  // LED mode caches
+  private _ledHitSets = new Map<string, { ref: unknown; steps: Set<number> }>();
+  // Chase mode: reuse rotated sets per instrument
+  private _chaseRotatedSets = new Map<string, { step: number; hitRef: unknown; set: Set<number> }>();
+
   private render(): void {
     const w = this._rectW;
     const h = this._rectH;
     if (w <= 0 || h <= 0) return;
     const state = useStore.getState();
+    if (state.orbitDisplayMode === 'led') {
+      this.renderLED(state);
+      return;
+    }
+    if (state.orbitDisplayMode === 'rotate') {
+      this.renderRotate(state);
+      return;
+    }
+    if (state.orbitDisplayMode === 'chase') {
+      this.renderChase(state);
+      return;
+    }
     const { instruments, isPlaying, spinMode, bpm } = state;
 
     // Sort by loopSize ascending — memoized; only re-sort when instruments array changes.
@@ -130,7 +148,8 @@ export class OrbitRenderer {
     // Per-instrument real-time progress
     const instProgressRT: Record<string, number> = {};
     for (const inst of ordered) {
-      instProgressRT[inst.id] = isPlaying
+      const effMuted = isInstrumentEffectivelyMuted(state, inst.id, inst.muted, inst.solo);
+      instProgressRT[inst.id] = isPlaying && !effMuted
         ? ((totalSteps % inst.loopSize) / inst.loopSize)
         : 0;
     }
@@ -222,10 +241,7 @@ export class OrbitRenderer {
 
         if (isTriggered) {
           ctx.fillStyle = '#ffffff';
-          ctx.shadowColor = inst.color;
-          ctx.shadowBlur = 15;
           ctx.fill();
-          ctx.shadowBlur = 0;
         } else {
           ctx.fillStyle = baseFillColor;
           ctx.fill();
@@ -240,19 +256,349 @@ export class OrbitRenderer {
     }
   }
 
+  private renderLED(state: ReturnType<typeof useStore.getState>): void {
+    const w = this._rectW;
+    const h = this._rectH;
+    const { instruments, isPlaying, bpm } = state;
+
+    if (instruments !== this._lastInstrRef) {
+      this._lastInstrRef = instruments;
+      this._orderedCache = [...instruments].sort((a, b) => a.loopSize - b.loopSize);
+    }
+    const ordered = this._orderedCache;
+
+    if (w !== this.layout.width || h !== this.layout.height || ordered.length !== this.layout.instrumentCount || this.zoom !== this.layout.zoom) {
+      this.updateLayout(w, h, ordered.length);
+    }
+
+    const { cx, cy, maxRadius, ringSpacing } = this.layout;
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, w, h);
+
+    const toneTransport = Tone.getTransport();
+    const stepsPerBeat = state.stepsPerBeat ?? 8;
+    const secondsPerStep = 60 / bpm / stepsPerBeat;
+    const totalSteps = isPlaying ? toneTransport.seconds / secondsPerStep : 0;
+
+    // Trigger line (plain, no shadow)
+    const maxLoopSize = ordered.reduce((m, i) => Math.max(m, i.loopSize), 1);
+    const globalProgress = (totalSteps % maxLoopSize) / maxLoopSize;
+    const lineAngle = state.spinMode ? TRIGGER_ANGLE + globalProgress * TWO_PI : TRIGGER_ANGLE;
+    const cos0 = Math.cos(lineAngle);
+    const sin0 = Math.sin(lineAngle);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + cos0 * (maxRadius + 20), cy + sin0 * (maxRadius + 20));
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    for (let si = 0; si < ordered.length; si++) {
+      const inst = ordered[si];
+      const radius = ringSpacing * (si + 1);
+      const loopSize = inst.loopSize;
+      const effMuted = isInstrumentEffectivelyMuted(state, inst.id, inst.muted, inst.solo);
+
+      const instProg = isPlaying && !effMuted ? (totalSteps % loopSize) / loopSize : 0;
+      const currentStep = Math.floor(instProg * loopSize) % loopSize;
+      const dotRotation = state.spinMode ? 0 : instProg * TWO_PI;
+
+      // Ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, TWO_PI);
+      ctx.strokeStyle = rgba(inst.color, effMuted ? 0.1 : 0.2);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Build hit step set (cached)
+      const cached = this._ledHitSets.get(inst.id);
+      let hitSteps: Set<number>;
+      if (cached && cached.ref === inst.hitPositions) {
+        hitSteps = cached.steps;
+      } else {
+        hitSteps = new Set<number>();
+        for (const hp of inst.hitPositions) {
+          hitSteps.add(Math.round(hp * loopSize) % loopSize);
+        }
+        this._ledHitSets.set(inst.id, { ref: inst.hitPositions, steps: hitSteps });
+      }
+
+      // Pass 1: empty steps (dim)
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.beginPath();
+      for (let g = 0; g < loopSize; g++) {
+        if (hitSteps.has(g)) continue;
+        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE - dotRotation;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        ctx.moveTo(x + 2, y);
+        ctx.arc(x, y, 2, 0, TWO_PI);
+      }
+      ctx.fill();
+
+      // Pass 2: active hits (colored)
+      ctx.fillStyle = rgba(inst.color, effMuted ? 0.3 : 0.85);
+      ctx.beginPath();
+      for (let g = 0; g < loopSize; g++) {
+        if (!hitSteps.has(g)) continue;
+        if (isPlaying && g === currentStep) continue;
+        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE - dotRotation;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        ctx.moveTo(x + 4, y);
+        ctx.arc(x, y, 4, 0, TWO_PI);
+      }
+      ctx.fill();
+
+      // Pass 3: triggered step (white)
+      if (isPlaying && hitSteps.has(currentStep)) {
+        const angle = (currentStep / loopSize) * TWO_PI + TRIGGER_ANGLE - dotRotation;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, TWO_PI);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+      }
+    }
+  }
+
+  private renderRotate(state: ReturnType<typeof useStore.getState>): void {
+    const w = this._rectW;
+    const h = this._rectH;
+    const { instruments, isPlaying, bpm } = state;
+
+    if (instruments !== this._lastInstrRef) {
+      this._lastInstrRef = instruments;
+      this._orderedCache = [...instruments].sort((a, b) => a.loopSize - b.loopSize);
+    }
+    const ordered = this._orderedCache;
+
+    if (w !== this.layout.width || h !== this.layout.height || ordered.length !== this.layout.instrumentCount || this.zoom !== this.layout.zoom) {
+      this.updateLayout(w, h, ordered.length);
+    }
+
+    const { cx, cy, maxRadius, ringSpacing } = this.layout;
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, w, h);
+
+    const toneTransport = Tone.getTransport();
+    const stepsPerBeat = state.stepsPerBeat ?? 8;
+    const secondsPerStep = 60 / bpm / stepsPerBeat;
+    const totalSteps = isPlaying ? toneTransport.seconds / secondsPerStep : 0;
+
+    // Fixed trigger line at bottom
+    const cos0 = Math.cos(TRIGGER_ANGLE);
+    const sin0 = Math.sin(TRIGGER_ANGLE);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + cos0 * (maxRadius + 20), cy + sin0 * (maxRadius + 20));
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    for (let si = 0; si < ordered.length; si++) {
+      const inst = ordered[si];
+      const radius = ringSpacing * (si + 1);
+      const loopSize = inst.loopSize;
+      const effMuted = isInstrumentEffectivelyMuted(state, inst.id, inst.muted, inst.solo);
+
+      const instProg = isPlaying && !effMuted ? (totalSteps % loopSize) / loopSize : 0;
+      const currentStep = Math.floor(instProg * loopSize) % loopSize;
+
+      // Ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, TWO_PI);
+      ctx.strokeStyle = rgba(inst.color, effMuted ? 0.1 : 0.2);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Build hit step set (cached)
+      const cached = this._ledHitSets.get(inst.id);
+      let hitSteps: Set<number>;
+      if (cached && cached.ref === inst.hitPositions) {
+        hitSteps = cached.steps;
+      } else {
+        hitSteps = new Set<number>();
+        for (const hp of inst.hitPositions) {
+          hitSteps.add(Math.round(hp * loopSize) % loopSize);
+        }
+        this._ledHitSets.set(inst.id, { ref: inst.hitPositions, steps: hitSteps });
+      }
+
+      // Rotate hit positions by currentStep
+      const rotatedHits = new Set<number>();
+      for (const s of hitSteps) {
+        rotatedHits.add((s + currentStep) % loopSize);
+      }
+
+      const triggerDisplayStep = 0;
+      const isTriggerHit = isPlaying && rotatedHits.has(triggerDisplayStep);
+
+      // Pass 1: empty steps (dim)
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.beginPath();
+      for (let g = 0; g < loopSize; g++) {
+        if (rotatedHits.has(g)) continue;
+        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        ctx.moveTo(x + 2, y);
+        ctx.arc(x, y, 2, 0, TWO_PI);
+      }
+      ctx.fill();
+
+      // Pass 2: active hits (colored)
+      ctx.fillStyle = rgba(inst.color, effMuted ? 0.3 : 0.85);
+      ctx.beginPath();
+      for (let g = 0; g < loopSize; g++) {
+        if (!rotatedHits.has(g)) continue;
+        if (isPlaying && g === triggerDisplayStep) continue;
+        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        ctx.moveTo(x + 4, y);
+        ctx.arc(x, y, 4, 0, TWO_PI);
+      }
+      ctx.fill();
+
+      // Pass 3: triggered dot at indicator (white)
+      if (isTriggerHit) {
+        const x = cx + cos0 * radius;
+        const y = cy + sin0 * radius;
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, TWO_PI);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+      }
+    }
+  }
+
+  private renderChase(state: ReturnType<typeof useStore.getState>): void {
+    const w = this._rectW;
+    const h = this._rectH;
+    const { instruments, isPlaying, bpm } = state;
+
+    if (instruments !== this._lastInstrRef) {
+      this._lastInstrRef = instruments;
+      this._orderedCache = [...instruments].sort((a, b) => a.loopSize - b.loopSize);
+    }
+    const ordered = this._orderedCache;
+
+    if (w !== this.layout.width || h !== this.layout.height || ordered.length !== this.layout.instrumentCount || this.zoom !== this.layout.zoom) {
+      this.updateLayout(w, h, ordered.length);
+    }
+
+    const { cx, cy, maxRadius, ringSpacing } = this.layout;
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, w, h);
+
+    const toneTransport = Tone.getTransport();
+    const stepsPerBeat = state.stepsPerBeat ?? 8;
+    const secondsPerStep = 60 / bpm / stepsPerBeat;
+    const totalSteps = isPlaying ? toneTransport.seconds / secondsPerStep : 0;
+
+    // Fixed trigger line at bottom
+    const cos0 = Math.cos(TRIGGER_ANGLE);
+    const sin0 = Math.sin(TRIGGER_ANGLE);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + cos0 * (maxRadius + 20), cy + sin0 * (maxRadius + 20));
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    for (let si = 0; si < ordered.length; si++) {
+      const inst = ordered[si];
+      const radius = ringSpacing * (si + 1);
+      const loopSize = inst.loopSize;
+      const effMuted = isInstrumentEffectivelyMuted(state, inst.id, inst.muted, inst.solo);
+
+      const instProg = isPlaying && !effMuted ? (totalSteps % loopSize) / loopSize : 0;
+      const currentStep = Math.floor(instProg * loopSize) % loopSize;
+
+      // Build hit step set (cached)
+      const cached = this._ledHitSets.get(inst.id);
+      let hitSteps: Set<number>;
+      if (cached && cached.ref === inst.hitPositions) {
+        hitSteps = cached.steps;
+      } else {
+        hitSteps = new Set<number>();
+        for (const hp of inst.hitPositions) {
+          hitSteps.add(Math.round(hp * loopSize) % loopSize);
+        }
+        this._ledHitSets.set(inst.id, { ref: inst.hitPositions, steps: hitSteps });
+      }
+
+      // Rotate hits by currentStep — reuse cached set per instrument
+      const cached2 = this._chaseRotatedSets.get(inst.id);
+      let rotatedHits: Set<number>;
+      if (cached2 && cached2.step === currentStep && cached2.hitRef === inst.hitPositions) {
+        rotatedHits = cached2.set;
+      } else {
+        rotatedHits = cached2?.set ?? new Set<number>();
+        rotatedHits.clear();
+        for (const s of hitSteps) {
+          rotatedHits.add((s + currentStep) % loopSize);
+        }
+        this._chaseRotatedSets.set(inst.id, { step: currentStep, hitRef: inst.hitPositions, set: rotatedHits });
+      }
+
+      const triggerDisplayStep = 0;
+      const isTriggerHit = isPlaying && rotatedHits.has(triggerDisplayStep);
+
+      // Dot sizing
+      const baseDotR = Math.max(2, ringSpacing * 0.08);
+      const hitDotR = baseDotR * 1.35;
+
+      // Pass 1: non-hit dots (visible gray)
+      ctx.fillStyle = 'rgba(180,180,190,0.35)';
+      ctx.beginPath();
+      for (let g = 0; g < loopSize; g++) {
+        if (rotatedHits.has(g)) continue;
+        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        ctx.moveTo(x + baseDotR, y);
+        ctx.arc(x, y, baseDotR, 0, TWO_PI);
+      }
+      ctx.fill();
+
+      // Pass 2: hit dots (instrument color)
+      ctx.fillStyle = rgba(inst.color, effMuted ? 0.35 : 0.9);
+      ctx.beginPath();
+      for (let g = 0; g < loopSize; g++) {
+        if (!rotatedHits.has(g)) continue;
+        if (isPlaying && g === triggerDisplayStep) continue;
+        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        ctx.moveTo(x + hitDotR, y);
+        ctx.arc(x, y, hitDotR, 0, TWO_PI);
+      }
+      ctx.fill();
+
+      // Pass 3: triggered dot (white)
+      if (isTriggerHit) {
+        const x = cx + cos0 * radius;
+        const y = cy + sin0 * radius;
+        ctx.beginPath();
+        ctx.arc(x, y, hitDotR * 1.15, 0, TWO_PI);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+      }
+    }
+  }
+
   private drawTriggerLine(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxRadius: number, angle: number): void {
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
-    ctx.save();
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(cx + cos * maxRadius, cy + sin * maxRadius);
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
     ctx.lineWidth = 2;
-    ctx.shadowColor = 'rgba(255,255,255,0.3)';
-    ctx.shadowBlur = 8;
     ctx.stroke();
-    ctx.restore();
   }
 
   // --- Hit detection for mouse interaction ---

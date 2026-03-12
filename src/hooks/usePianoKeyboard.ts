@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 import { useStore } from '../state/store';
 import { getSynthEngine } from '../audio/synthManager';
 import { initAudio } from '../audio/engine';
-import { loadSamples, triggerSample } from '../audio/sampler';
+import { loadSamples } from '../audio/sampler';
+import { superdough, getAudioContext } from 'superdough';
+import { DEFAULT_SAMPLER_PARAMS } from '../types/superdough';
 
 const audioInitRef = { initialized: false };
 
@@ -131,12 +133,25 @@ export function usePianoKeyboard(): void {
           engine.noteOnNow(midiNote, velocityRef.current);
           heldKeysRef.current.set(keyCode, midiNote);
         } else if (inst.type === 'sampler' && inst.sampleName) {
-          // Velocity as dB attenuation added to instrument volume
+          const sp = inst.samplerParams ?? DEFAULT_SAMPLER_PARAMS;
           const velocityLinear = velocityRef.current / 127;
-          const velocityDb = 20 * Math.log10(Math.max(0.001, velocityLinear));
-          const rootNote = inst.samplerParams?.rootNote ?? 60;
-          const speed = (inst.samplerParams?.speed ?? 1) * Math.pow(2, (midiNote - rootNote) / 12);
-          triggerSample(inst.sampleName, undefined, inst.volume + velocityDb, speed);
+          const instGain = Math.pow(10, inst.volume / 20);
+          const rootNote = sp.rootNote ?? 60;
+          const speed = (sp.speed ?? 1) * Math.pow(2, (midiNote - rootNote) / 12);
+
+          superdough({
+            s: inst.sampleName,
+            gain: sp.gain * instGain * velocityLinear,
+            speed,
+            begin: sp.begin,
+            end: sp.end,
+            attack: sp.attack,
+            release: Math.max(sp.release, 0.005),
+            cutoff: sp.cutoff,
+            resonance: sp.resonance,
+            pan: (sp.pan + 1) / 2,
+            orbit: inst.orbitIndex,
+          }, getAudioContext().currentTime, 1);
           heldKeysRef.current.set(keyCode, midiNote);
         }
       } catch (err) {

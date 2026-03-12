@@ -9,20 +9,59 @@ type DeviceChangeCallback = (devices: MidiDeviceInfo[]) => void;
 type MidiActivityCallback = () => void;
 type MidiSystemCallback = (statusByte: number) => void;
 
+type ReconnectCallback = (deviceId: string) => void;
+
 let midiInputDevice: Input | null = null;
 let midiOutputDevice: Output | null = null;
 let isWebMidiEnabled = false;
+let storedInputDeviceId: string | null = null;
+let storedOutputDeviceId: string | null = null;
 let ccCallbacks: MidiCallback[] = [];
 let noteCallbacks: MidiCallback[] = [];
 let deviceChangeCallbacks: DeviceChangeCallback[] = [];
 let activityCallbacks: MidiActivityCallback[] = [];
 let systemCallbacks: MidiSystemCallback[] = [];
+let reconnectCallbacks: ReconnectCallback[] = [];
 
 export async function initMidi(): Promise<void> {
   try {
     await WebMidi.enable();
     isWebMidiEnabled = true;
     console.log('[MIDI] WebMidi enabled');
+
+    WebMidi.addListener('connected', (e: any) => {
+      console.log('[MIDI] Device connected:', e.port?.name);
+      notifyDeviceChange();
+
+      // Auto-reconnect input if it matches stored device ID
+      if (storedInputDeviceId && !midiInputDevice && e.port?.id === storedInputDeviceId) {
+        console.log('[MIDI] Auto-reconnecting input device:', e.port.name);
+        setMidiInputDevice(storedInputDeviceId);
+        reconnectCallbacks.forEach(cb => cb(storedInputDeviceId!));
+      }
+
+      // Auto-reconnect output
+      if (storedOutputDeviceId && !midiOutputDevice && e.port?.id === storedOutputDeviceId) {
+        setMidiOutputDevice(storedOutputDeviceId);
+      }
+    });
+
+    WebMidi.addListener('disconnected', (e: any) => {
+      console.log('[MIDI] Device disconnected:', e.port?.name);
+
+      if (midiInputDevice && e.port?.id === midiInputDevice.id) {
+        console.log('[MIDI] Active input device disconnected, clearing reference');
+        midiInputDevice.removeListener();
+        midiInputDevice = null;
+      }
+
+      if (midiOutputDevice && e.port?.id === midiOutputDevice.id) {
+        midiOutputDevice = null;
+      }
+
+      notifyDeviceChange();
+    });
+
     notifyDeviceChange();
   } catch (error) {
     console.error('[MIDI] Failed to enable WebMidi:', error);
@@ -60,6 +99,7 @@ export function setMidiInputDevice(deviceId: string | null): boolean {
     midiInputDevice = null;
   }
 
+  storedInputDeviceId = deviceId;
   if (!deviceId) return true;
 
   const device = WebMidi.getInputById(deviceId);
@@ -77,6 +117,7 @@ export function setMidiInputDevice(deviceId: string | null): boolean {
 export function setMidiOutputDevice(deviceId: string | null): boolean {
   if (!isWebMidiEnabled) return false;
 
+  storedOutputDeviceId = deviceId;
   midiOutputDevice = deviceId ? WebMidi.getOutputById(deviceId) || null : null;
   if (deviceId && !midiOutputDevice) {
     console.error(`[MIDI] Output device not found: ${deviceId}`);
@@ -154,6 +195,13 @@ export function onMidiDeviceChange(callback: DeviceChangeCallback): () => void {
   };
 }
 
+export function onMidiReconnect(callback: ReconnectCallback): () => void {
+  reconnectCallbacks.push(callback);
+  return () => {
+    reconnectCallbacks = reconnectCallbacks.filter(cb => cb !== callback);
+  };
+}
+
 function notifyDeviceChange(): void {
   const allDevices: MidiDeviceInfo[] = [
     ...getMidiInputDevices(),
@@ -218,9 +266,16 @@ export function disableMidi(): void {
     midiInputDevice = null;
   }
   midiOutputDevice = null;
+  storedInputDeviceId = null;
+  storedOutputDeviceId = null;
   ccCallbacks = [];
   noteCallbacks = [];
   activityCallbacks = [];
   systemCallbacks = [];
+  reconnectCallbacks = [];
+  if (isWebMidiEnabled) {
+    WebMidi.removeListener('connected');
+    WebMidi.removeListener('disconnected');
+  }
   isWebMidiEnabled = false;
 }

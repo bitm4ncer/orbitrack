@@ -7,6 +7,7 @@ import {
   setMidiInputDevice,
   setMidiOutputDevice,
   onMidiDeviceChange,
+  onMidiReconnect,
   isMidiEnabled,
 } from '../audio/midiController';
 import { startMidiRouting, stopMidiRouting } from '../audio/midiRouter';
@@ -55,8 +56,16 @@ export function useMidiSetup(): {
           }
         });
 
+        const unsubReconnect = onMidiReconnect(() => {
+          if (mounted) {
+            stopMidiRouting();
+            startMidiRouting(midiSettings.ccMappings, midiSettings.noteMappings);
+          }
+        });
+
         return () => {
           unsubscribe();
+          unsubReconnect();
           stopMidiRouting();
         };
       } catch (err) {
@@ -95,6 +104,26 @@ export function useMidiSetup(): {
       setMidiOutputDevice(midiSettings.midiOutputDeviceId);
     }
   }, [midiSettings.midiOutputDeviceId]);
+
+  // Re-validate MIDI connection when tab becomes visible again (stale session recovery)
+  useEffect(() => {
+    if (!midiSettings.enabled) return;
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isReady.current) {
+        if (midiSettings.midiInputDeviceId && !isMidiEnabled()) {
+          const reconnected = setMidiInputDevice(midiSettings.midiInputDeviceId);
+          if (reconnected) {
+            stopMidiRouting();
+            startMidiRouting(midiSettings.ccMappings, midiSettings.noteMappings);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [midiSettings.enabled, midiSettings.midiInputDeviceId, midiSettings.ccMappings, midiSettings.noteMappings]);
 
   return {
     isReady: isReady.current,
