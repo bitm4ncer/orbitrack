@@ -7,7 +7,7 @@ import { setLastSetId } from '../../storage/sessionAutosave';
 import { gunzipAsync, fromBase64Url, strFromU8 } from '../../storage/compressionUtils';
 import { encodeSetToUrl, buildShareUrl } from '../../storage/urlShare';
 import { resizeImageToThumbnail } from '../../storage/thumbnailCapture';
-import type { SetMeta, OrbeatSet, SetVersionEntry } from '../../types/storage';
+import type { SetMeta, OrbitrackSet, SetVersionEntry } from '../../types/storage';
 
 interface OpenSetDialogProps {
   onClose: () => void;
@@ -56,7 +56,7 @@ export function OpenSetDialog({ onClose }: OpenSetDialogProps) {
   const handleImportFile = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.orbeat,.json';
+    input.accept = '.orb,.json';
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
@@ -80,7 +80,7 @@ export function OpenSetDialog({ onClose }: OpenSetDialogProps) {
     }
     setExpandedId(id);
     setLoadingVersions(true);
-    const set = await storage.getSet(id) as OrbeatSet | undefined;
+    const set = await storage.getSet(id) as OrbitrackSet | undefined;
     setVersions(set?.versions ?? []);
     setLoadingVersions(false);
   }, [expandedId]);
@@ -103,7 +103,7 @@ export function OpenSetDialog({ onClose }: OpenSetDialogProps) {
     try {
       const store = useStore.getState();
       const serState = store.getSerializableState();
-      const setData = await storage.getSet(id) as OrbeatSet | undefined;
+      const setData = await storage.getSet(id) as OrbitrackSet | undefined;
       const name = setData?.meta?.name ?? 'Shared';
       const thumb = setData?.meta?.thumbnail ?? store.currentSetThumbnail ?? undefined;
       const result = await encodeSetToUrl(serState, name, thumb);
@@ -128,7 +128,7 @@ export function OpenSetDialog({ onClose }: OpenSetDialogProps) {
       try {
         const dataUrl = await resizeImageToThumbnail(file);
         // Update in IDB
-        const set = await storage.getSet(id) as OrbeatSet | undefined;
+        const set = await storage.getSet(id) as OrbitrackSet | undefined;
         if (set) {
           set.meta.thumbnail = dataUrl;
           await storage.saveSet(set);

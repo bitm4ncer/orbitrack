@@ -46,7 +46,7 @@ export interface SetVersion {
 }
 
 export interface SetVersionEntry extends SetVersion {
-  snapshot: string;         // gzip+base64url of OrbeatSet JSON (without versions array)
+  snapshot: string;         // gzip+base64url of OrbitrackSet JSON (without versions array)
 }
 
 export interface EmbeddedSample {
@@ -56,7 +56,7 @@ export interface EmbeddedSample {
   base64: string;
 }
 
-export interface OrbeatSet {
+export interface OrbitrackSet {
   id: string;           // top-level key for IndexedDB (mirrors meta.id)
   version: 1;
   meta: SetMeta;

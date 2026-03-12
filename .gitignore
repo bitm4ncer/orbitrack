@@ -4,6 +4,9 @@ dist
 *.local
 *.
 
+# Claude Code
+.claude/
+
 # Audio assets served from CDN
 loops/
 samples/

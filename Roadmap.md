@@ -1,4 +1,4 @@
-ORBEAT — ROADMAP
+ORBITRACK — ROADMAP
 ================================================================================
 
 STATUS: v0.0.8 (dev)  |  MODEL: open core  |  LICENSE: MIT (planned)
@@ -12,9 +12,9 @@ You start with a beat, not a blank page.
 DECISIONS LOCKED
 ----------------
   Monetization  →  free forever to jam
-                   audio export free but watermarked ("Made with Orbeat")
+                   audio export free but watermarked ("Made with orbitrack")
                    €35 one-time: removes watermark + unlocks private cloud saves
-  Open source   →  yes. code on GitHub (MIT), hosted service at orbeat.app
+  Open source   →  yes. code on GitHub (MIT), hosted service at orbitrack.app
   Accounts      →  v2. URL-as-save ships first, no backend in v1
   Mobile        →  desktop-first. iPad/mobile is a later milestone
   Arrangement   →  Scene chain (Song Mode), NOT a full DAW timeline
@@ -52,18 +52,18 @@ v1 ADDITIONS
 
   [ ] Shareable URL
         - "Share" button → encodes project state as base64 URL hash
-        - orbeat.app/#[base64-encoded-OrbeatSet]
+        - orbitrack.app/#[base64-encoded-OrbitrackSet]
         - no backend, no account needed
         - works as a bookmark = free save
         - opens and hydrates on load
 
   [ ] Audio export
-        - free: exports with "Made with Orbeat — orbeat.app" mixed into audio
+        - free: exports with "Made with orbitrack — orbitrack.app" mixed into audio
         - paid: clean export (no watermark)
         - format: wav + mp3
 
   [ ] Landing page
-        - designer-made, ships as separate route or orbeat.app/
+        - designer-made, ships as separate route or orbitrack.app/
         - embed: live demo in page, no install
         - one CTA: "Make a beat"
 
@@ -81,16 +81,16 @@ v2 — SOCIAL                                                         after laun
         - magic link fallback
 
   [ ] Cloud save
-        - save sets to Supabase DB (JSON, same OrbeatSet format)
+        - save sets to Supabase DB (JSON, same OrbitrackSet format)
         - free: 3 private sets
         - paid: unlimited
 
   [ ] Public profiles
-        - orbeat.app/@username
+        - orbitrack.app/@username
         - lists public sets with play count
 
   [ ] Shareable set URLs (server-side)
-        - orbeat.app/set/[short-id]
+        - orbitrack.app/set/[short-id]
         - replaces URL hash approach
         - enables play counts, forks
 

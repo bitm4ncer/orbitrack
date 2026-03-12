@@ -18,7 +18,7 @@ import { DEFAULT_LOOPER_PARAMS, createLooperEditorState } from '../types/looper'
 import { sliceBuffer, deleteRange, silenceRange, insertBuffer, extractPeaks, bufferToBlobUrl, revokeBlobUrl } from '../audio/bufferOps';
 import { detectTransients, detectTransientTails, mapTransientsToGrid, estimateLoopSize, detectBpm } from '../audio/transientDetector';
 import { getCachedBpm, setCachedBpm } from '../audio/bpmCache';
-import type { OrbeatSet } from '../types/storage';
+import type { OrbitrackSet } from '../types/storage';
 import { base64ToBlob } from '../storage/serializer';
 import { generateName } from '../utils/nameGenerator';
 import { startRecording as recStart, stopRecordingAsync, type RecordingFormat } from '../audio/recorder';
@@ -78,7 +78,7 @@ function randomHits(min = 1, max = 8): number {
 // Sample favorites helpers
 function loadSampleFavorites(): string[] {
   try {
-    const stored = localStorage.getItem('orbeat-sample-favorites');
+    const stored = localStorage.getItem('orbitrack-sample-favorites');
     return stored ? JSON.parse(stored) : [];
   } catch (e) {
     console.error('Failed to load sample favorites:', e);
@@ -88,7 +88,7 @@ function loadSampleFavorites(): string[] {
 
 function saveSampleFavorites(paths: string[]): void {
   try {
-    localStorage.setItem('orbeat-sample-favorites', JSON.stringify(paths));
+    localStorage.setItem('orbitrack-sample-favorites', JSON.stringify(paths));
   } catch (e) {
     console.error('Failed to save sample favorites:', e);
   }
@@ -440,7 +440,7 @@ export interface StoreState {
     trackMode: boolean;
     arrangement: ArrangementStep[];
   };
-  loadSet: (set: OrbeatSet) => void;
+  loadSet: (set: OrbitrackSet) => void;
   newSet: () => void;
 }
 
@@ -494,12 +494,12 @@ export const useStore = create<StoreState>((set, get) => ({
 
   // Orbit display — persisted to localStorage
   orbitDisplayMode: ((): 'classic' | 'led' | 'rotate' | 'chase' => {
-    const stored = localStorage.getItem('orbeat:orbitDisplayMode');
+    const stored = localStorage.getItem('orbitrack:orbitDisplayMode');
     if (stored === 'classic' || stored === 'led' || stored === 'rotate' || stored === 'chase') return stored;
     return 'led';
   })(),
   setOrbitDisplayMode: (mode: 'classic' | 'led' | 'rotate' | 'chase') => {
-    localStorage.setItem('orbeat:orbitDisplayMode', mode);
+    localStorage.setItem('orbitrack:orbitDisplayMode', mode);
     set({ orbitDisplayMode: mode });
   },
 
@@ -2630,7 +2630,7 @@ export const useStore = create<StoreState>((set, get) => ({
     };
   },
 
-  loadSet: (orbeatSet: OrbeatSet) => {
+  loadSet: (orbitrackSet: OrbitrackSet) => {
     // Tear down existing group buses before loading new state
     destroyAllSceneBuses();
 
@@ -2641,8 +2641,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
     // Re-register custom samples from embedded data and pre-decode into superdough's buffer cache
     const customSamples: { key: string; url: string; name: string }[] = [];
-    if (orbeatSet.customSamples) {
-      for (const es of orbeatSet.customSamples) {
+    if (orbitrackSet.customSamples) {
+      for (const es of orbitrackSet.customSamples) {
         const blob = base64ToBlob(es.base64, es.mimeType);
         const url = URL.createObjectURL(blob);
         registerSampleForPlayback(es.key, url);
@@ -2652,7 +2652,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }
 
     // Re-register + pre-decode non-custom samples referenced by instruments
-    for (const inst of orbeatSet.instruments) {
+    for (const inst of orbitrackSet.instruments) {
       if ((inst.type === 'sampler' || inst.type === 'looper') && inst.samplePath) {
         const isCustom = customSamples.some((c) => c.key === inst.samplePath);
         if (!isCustom) {
@@ -2662,47 +2662,47 @@ export const useStore = create<StoreState>((set, get) => ({
     }
 
     // Reset orbit counter to match loaded instruments
-    orbitCounter = orbeatSet.instruments.reduce((max, i) => Math.max(max, i.orbitIndex + 1), 0);
+    orbitCounter = orbitrackSet.instruments.reduce((max, i) => Math.max(max, i.orbitIndex + 1), 0);
 
     // Migration: use stepsPerBeat if saved, otherwise default to 16th notes
-    let instruments = orbeatSet.instruments;
-    let stepsPerBeat = orbeatSet.stepsPerBeat ?? 4;  // Default to 16th notes (4)
+    let instruments = orbitrackSet.instruments;
+    let stepsPerBeat = orbitrackSet.stepsPerBeat ?? 4;  // Default to 16th notes (4)
 
     set({
-      bpm: orbeatSet.bpm,
+      bpm: orbitrackSet.bpm,
       stepsPerBeat,
-      masterVolume: orbeatSet.masterVolume,
+      masterVolume: orbitrackSet.masterVolume,
       instruments,
-      gridNotes: orbeatSet.gridNotes,
-      gridGlide: orbeatSet.gridGlide,
-      gridLengths: orbeatSet.gridLengths,
-      gridVelocities: orbeatSet.gridVelocities ?? {},
-      instrumentEffects: orbeatSet.instrumentEffects,
-      masterEffects: orbeatSet.masterEffects ?? [],
-      scenes: orbeatSet.scenes ?? [],
-      sceneEffects: orbeatSet.sceneEffects ?? {},
+      gridNotes: orbitrackSet.gridNotes,
+      gridGlide: orbitrackSet.gridGlide,
+      gridLengths: orbitrackSet.gridLengths,
+      gridVelocities: orbitrackSet.gridVelocities ?? {},
+      instrumentEffects: orbitrackSet.instrumentEffects,
+      masterEffects: orbitrackSet.masterEffects ?? [],
+      scenes: orbitrackSet.scenes ?? [],
+      sceneEffects: orbitrackSet.sceneEffects ?? {},
       customSamples,
-      currentSetId: orbeatSet.meta.id,
-      currentSetName: orbeatSet.meta.name,
-      currentSetThumbnail: orbeatSet.meta.thumbnail ?? null,
-      selectedInstrumentId: orbeatSet.instruments[0]?.id ?? null,
-      selectedInstrumentIds: orbeatSet.instruments[0] ? [orbeatSet.instruments[0].id] : [],
+      currentSetId: orbitrackSet.meta.id,
+      currentSetName: orbitrackSet.meta.name,
+      currentSetThumbnail: orbitrackSet.meta.thumbnail ?? null,
+      selectedInstrumentId: orbitrackSet.instruments[0]?.id ?? null,
+      selectedInstrumentIds: orbitrackSet.instruments[0] ? [orbitrackSet.instruments[0].id] : [],
       selectedSceneId: null,
-      gridResolution: orbeatSet.gridResolution ?? 1,
-      scaleRoot: orbeatSet.scaleRoot ?? 0,
-      scaleType: orbeatSet.scaleType ?? 'chromatic',
-      trackMode: orbeatSet.trackMode ?? false,
-      arrangement: orbeatSet.arrangement ?? [],
+      gridResolution: orbitrackSet.gridResolution ?? 1,
+      scaleRoot: orbitrackSet.scaleRoot ?? 0,
+      scaleType: orbitrackSet.scaleType ?? 'chromatic',
+      trackMode: orbitrackSet.trackMode ?? false,
+      arrangement: orbitrackSet.arrangement ?? [],
     });
 
     // Persist last set ID for session restore on next load
     try {
-      localStorage.setItem('orbeat:lastSetId', orbeatSet.meta.id);
+      localStorage.setItem('orbitrack:lastSetId', orbitrackSet.meta.id);
     } catch { /* quota exceeded or private mode */ }
 
     // Re-init looper editors — async decode + BPM detection
     const baseUrl = ((import.meta.env.BASE_URL as string) ?? '/').replace(/\/$/, '') + '/';
-    for (const inst of orbeatSet.instruments) {
+    for (const inst of orbitrackSet.instruments) {
       if (inst.type === 'looper' && inst.samplePath) {
         const custom = customSamples.find((c) => c.key === inst.samplePath);
         let url: string | null;
@@ -2745,8 +2745,8 @@ export const useStore = create<StoreState>((set, get) => ({
     import('./undoHistory').then((m) => m.clearHistory());
 
     // Re-initialize group buses from loaded state
-    if (orbeatSet.scenes && orbeatSet.scenes.length > 0) {
-      initSceneBusesFromState(orbeatSet.scenes, orbeatSet.instruments);
+    if (orbitrackSet.scenes && orbitrackSet.scenes.length > 0) {
+      initSceneBusesFromState(orbitrackSet.scenes, orbitrackSet.instruments);
     }
   },
 
@@ -2793,7 +2793,7 @@ export const useStore = create<StoreState>((set, get) => ({
     });
 
     // Clear last set ID so autosave doesn't run for unsaved new sets
-    try { localStorage.removeItem('orbeat:lastSetId'); } catch { /* ignore */ }
+    try { localStorage.removeItem('orbitrack:lastSetId'); } catch { /* ignore */ }
 
     // Assign random samples to default sampler instruments
     const CATEGORIES: { keywords: string[]; index: number }[] = [

@@ -4,6 +4,6 @@ import tailwindcss from '@tailwindcss/vite'
 import { sampleListPlugin } from './src/vite-plugins/sampleListPlugin'
 
 export default defineConfig({
-  base: '/Orbeat/',
+  base: '/Orbitrack/',
   plugins: [react(), tailwindcss(), sampleListPlugin()],
 })

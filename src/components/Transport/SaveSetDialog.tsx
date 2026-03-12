@@ -6,7 +6,7 @@ import { serializeSet } from '../../storage/serializer';
 import { resizeImageToThumbnail } from '../../storage/thumbnailCapture';
 import { gzipAsync, toBase64Url, strToU8 } from '../../storage/compressionUtils';
 import { setLastSetId } from '../../storage/sessionAutosave';
-import type { OrbeatSet, SetVersionEntry } from '../../types/storage';
+import type { OrbitrackSet, SetVersionEntry } from '../../types/storage';
 
 const MAX_VERSIONS = 50;
 
@@ -85,7 +85,7 @@ export function SaveSetDialog({ onClose }: SaveSetDialogProps) {
       let versions: SetVersionEntry[] = [];
       if (existingSetId) {
         const existing = await storage.getSet(existingSetId);
-        versions = (existing as OrbeatSet | undefined)?.versions ?? [];
+        versions = (existing as OrbitrackSet | undefined)?.versions ?? [];
       }
 
       // Prepend new version, cap at MAX_VERSIONS

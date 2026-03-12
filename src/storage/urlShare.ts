@@ -1,7 +1,7 @@
 import { zip, unzip, strToU8, strFromU8 } from 'fflate';
 import { serializeSet, deserializeSet, sampleToBase64 } from './serializer';
 import { gzipAsync, gunzipAsync, toBase64Url, fromBase64Url } from './compressionUtils';
-import type { OrbeatSet } from '../types/storage';
+import type { OrbitrackSet } from '../types/storage';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,9 +63,9 @@ export async function encodeSetToUrl(
 }
 
 /**
- * Decode a base64url-encoded, gzip-compressed string back into an OrbeatSet.
+ * Decode a base64url-encoded, gzip-compressed string back into an OrbitrackSet.
  */
-export async function decodeSetFromUrl(encoded: string): Promise<OrbeatSet> {
+export async function decodeSetFromUrl(encoded: string): Promise<OrbitrackSet> {
   const compressed = fromBase64Url(encoded);
   const decompressed = await gunzipAsync(compressed);
   const json = strFromU8(decompressed);

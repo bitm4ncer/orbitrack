@@ -3,7 +3,7 @@
  * Keys are NEVER persisted to Zustand state or IndexedDB.
  */
 
-const API_KEY_STORAGE_KEY = 'orbeat_llm_api_key';
+const API_KEY_STORAGE_KEY = 'orbitrack_llm_api_key';
 
 export function getLLMApiKey(): string {
   try {

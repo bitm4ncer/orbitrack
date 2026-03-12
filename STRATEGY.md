@@ -1,4 +1,4 @@
-ORBEAT — STRATEGY
+ORBITRACK — STRATEGY
 ================================================================================
 
 NOT A MARKETING PLAN. A BEHAVIOUR PLAN.
@@ -86,7 +86,7 @@ PHASE 3 — COMPOUND (after first users)
 ================================================================================
 
   The watermark does the work
-    - Every shared clip has "Made with Orbeat — orbeat.app"
+    - Every shared clip has "Made with orbitrack — orbitrack.app"
     - You don't need to post. Your users post.
     - Optimise for this: make export dead simple, make sharing one tap.
 
@@ -110,7 +110,7 @@ PHASE 3 — COMPOUND (after first users)
 SAMPLE COMPANY ANGLE (parallel, not primary)
 ================================================================================
 
-  Pitch: "I'll integrate your sample pack as a free preset in Orbeat.
+  Pitch: "I'll integrate your sample pack as a free preset in orbitrack.
           Users demo your sounds in an interactive beat maker.
           You get a branded experience + leads."
 

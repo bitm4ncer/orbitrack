@@ -9,7 +9,7 @@ import { FilesMenu } from './FilesMenu';
 import { SettingsPopup } from './SettingsPopup';
 import { encodeSetToUrl, buildShareUrl, exportSamplesZip, importSamplesZip } from '../../storage/urlShare';
 import { MidiLight } from './MidiLight';
-const orbeatLogo = `${import.meta.env.BASE_URL}orbitrack_logo.svg`;
+const orbitrackLogo = `${import.meta.env.BASE_URL}orbitrack_logo.svg`;
 
 const SHORTCUTS = [
   { key: 'Space', action: 'Play / Stop' },
@@ -40,7 +40,7 @@ function InfoPopup({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4">
-          <img src={orbeatLogo} alt="ORBEAT" className="h-5" />
+          <img src={orbitrackLogo} alt="orbitrack" className="h-5" />
           <div className="text-[10px] text-text-secondary uppercase tracking-widest mt-0.5">Polyrhythmic Web Sequencer</div>
         </div>
 
@@ -348,7 +348,7 @@ export function TransportBar() {
   return (
     <div className="transport-bar relative flex items-center bg-bg-secondary border-t border-border">
       <div className="transport-logo flex items-center gap-3">
-        <img src={orbeatLogo} alt="ORBEAT" className="h-6" />
+        <img src={orbitrackLogo} alt="orbitrack" className="h-6" />
         <button
           ref={filesRef}
           onClick={() => setFilesOpen((o) => !o)}
@@ -438,7 +438,7 @@ export function TransportBar() {
         <button
           onClick={() => setInfoOpen((o) => !o)}
           className="w-5 h-5 rounded-full border border-border text-text-secondary hover:border-white/30 hover:text-text-primary transition-colors flex items-center justify-center text-[10px] font-bold leading-none cursor-pointer"
-          title="About Orbeat"
+          title="About orbitrack"
         >
           i
         </button>

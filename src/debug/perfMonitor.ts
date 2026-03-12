@@ -1,7 +1,7 @@
 /**
- * Lightweight performance monitor for Orbeat.
+ * Lightweight performance monitor for orbitrack.
  *
- * Toggle via console:  window.__orbeatPerf.start() / .stop()
+ * Toggle via console:  window.__orbitrackPerf.start() / .stop()
  * Or keyboard:         Ctrl+Shift+P
  *
  * Logs every 2 seconds:
@@ -50,7 +50,7 @@ class PerfMonitor {
     this._logIntervalId = setInterval(() => this._log(), LOG_INTERVAL_MS);
 
     console.log(
-      '%c[PerfMon] Started — logging every 2s. Call window.__orbeatPerf.stop() to disable.',
+      '%c[PerfMon] Started — logging every 2s. Call window.__orbitrackPerf.stop() to disable.',
       'color: #22c55e; font-weight: bold',
     );
   }

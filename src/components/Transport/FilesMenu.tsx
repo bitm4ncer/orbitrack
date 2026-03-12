@@ -6,7 +6,7 @@ import { storage } from '../../storage/LocalStorageProvider';
 import { serializeSet, exportSetToFile, importSetFromFile } from '../../storage/serializer';
 import { gzipAsync, toBase64Url, strToU8 } from '../../storage/compressionUtils';
 import { setLastSetId } from '../../storage/sessionAutosave';
-import type { OrbeatSet, SetVersionEntry } from '../../types/storage';
+import type { OrbitrackSet, SetVersionEntry } from '../../types/storage';
 import { SaveSetDialog } from './SaveSetDialog';
 import { OpenSetDialog } from './OpenSetDialog';
 
@@ -83,7 +83,7 @@ export function FilesMenu({ anchorRef, onClose }: FilesMenuProps) {
       };
 
       // Use already-loaded existing set for versions
-      const versions: SetVersionEntry[] = (existing as OrbeatSet | undefined)?.versions ?? [];
+      const versions: SetVersionEntry[] = (existing as OrbitrackSet | undefined)?.versions ?? [];
       versions.unshift(entry);
       if (versions.length > MAX_VERSIONS) versions.length = MAX_VERSIONS;
 
@@ -125,7 +125,7 @@ export function FilesMenu({ anchorRef, onClose }: FilesMenuProps) {
   const handleImport = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.orbeat,.json';
+    input.accept = '.orb,.json';
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
@@ -150,8 +150,8 @@ export function FilesMenu({ anchorRef, onClose }: FilesMenuProps) {
     { label: 'Save', action: handleSave },
     { label: 'Save As…', action: handleSaveAs },
     'separator',
-    { label: 'Export .orbeat…', action: handleExport },
-    { label: 'Import .orbeat…', action: handleImport },
+    { label: 'Export .orb…', action: handleExport },
+    { label: 'Import .orb…', action: handleImport },
     'separator',
     { label: 'My Sets', action: handleOpen },
   ] as const;

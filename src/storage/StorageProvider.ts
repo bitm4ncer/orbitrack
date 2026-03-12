@@ -1,4 +1,4 @@
-import type { SynthPreset, EffectPreset, SetMeta, OrbeatSet, SampleMeta } from '../types/storage';
+import type { SynthPreset, EffectPreset, SetMeta, OrbitrackSet, SampleMeta } from '../types/storage';
 
 /**
  * Abstract storage interface. Implemented by LocalStorageProvider (IndexedDB)
@@ -19,8 +19,8 @@ export interface StorageProvider {
 
   // Sets
   listSets(): Promise<SetMeta[]>;
-  getSet(id: string): Promise<OrbeatSet | undefined>;
-  saveSet(set: OrbeatSet): Promise<void>;
+  getSet(id: string): Promise<OrbitrackSet | undefined>;
+  saveSet(set: OrbitrackSet): Promise<void>;
   deleteSet(id: string): Promise<void>;
 
   // Samples

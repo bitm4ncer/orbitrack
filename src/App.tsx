@@ -48,9 +48,9 @@ function App() {
   const isLooperSelected = selectedInstrument?.type === 'looper';
   const hasSelection = !!selectedInstrument;
 
-  // Performance monitor — toggle with Ctrl+Shift+P or window.__orbeatPerf
+  // Performance monitor — toggle with Ctrl+Shift+P or window.__orbitrackPerf
   useEffect(() => {
-    (window as unknown as Record<string, unknown>).__orbeatPerf = perfMonitor;
+    (window as unknown as Record<string, unknown>).__orbitrackPerf = perfMonitor;
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.code === 'KeyP') {
         e.preventDefault();

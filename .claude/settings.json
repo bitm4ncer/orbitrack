@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm install --save-dev @aws-sdk/client-s3)"
+      "Bash(npm install --save-dev @aws-sdk/client-s3)",
+      "WebSearch"
     ]
   }
 }

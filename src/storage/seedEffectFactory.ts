@@ -4,7 +4,7 @@ import type { EffectPreset } from '../types/storage';
 
 /** Current factory effect preset version. Bump to re-seed after adding/changing presets. */
 const EFFECT_FACTORY_VERSION = 2;
-const LS_KEY = 'orbeat-effect-factory-v';
+const LS_KEY = 'orbitrack-effect-factory-v';
 
 /**
  * Seeds factory effect presets into IndexedDB on first run (or when the version bumps).

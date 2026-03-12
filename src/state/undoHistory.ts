@@ -1,5 +1,5 @@
 /**
- * Global undo/redo history for Orbeat.
+ * Global undo/redo history for orbitrack.
  *
  * Subscribe-based: watches the Zustand store for changes, captures snapshots
  * of only the "undoable" state slice, debounces rapid changes (knob drags),

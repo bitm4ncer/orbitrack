@@ -128,7 +128,7 @@ export function MidiSettingsPanel() {
               <option value="midiClockIn">MIDI Clock In</option>
             </select>
             <p className="text-xs text-muted-foreground">
-              {midiSettings.syncMode === 'internal' && 'Orbeat uses its own clock'}
+              {midiSettings.syncMode === 'internal' && 'orbitrack uses its own clock'}
               {midiSettings.syncMode === 'midiClockOut' && 'Sends clock to external devices'}
               {midiSettings.syncMode === 'midiClockIn' && 'Syncs to external MIDI clock'}
             </p>

@@ -3,7 +3,7 @@
  * in localStorage so they're instantly available on next load.
  */
 
-const STORAGE_KEY = 'orbeat-bpm-cache';
+const STORAGE_KEY = 'orbitrack-bpm-cache';
 
 let cache: Record<string, number> | null = null;
 

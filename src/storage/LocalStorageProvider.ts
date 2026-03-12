@@ -1,5 +1,5 @@
 import type { StorageProvider } from './StorageProvider';
-import type { SynthPreset, EffectPreset, SetMeta, OrbeatSet, SampleMeta } from '../types/storage';
+import type { SynthPreset, EffectPreset, SetMeta, OrbitrackSet, SampleMeta } from '../types/storage';
 import { getAll, get, put, del } from './idb';
 
 /**
@@ -46,15 +46,15 @@ export class LocalStorageProvider implements StorageProvider {
   // ── Sets ──────────────────────────────────────────────────────────────────
 
   async listSets(): Promise<SetMeta[]> {
-    const sets = await getAll<OrbeatSet>('sets');
+    const sets = await getAll<OrbitrackSet>('sets');
     return sets.map((s) => s.meta);
   }
 
-  async getSet(id: string): Promise<OrbeatSet | undefined> {
-    return get<OrbeatSet>('sets', id);
+  async getSet(id: string): Promise<OrbitrackSet | undefined> {
+    return get<OrbitrackSet>('sets', id);
   }
 
-  async saveSet(set: OrbeatSet): Promise<void> {
+  async saveSet(set: OrbitrackSet): Promise<void> {
     return put('sets', set);
   }
 

@@ -63,7 +63,7 @@ export function sampleListPlugin(): Plugin {
   let rootDir: string;
   let outDir: string;
   let isBuild: boolean;
-  // Normalised base without trailing slash: '/Orbeat/' → '/Orbeat', '/' → ''
+  // Normalised base without trailing slash: '/Orbitrack/' → '/Orbitrack', '/' → ''
   let basePath: string;
 
   return {

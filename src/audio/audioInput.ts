@@ -1,5 +1,5 @@
 /**
- * Audio Input Capture — Record from mic/interface into Orbeat
+ * Audio Input Capture — Record from mic/interface into orbitrack
  *
  * Signal path:
  *   getUserMedia(deviceId) → MediaStreamSource → inputGain → ScriptProcessorNode (PCM capture)

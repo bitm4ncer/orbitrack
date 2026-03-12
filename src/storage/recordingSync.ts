@@ -28,7 +28,7 @@ export function postSync(msg: SyncMessage): void {
 export function initRecordingSync(): void {
   if (typeof BroadcastChannel === 'undefined') return;
 
-  channel = new BroadcastChannel('orbeat-recordings');
+  channel = new BroadcastChannel('orbitrack-recordings');
 
   channel.onmessage = async (e: MessageEvent<SyncMessage>) => {
     const msg = e.data;

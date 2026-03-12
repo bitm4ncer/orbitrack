@@ -6,8 +6,8 @@
  * or appending an autosave version entry.
  *
  * Settings stored in localStorage:
- *   orbeat:autosave:enabled  — "true" | "false" (default: "true")
- *   orbeat:autosave:interval — ms string (default: "3000")
+ *   orbitrack:autosave:enabled  — "true" | "false" (default: "true")
+ *   orbitrack:autosave:interval — ms string (default: "3000")
  */
 
 import { getAudioContext as getSdAudioContext } from 'superdough';
@@ -16,7 +16,7 @@ import { put, get, del } from './idb';
 import type { Instrument } from '../types/instrument';
 import type { Effect } from '../types/effects';
 import type { InstrumentScene } from '../types/scene';
-import type { OrbeatSet, SetVersionEntry } from '../types/storage';
+import type { OrbitrackSet, SetVersionEntry } from '../types/storage';
 import { base64ToBlob, serializeSet } from './serializer';
 import { registerSampleForPlayback } from '../audio/engine';
 import { loadSample } from '../audio/sampler';
@@ -31,30 +31,30 @@ const MAX_VERSIONS = 50;
 // ── localStorage helpers ────────────────────────────────────────────────────
 
 export function getAutosaveEnabled(): boolean {
-  return localStorage.getItem('orbeat:autosave:enabled') !== 'false';
+  return localStorage.getItem('orbitrack:autosave:enabled') !== 'false';
 }
 
 export function setAutosaveEnabled(enabled: boolean): void {
-  localStorage.setItem('orbeat:autosave:enabled', String(enabled));
+  localStorage.setItem('orbitrack:autosave:enabled', String(enabled));
 }
 
 export function getAutosaveInterval(): number {
-  const raw = localStorage.getItem('orbeat:autosave:interval');
+  const raw = localStorage.getItem('orbitrack:autosave:interval');
   const ms = raw ? parseInt(raw, 10) : 3000;
   return isNaN(ms) ? 3000 : ms;
 }
 
 export function setAutosaveInterval(ms: number): void {
-  localStorage.setItem('orbeat:autosave:interval', String(ms));
+  localStorage.setItem('orbitrack:autosave:interval', String(ms));
 }
 
 export function getLastSetId(): string | null {
-  return localStorage.getItem('orbeat:lastSetId');
+  return localStorage.getItem('orbitrack:lastSetId');
 }
 
 export function setLastSetId(id: string | null): void {
-  if (id) localStorage.setItem('orbeat:lastSetId', id);
-  else localStorage.removeItem('orbeat:lastSetId');
+  if (id) localStorage.setItem('orbitrack:lastSetId', id);
+  else localStorage.removeItem('orbitrack:lastSetId');
 }
 
 // ── Legacy autosave data (for migration) ────────────────────────────────────
@@ -105,7 +105,7 @@ function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-async function createSnapshot(set: OrbeatSet): Promise<string> {
+async function createSnapshot(set: OrbitrackSet): Promise<string> {
   // Strip versions from the snapshot to avoid nesting
   const { versions: _, ...setWithoutVersions } = set;
   const json = JSON.stringify(setWithoutVersions);
@@ -163,7 +163,7 @@ async function saveSession(): Promise<void> {
   }
 
   // Load existing set to preserve its thumbnail and versions
-  const existing = await get<OrbeatSet>('sets', setId);
+  const existing = await get<OrbitrackSet>('sets', setId);
   if (existing?.meta?.thumbnail) {
     set.meta.thumbnail = existing.meta.thumbnail;
   }
@@ -216,7 +216,7 @@ function debouncedSave(): void {
  */
 export async function restoreFromSetId(setId: string): Promise<boolean> {
   try {
-    const set = await get<OrbeatSet>('sets', setId);
+    const set = await get<OrbitrackSet>('sets', setId);
     if (!set || !set.instruments || set.instruments.length === 0) return false;
 
     useStore.getState().loadSet(set);

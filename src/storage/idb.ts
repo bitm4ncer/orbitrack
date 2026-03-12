@@ -3,7 +3,7 @@
  * No external dependencies.
  */
 
-const DB_NAME = 'orbeat-db';
+const DB_NAME = 'orbitrack-db';
 const DB_VERSION = 3;
 
 let cachedDB: IDBDatabase | null = null;

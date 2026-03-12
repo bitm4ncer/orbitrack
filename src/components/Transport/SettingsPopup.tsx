@@ -367,7 +367,7 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
                     <h3 className="text-sm font-semibold text-text-primary mb-3">Polyrhythmic Sequencing</h3>
                     <div className="space-y-2 text-xs text-text-secondary/70 leading-relaxed">
                       <p>
-                        Orbeat creates complex rhythms by layering independent hit patterns across instruments. Each Orb (instrument) has its own hit count and step size, letting you build polyrhythms where patterns interlock at different intervals.
+                        orbitrack creates complex rhythms by layering independent hit patterns across instruments. Each Orb (instrument) has its own hit count and step size, letting you build polyrhythms where patterns interlock at different intervals.
                       </p>
                       <p>
                         For example: a bass with 4 hits per 16-step loop, drums with 3 hits per 16 steps, and a synth with 5 hits creates a naturally cycling pattern that resolves after 16 steps.
@@ -528,7 +528,7 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
               {activeTab === 'about' && (
                 <div className="p-6 space-y-6">
                   <div>
-                    <h3 className="text-sm font-semibold text-text-primary mb-2">Orbeat</h3>
+                    <h3 className="text-sm font-semibold text-text-primary mb-2">orbitrack</h3>
                     <p className="text-xs text-text-secondary/70">Polyrhythmic Web Sequencer</p>
                     <p className="text-xs text-text-secondary/50 mt-2">v0.1.0</p>
                   </div>

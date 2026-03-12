@@ -4,7 +4,7 @@ import type { SynthPreset } from '../types/storage';
 
 /** Current factory preset version. Bump to re-seed after adding/changing presets. */
 const FACTORY_VERSION = 3;
-const LS_KEY = 'orbeat-factory-v';
+const LS_KEY = 'orbitrack-factory-v';
 
 /**
  * Seeds factory presets into IndexedDB on first run (or when the version bumps).

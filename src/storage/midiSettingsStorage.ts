@@ -3,7 +3,7 @@
 import type { MidiSettings } from '../types/midi';
 import { DEFAULT_MIDI_SETTINGS } from '../types/midi';
 
-const STORAGE_KEY = 'orbeat_midi_settings';
+const STORAGE_KEY = 'orbitrack_midi_settings';
 
 /**
  * Save MIDI settings to localStorage

@@ -1,4 +1,4 @@
-import type { OrbeatSet, SetMeta, EmbeddedSample } from '../types/storage';
+import type { OrbitrackSet, SetMeta, EmbeddedSample } from '../types/storage';
 import type { Instrument } from '../types/instrument';
 import type { Effect } from '../types/effects';
 import type { InstrumentScene } from '../types/scene';
@@ -66,7 +66,7 @@ export interface SerializableState {
 export async function serializeSet(
   state: SerializableState,
   options: SerializeOptions,
-): Promise<OrbeatSet> {
+): Promise<OrbitrackSet> {
   const now = Date.now();
   const meta: SetMeta = {
     id: uid(),
@@ -127,32 +127,32 @@ export async function serializeSet(
 
 // ── Deserialize ──────────────────────────────────────────────────────────────
 
-export function deserializeSet(json: unknown): OrbeatSet {
+export function deserializeSet(json: unknown): OrbitrackSet {
   const obj = json as Record<string, unknown>;
-  if (!obj || typeof obj !== 'object') throw new Error('Invalid .orbeat file');
+  if (!obj || typeof obj !== 'object') throw new Error('Invalid .orb file');
   if (obj.version !== 1) throw new Error(`Unsupported version: ${obj.version}`);
   // Ensure top-level id exists (older exports may lack it)
-  const set = obj as unknown as OrbeatSet;
+  const set = obj as unknown as OrbitrackSet;
   if (!set.id && set.meta?.id) set.id = set.meta.id;
   return set;
 }
 
 // ── File I/O ─────────────────────────────────────────────────────────────────
 
-export function exportSetToFile(set: OrbeatSet): void {
+export function exportSetToFile(set: OrbitrackSet): void {
   const json = JSON.stringify(set, null, 2);
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${set.meta.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.orbeat`;
+  a.download = `${set.meta.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.orb`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
-export async function importSetFromFile(file: File): Promise<OrbeatSet> {
+export async function importSetFromFile(file: File): Promise<OrbitrackSet> {
   const text = await file.text();
   const json = JSON.parse(text);
   return deserializeSet(json);

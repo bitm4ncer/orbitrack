@@ -3,8 +3,8 @@
  * Used for URL-based audio extraction (TikTok, YouTube, SoundCloud, etc.)
  */
 
-const COBALT_ENDPOINT_KEY = 'orbeat_cobalt_endpoint';
-const COBALT_API_KEY_KEY = 'orbeat_cobalt_api_key';
+const COBALT_ENDPOINT_KEY = 'orbitrack_cobalt_endpoint';
+const COBALT_API_KEY_KEY = 'orbitrack_cobalt_api_key';
 
 const DEFAULT_ENDPOINT = 'https://orbeat-cobalt.onrender.com';
 

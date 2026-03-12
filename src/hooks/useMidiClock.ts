@@ -1,4 +1,4 @@
-/** Hook to sync MIDI clock with Orbeat transport based on sync mode */
+/** Hook to sync MIDI clock with orbitrack transport based on sync mode */
 
 import { useEffect } from 'react';
 import { useStore } from '../state/store';
