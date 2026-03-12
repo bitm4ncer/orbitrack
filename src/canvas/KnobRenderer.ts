@@ -33,6 +33,9 @@ export class KnobRenderer {
   // Cache instrument reference to avoid O(N) .find() every frame
   private _lastInstrRef: unknown = null;
   private _cachedInst: ReturnType<typeof useStore.getState>['instruments'][number] | null = null;
+  // Cache layout to avoid getBoundingClientRect() every frame (forces layout recalc)
+  private _rectW = 0;
+  private _rectH = 0;
 
   constructor(canvas: HTMLCanvasElement, instrumentId: string) {
     this.canvas = canvas;
@@ -55,6 +58,8 @@ export class KnobRenderer {
   resize(): void {
     const dpr = window.devicePixelRatio || 1;
     const rect = this.canvas.getBoundingClientRect();
+    this._rectW = rect.width;
+    this._rectH = rect.height;
     this.canvas.width = rect.width * dpr;
     this.canvas.height = rect.height * dpr;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -66,9 +71,8 @@ export class KnobRenderer {
   };
 
   private getLayout(): { cx: number; cy: number; radius: number } {
-    const rect = this.canvas.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
+    const w = this._rectW;
+    const h = this._rectH;
     const cx = w / 2;
     const cy = h / 2;
     const radius = Math.min(cx, cy) - RING_PADDING;
@@ -85,9 +89,8 @@ export class KnobRenderer {
     const inst = this._cachedInst;
     if (!inst) return;
 
-    const rect = this.canvas.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
+    const w = this._rectW;
+    const h = this._rectH;
     if (w <= 0 || h <= 0) return;
     const ctx = this.ctx;
     const { cx, cy, radius } = this.getLayout();

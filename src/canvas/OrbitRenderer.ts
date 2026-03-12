@@ -45,6 +45,9 @@ export class OrbitRenderer {
   zoom = 1;
   private _lastInstrRef: unknown = null;
   private _orderedCache: Instrument[] = [];
+  // Cache rect to avoid getBoundingClientRect() every frame
+  private _rectW = 0;
+  private _rectH = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -66,6 +69,8 @@ export class OrbitRenderer {
   resize(): void {
     const dpr = window.devicePixelRatio || 1;
     const rect = this.canvas.getBoundingClientRect();
+    this._rectW = rect.width;
+    this._rectH = rect.height;
     this.canvas.width = rect.width * dpr;
     this.canvas.height = rect.height * dpr;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -87,9 +92,8 @@ export class OrbitRenderer {
   };
 
   private render(): void {
-    const rect = this.canvas.getBoundingClientRect();
-    const w = rect.width;
-    const h = rect.height;
+    const w = this._rectW;
+    const h = this._rectH;
     if (w <= 0 || h <= 0) return;
     const state = useStore.getState();
     const { instruments, isPlaying, spinMode, bpm } = state;
@@ -113,8 +117,9 @@ export class OrbitRenderer {
 
     // Compute real-time transport position (smooth 60fps, not discrete ticks)
     const toneTransport = Tone.getTransport();
-    const secondsPer32nd = 60 / bpm / 8;
-    const totalSteps = isPlaying ? toneTransport.seconds / secondsPer32nd : 0;
+    const stepsPerBeat = state.stepsPerBeat ?? 8;
+    const secondsPerStep = 60 / bpm / stepsPerBeat;
+    const totalSteps = isPlaying ? toneTransport.seconds / secondsPerStep : 0;
 
     // Indicator line: 1 rotation = maxLoopSize steps
     const maxLoopSize = ordered.reduce((m, i) => Math.max(m, i.loopSize), 1);
@@ -130,26 +135,26 @@ export class OrbitRenderer {
         : 0;
     }
 
-    // Fixed clock-face reference grid: always 32 marks (1 bar of 32nd notes), never rotates
+    // Fixed clock-face reference grid — batched by style (3 strokes instead of ~12)
     const OUTER_GRID_STEPS = 32;
-    for (let g = 0; g < OUTER_GRID_STEPS; g++) {
-      const tickAngle = (g / OUTER_GRID_STEPS) * TWO_PI + TRIGGER_ANGLE;
-      const cos = Math.cos(tickAngle);
-      const sin = Math.sin(tickAngle);
-      const isBar = g === 0;
-      const isBeat = g % 8 === 0;
-      const is16th = g % 4 === 0 && !isBeat;
-      if (!isBeat && !is16th) continue;
-      const innerR = 20;
-      const outerR = maxRadius + 10;
+    const innerR = 20;
+    const outerR = maxRadius + 10;
+    const outerStyles: [string, (g: number) => boolean][] = [
+      ['rgba(255,255,255,0.12)', (g) => g === 0],
+      ['rgba(255,255,255,0.07)', (g) => g !== 0 && g % 8 === 0],
+      ['rgba(255,255,255,0.03)', (g) => g % 4 === 0 && g % 8 !== 0],
+    ];
+    for (const [style, match] of outerStyles) {
       ctx.beginPath();
-      ctx.moveTo(cx + cos * innerR, cy + sin * innerR);
-      ctx.lineTo(cx + cos * outerR, cy + sin * outerR);
-      ctx.strokeStyle = isBar
-        ? 'rgba(255,255,255,0.12)'
-        : isBeat
-        ? 'rgba(255,255,255,0.07)'
-        : 'rgba(255,255,255,0.03)';
+      for (let g = 0; g < OUTER_GRID_STEPS; g++) {
+        if (!match(g)) continue;
+        const tickAngle = (g / OUTER_GRID_STEPS) * TWO_PI + TRIGGER_ANGLE;
+        const cos = Math.cos(tickAngle);
+        const sin = Math.sin(tickAngle);
+        ctx.moveTo(cx + cos * innerR, cy + sin * innerR);
+        ctx.lineTo(cx + cos * outerR, cy + sin * outerR);
+      }
+      ctx.strokeStyle = style;
       ctx.lineWidth = 1;
       ctx.stroke();
     }
@@ -175,19 +180,22 @@ export class OrbitRenderer {
       ctx.lineWidth = 1.5;
       ctx.stroke();
 
-      // Draw grid ticks based on instrument's loopSize — show all steps
+      // Draw grid ticks batched by alpha level (3 passes instead of N individual strokes)
       const gridDiv = inst.loopSize;
-      for (let g = 0; g < gridDiv; g++) {
-        const tickAngle = (g / gridDiv) * TWO_PI + TRIGGER_ANGLE - dotRotation;
-        const cos = Math.cos(tickAngle);
-        const sin = Math.sin(tickAngle);
-        const isBeat = g % 8 === 0;
-        const is16th = g % 4 === 0 && !isBeat;
-        const tickLen = isBeat ? 12 : is16th ? 6 : 3;
-        const tickAlpha = isBeat ? 0.3 : is16th ? 0.15 : 0.07;
+      const tickGroups: [number, number][] = [[0.07, 3], [0.15, 6], [0.3, 12]]; // [alpha, tickLen]
+      for (const [tickAlpha, tickLen] of tickGroups) {
         ctx.beginPath();
-        ctx.moveTo(cx + cos * (radius - tickLen), cy + sin * (radius - tickLen));
-        ctx.lineTo(cx + cos * (radius + tickLen), cy + sin * (radius + tickLen));
+        for (let g = 0; g < gridDiv; g++) {
+          const isBeat = g % 8 === 0;
+          const is16th = g % 4 === 0 && !isBeat;
+          const ga = isBeat ? 0.3 : is16th ? 0.15 : 0.07;
+          if (ga !== tickAlpha) continue;
+          const tickAngle = (g / gridDiv) * TWO_PI + TRIGGER_ANGLE - dotRotation;
+          const cos = Math.cos(tickAngle);
+          const sin = Math.sin(tickAngle);
+          ctx.moveTo(cx + cos * (radius - tickLen), cy + sin * (radius - tickLen));
+          ctx.lineTo(cx + cos * (radius + tickLen), cy + sin * (radius + tickLen));
+        }
         ctx.strokeStyle = rgba(inst.color, tickAlpha);
         ctx.lineWidth = 1;
         ctx.stroke();

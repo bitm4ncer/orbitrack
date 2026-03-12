@@ -1,5 +1,6 @@
-import { gzip, gunzip, strToU8, strFromU8, zip, unzip } from 'fflate';
+import { zip, unzip, strToU8, strFromU8 } from 'fflate';
 import { serializeSet, deserializeSet, sampleToBase64 } from './serializer';
+import { gzipAsync, gunzipAsync, toBase64Url, fromBase64Url } from './compressionUtils';
 import type { OrbeatSet } from '../types/storage';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -21,41 +22,12 @@ export interface ImportedSample {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function gzipAsync(data: Uint8Array): Promise<Uint8Array> {
-  return new Promise((res, rej) => gzip(data, (err, out) => (err ? rej(err) : res(out))));
-}
-
-function gunzipAsync(data: Uint8Array): Promise<Uint8Array> {
-  return new Promise((res, rej) => gunzip(data, (err: any, out: Uint8Array) => (err ? rej(err) : res(out))));
-}
-
 function zipAsync(files: Record<string, Uint8Array>): Promise<Uint8Array> {
   return new Promise((res, rej) => zip(files, {}, (err: any, out: Uint8Array) => (err ? rej(err) : res(out))));
 }
 
 function unzipAsync(data: Uint8Array): Promise<Record<string, Uint8Array>> {
   return new Promise((res, rej) => unzip(data, (err: any, out: Record<string, Uint8Array>) => (err ? rej(err) : res(out))));
-}
-
-function toBase64Url(bytes: Uint8Array): string {
-  let bin = '';
-  const chunkSize = 8192;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function fromBase64Url(str: string): Uint8Array {
-  const padded = str.replace(/-/g, '+').replace(/_/g, '/');
-  const mod4 = padded.length % 4;
-  const repadded = mod4 ? padded + '===='.slice(mod4) : padded;
-  const bin = atob(repadded);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) {
-    out[i] = bin.charCodeAt(i);
-  }
-  return out;
 }
 
 // ── URL Encode/Decode ────────────────────────────────────────────────────────
@@ -67,6 +39,7 @@ function fromBase64Url(str: string): Uint8Array {
 export async function encodeSetToUrl(
   state: Parameters<typeof serializeSet>[0],
   projectName?: string,
+  thumbnail?: string,
 ): Promise<EncodeResult> {
   const hasCustomSamples = state.customSamples.length > 0;
 
@@ -77,6 +50,8 @@ export async function encodeSetToUrl(
     includeEffects: true,
     includeSynthParams: true,
   });
+
+  if (thumbnail) set.meta.thumbnail = thumbnail;
 
   const json = JSON.stringify(set);
   const data = strToU8(json);

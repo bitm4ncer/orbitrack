@@ -214,30 +214,34 @@ export async function detectBpm(buffer: AudioBuffer): Promise<number> {
  * @param projectBpm - Current project BPM (fallback)
  * @param detectedBpm - BPM detected from the audio (0 = unknown)
  */
-export function estimateLoopSize(buffer: AudioBuffer, projectBpm: number, detectedBpm: number = 0): number {
+export function estimateLoopSize(buffer: AudioBuffer, projectBpm: number, detectedBpm: number = 0, stepsPerBeat: number = 4): number {
   const bpmForCalc = detectedBpm > 0 ? detectedBpm : projectBpm;
 
-  const secondsPer16th = 60 / bpmForCalc / 4;
-  const raw16ths = buffer.duration / secondsPer16th;
+  // Calculate in the current step resolution (stepsPerBeat).
+  // stepsPerBeat=4 → 16th notes, stepsPerBeat=8 → 32nd notes, etc.
+  const secondsPerStep = 60 / bpmForCalc / stepsPerBeat;
+  const rawSteps = buffer.duration / secondsPerStep;
 
-  // Round to the nearest bar (32 32nd notes = 16 sixteenth notes) for clean musical alignment.
-  // For shorter samples (< 1 bar) round to nearest beat (8 32nd notes = 4 sixteenth notes).
-  // With stepsPerBeat=8 (32nd note resolution), loopSize is in 32nd notes.
+  // Steps per beat and per bar at current resolution
+  const spb = stepsPerBeat;      // steps per beat
+  const spBar = spb * 4;         // steps per bar (4/4 time)
+
   let loopSize: number;
-  if (raw16ths <= 6) {
-    // Very short: round to nearest 8 (one beat in 32nds), minimum 8
-    loopSize = Math.max(8, Math.round(raw16ths / 4) * 8);
-  } else if (raw16ths <= 24) {
-    // Short: round to nearest 16 (half-bar in 32nds), minimum 16
-    loopSize = Math.max(16, Math.round(raw16ths / 8) * 16);
+  if (rawSteps <= spb * 1.5) {
+    // Very short: round to nearest beat, minimum 1 beat
+    loopSize = Math.max(spb, Math.round(rawSteps / spb) * spb);
+  } else if (rawSteps <= spBar * 1.5) {
+    // Short: round to nearest half-bar, minimum half-bar
+    const halfBar = spb * 2;
+    loopSize = Math.max(halfBar, Math.round(rawSteps / halfBar) * halfBar);
   } else {
-    // Standard+: round to nearest bar (32 in 32nds), minimum 32
-    loopSize = Math.max(32, Math.round(raw16ths / 16) * 32);
+    // Standard+: round to nearest bar, minimum 1 bar
+    loopSize = Math.max(spBar, Math.round(rawSteps / spBar) * spBar);
   }
 
-  // Cap at 512 (16 bars at 32nd resolution)
-  loopSize = Math.min(loopSize, 512);
+  // Cap at 16 bars
+  loopSize = Math.min(loopSize, spBar * 16);
 
-  console.log(`[estimateLoopSize] duration=${buffer.duration.toFixed(2)}s, bpm=${bpmForCalc}, raw16ths=${raw16ths.toFixed(1)}, loopSize=${loopSize}`);
+  console.log(`[estimateLoopSize] duration=${buffer.duration.toFixed(2)}s, bpm=${bpmForCalc}, rawSteps=${rawSteps.toFixed(1)}, loopSize=${loopSize}, stepsPerBeat=${stepsPerBeat}`);
   return loopSize;
 }

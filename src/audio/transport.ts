@@ -46,7 +46,26 @@ function startUISync(): void {
   function sync(): void {
     if (_pos.dirty) {
       _pos.dirty = false;
-      useStore.getState().setPlaybackUI(_pos.progress, _pos.currentStep, _pos.instProgress, _pos.trackPosition, _pos.trackStepProgress);
+
+      // Recompute instProgress from transport.seconds at RAF-time so the grid
+      // playhead is in sync with the orbit renderers (which also read
+      // transport.seconds at RAF-time).  The _tick() writes discrete-step
+      // progress which lags by 1-2 frames; recomputing here eliminates that.
+      const state = useStore.getState();
+      const transport = Tone.getTransport();
+      const stepsPerBeat = state.stepsPerBeat ?? 8;
+      const secondsPerStep = 60 / state.bpm / stepsPerBeat;
+      const totalSteps = transport.seconds / secondsPerStep;
+
+      const instProgress: Record<string, number> = {};
+      for (const inst of state.instruments) {
+        instProgress[inst.id] = (totalSteps % inst.loopSize) / inst.loopSize;
+      }
+
+      useStore.getState().setPlaybackUI(
+        _pos.progress, _pos.currentStep, instProgress,
+        _pos.trackPosition, _pos.trackStepProgress,
+      );
     }
     _rafId = requestAnimationFrame(sync);
   }

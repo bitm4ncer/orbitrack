@@ -146,7 +146,6 @@ export function LooperEditor() {
 
     // ── Build warp map: map buffer positions to grid positions per slice ──
     const hitPositions = [...instrument.hitPositions].sort((a: number, b: number) => a - b);
-    const transientTails = editor.transientTails ?? [];
     const barW = Math.max(1, width / peaks.length * (1 / viewRange));
 
     // Build slice mappings: for each slice, define buffer range → grid range
@@ -156,10 +155,7 @@ export function LooperEditor() {
     if (hitPositions.length > 0) {
       for (let si = 0; si < hitPositions.length; si++) {
         const bufStart = hitPositions[si];
-        // Tail end: use detected tail or next hit, whichever is sooner
-        const nextHit = si + 1 < hitPositions.length ? hitPositions[si + 1] : 1;
-        const tail = si < transientTails.length ? Math.min(transientTails[si], nextHit) : nextHit;
-        const bufEnd = tail;
+        const bufEnd = si + 1 < hitPositions.length ? hitPositions[si + 1] : 1;
 
         // Grid positions: where this hit snaps to on the grid
         const gridStart = Math.round(hitPositions[si] * loopSize) / loopSize;
@@ -227,22 +223,7 @@ export function LooperEditor() {
           ctx.fillRect(x, mid - amp, barW, amp * 2 || 1);
         }
 
-        // Draw gap indicator (dotted) if tail ends before next grid slot
-        const tailGridNorm = slice.gridStart + ((slice.bufEnd - slice.bufStart) / bufRange) * gridRange;
-        if (tailGridNorm < slice.gridEnd - 0.005) {
-          const gapStartX = ((tailGridNorm - viewStart) / viewRange) * width;
-          const gapEndX = ((slice.gridEnd - viewStart) / viewRange) * width;
-          if (gapEndX > 0 && gapStartX < width) {
-            ctx.strokeStyle = `${color}20`;
-            ctx.lineWidth = 1;
-            ctx.setLineDash([2, 4]);
-            ctx.beginPath();
-            ctx.moveTo(Math.max(0, gapStartX), mid);
-            ctx.lineTo(Math.min(width, gapEndX), mid);
-            ctx.stroke();
-            ctx.setLineDash([]);
-          }
-        }
+        // (Gap indicators removed — slices now span full hit-to-hit range)
       }
     } else {
       // No hit positions — draw unwarped waveform normally
@@ -640,28 +621,34 @@ export function LooperEditor() {
     };
   }, [selectedId, xToNorm, setLooperSelection, setLooperCursor, setHitPosition]);
 
-  // ── Mouse wheel: zoom ──
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (!selectedId) return;
-    e.preventDefault();
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
+  // ── Mouse wheel: zoom (native listener to allow preventDefault on non-passive) ──
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!selectedId) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
 
-    const mouseNorm = xToNorm(e.clientX);
-    const zoomFactor = e.deltaY > 0 ? 1.15 : 0.87;
-    const newRange = Math.min(1, Math.max(0.02, viewRange * zoomFactor));
+      const mouseNorm = xToNorm(e.clientX);
+      const zoomFactor = e.deltaY > 0 ? 1.15 : 0.87;
+      const curRange = viewEnd - viewStart;
+      const newRange = Math.min(1, Math.max(0.02, curRange * zoomFactor));
 
-    const mouseRatio = (e.clientX - rect.left) / rect.width;
-    let newStart = mouseNorm - mouseRatio * newRange;
-    let newEnd = newStart + newRange;
+      const mouseRatio = (e.clientX - rect.left) / rect.width;
+      let newStart = mouseNorm - mouseRatio * newRange;
+      let newEnd = newStart + newRange;
 
-    if (newStart < 0) { newEnd -= newStart; newStart = 0; }
-    if (newEnd > 1) { newStart -= (newEnd - 1); newEnd = 1; }
-    newStart = Math.max(0, newStart);
-    newEnd = Math.min(1, newEnd);
+      if (newStart < 0) { newEnd -= newStart; newStart = 0; }
+      if (newEnd > 1) { newStart -= (newEnd - 1); newEnd = 1; }
+      newStart = Math.max(0, newStart);
+      newEnd = Math.min(1, newEnd);
 
-    setLooperZoom(selectedId, newStart, newEnd);
-  }, [selectedId, xToNorm, viewRange, setLooperZoom]);
+      setLooperZoom(selectedId, newStart, newEnd);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [selectedId, xToNorm, viewStart, viewEnd, setLooperZoom]);
 
   // ── Keyboard shortcuts ──
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -697,7 +684,7 @@ export function LooperEditor() {
         sensitivity={sensitivity}
         onSensitivityChange={setSensitivity}
       />
-      <div ref={containerRef} className="flex-1 relative min-h-0" onWheel={handleWheel}>
+      <div ref={containerRef} className="flex-1 relative min-h-0">
         <canvas
           ref={canvasRef}
           className="w-full h-full"

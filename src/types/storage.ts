@@ -34,6 +34,19 @@ export interface SetMeta {
   name: string;
   createdAt: number;
   updatedAt: number;
+  thumbnail?: string;      // JPEG data URL for preview (~10-15KB)
+  versionCount?: number;   // quick count without loading full versions array
+}
+
+export interface SetVersion {
+  versionId: string;
+  timestamp: number;
+  source: 'manual' | 'autosave';
+  thumbnail?: string;      // JPEG data URL
+}
+
+export interface SetVersionEntry extends SetVersion {
+  snapshot: string;         // gzip+base64url of OrbeatSet JSON (without versions array)
 }
 
 export interface EmbeddedSample {
@@ -62,6 +75,7 @@ export interface OrbeatSet {
   groupEffects?: Record<string, Effect[]>;  // legacy: for backward compat on load
   sceneEffects?: Record<string, Effect[]>;
   customSamples?: EmbeddedSample[];
+  versions?: SetVersionEntry[];   // newest-first, capped at 50
   gridResolution?: number;
   scaleRoot?: number;
   scaleType?: string;
