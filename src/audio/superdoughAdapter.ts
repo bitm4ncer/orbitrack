@@ -65,7 +65,7 @@ export function triggerSuperdough(
   if (instrument.type === 'synth') {
     // Route through the custom SynthEngine — NOT superdough.
     // This fixes "sound supersaw not found" and enables poly, LFO, FM, unison.
-    const engine = getSynthEngine(instrument.id, instrument.orbitIndex);
+    const engine = getSynthEngine(instrument.id, instrument.orbitIndex, instrument.engineParams);
     const instGain = dbToLinear(instrument.volume) * (velocity / 127);
     void glide; // portamentoSpeed is already in SynthParams
     engine.noteOn(midiNote, audioTime, noteDuration, instGain);
@@ -128,23 +128,9 @@ export function triggerLooperSlice(
   // Skip hits outside the loop region
   if (rawBegin < loopIn || rawBegin >= loopOut) return;
 
-  // Use transient tail for tighter slice boundaries (avoids stretching silence).
-  // transientTails is parallel to editorState.transients, NOT to sortedHits —
-  // find the matching transient index by position to get the correct tail.
-  const transients = editorState?.transients ?? [];
-  const tails = editorState?.transientTails ?? [];
-  let tailEnd = rawEnd;
-  if (tails.length > 0) {
-    const tIdx = transients.findIndex(t => Math.abs(t - rawBegin) < 0.0001);
-    if (tIdx >= 0 && tIdx < tails.length) {
-      tailEnd = tails[tIdx];
-    }
-  }
-  // Slice end = min(tail, next hit, loop boundary) — prefer tail for cleaner slicing
-  const effectiveEnd = Math.min(tailEnd, rawEnd, loopOut);
-
+  // Clamp slice end to loop boundary
   const sliceBegin = rawBegin;
-  const sliceEnd = Math.max(effectiveEnd, rawBegin + 0.001); // ensure non-zero length
+  const sliceEnd = Math.min(rawEnd, loopOut);
 
   if (sliceBegin >= sliceEnd) return; // degenerate slice
 
@@ -159,13 +145,17 @@ export function triggerLooperSlice(
     : instrument.loopSize;
   const availableSec = overrideAvailableSec ?? (nextStep - thisStep) * secondsPerStep;
 
-  let sliceSpeed = lp.speed;
-  if (bufferDuration && bufferDuration > 0) {
+  // Per-slice time-stretch: adjust speed so each slice fills its grid slot exactly.
+  // This handles tempo matching — loopSize (orbit steps) controls perceived tempo.
+  // lp.speed is NOT applied here: it was a BPM-match ratio that double-corrects
+  // since estimateLoopSize already accounts for detected BPM.
+  let sliceSpeed = 1;
+  if (lp.stretchToSteps && bufferDuration && bufferDuration > 0) {
     const originalSliceSec = (sliceEnd - sliceBegin) * bufferDuration;
-    sliceSpeed = lp.speed * (originalSliceSec / Math.max(availableSec, 0.01));
+    sliceSpeed = originalSliceSec / Math.max(availableSec, 0.01);
   }
 
-  // Apply pitch offset (semitones)
+  // Apply pitch offset (semitones) — only pitch control for looper slices
   const pitchRatio = Math.pow(2, (lp.pitchSemitones ?? 0) / 12);
   sliceSpeed *= pitchRatio;
 

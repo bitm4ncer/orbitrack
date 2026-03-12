@@ -7,9 +7,9 @@ import type { SampleEntry } from '../../audio/sampleApi';
 import type { LooperParams } from '../../types/looper';
 import { DEFAULT_LOOPER_PARAMS } from '../../types/looper';
 
-function Knob({ label, value, min, max, step = 0.001, decimals = 2, unit = '', color, onChange }: {
+function Knob({ label, value, min, max, step = 0.001, decimals = 2, unit = '', color, size = 36, onChange }: {
   label: string; value: number; min: number; max: number;
-  step?: number; decimals?: number; unit?: string; color: string;
+  step?: number; decimals?: number; unit?: string; color: string; size?: number;
   onChange: (v: number) => void;
 }) {
   const norm = Math.max(0, Math.min(1, (value - min) / (max - min)));
@@ -41,7 +41,7 @@ function Knob({ label, value, min, max, step = 0.001, decimals = 2, unit = '', c
   return (
     <div className="flex flex-col items-center gap-0.5 select-none">
       <span className="text-[8px] text-text-secondary uppercase tracking-wider">{label}</span>
-      <svg width="36" height="36" viewBox="-1 -1 2 2" onMouseDown={handleMouseDown}
+      <svg width={size} height={size} viewBox="-1 -1 2 2" onMouseDown={handleMouseDown}
         style={{ display: 'block', cursor: 'ns-resize' }}>
         <circle cx="0" cy="0" r="0.80" fill="none" stroke={color} strokeWidth="0.10" opacity="0.6" />
         <line x1="0" y1="0" x2={lineX} y2={lineY} stroke={color} strokeWidth="0.14" strokeLinecap="round" />
@@ -63,7 +63,9 @@ export function LoopBrowser() {
   const updateLooperParams = useStore((s) => s.updateLooperParams);
   const assignLoop = useStore((s) => s.assignLoop);
   const addCustomSample = useStore((s) => s.addCustomSample);
+  const setLoopSize = useStore((s) => s.setLoopSize);
 
+  const [collapsed, setCollapsed] = useState(false);
   const [tree, setTree] = useState<SampleEntry[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [focusIdx, setFocusIdx] = useState(-1);
@@ -192,23 +194,38 @@ export function LoopBrowser() {
       onKeyDown={handleKeyDown}
       className="bg-bg-secondary border-l border-border flex flex-col shrink-0 h-full min-h-0 outline-none overflow-hidden w-full"
     >
-      {/* Target + Looper params */}
-      <div className="text-[9px] text-text-secondary px-4 pt-3 pb-1 shrink-0">
-        <span className="text-text-secondary/60">target: </span>
-        <span style={{ color }}>{targetInst.name}</span>
+      {/* Target + collapse toggle */}
+      <div className="flex items-center justify-between text-[9px] text-text-secondary px-4 pt-3 pb-1.5 shrink-0">
+        <div>
+          <span className="text-text-secondary/60">target: </span>
+          <span style={{ color }}>{targetInst.name}</span>
+        </div>
+        <button
+          onClick={() => setCollapsed(c => !c)}
+          title={collapsed ? 'Expand looper params' : 'Collapse looper params'}
+          className="flex-shrink-0 p-1 hover:bg-white/10 rounded transition-colors"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5"
+            className="text-text-secondary/60 hover:text-text-primary transition-colors"
+            style={{ transform: `rotate(${collapsed ? 180 : 0}deg)`, transition: 'transform 0.2s' }}>
+            <polyline points="3 10 7 6 11 10" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
       </div>
 
-      {selectedId && (
+      {selectedId && !collapsed && (
         <div className="px-4 py-3 border-b border-border/50 shrink-0">
-          <div className="flex gap-2 justify-around mb-3">
-            <Knob label="Vol" value={lp.gain} min={0} max={1} decimals={2} color={color}
-              onChange={(v) => updateLooperParams(selectedId, { gain: v })} />
-            <Knob label="Speed" value={lp.speed} min={0.25} max={4} decimals={2} color={color}
-              onChange={(v) => updateLooperParams(selectedId, { speed: v })} />
-            <Knob label="A" value={lp.attack} min={0} max={2} decimals={3} unit="s" color={color}
-              onChange={(v) => updateLooperParams(selectedId, { attack: v })} />
-            <Knob label="R" value={lp.release} min={0} max={2} decimals={3} unit="s" color={color}
-              onChange={(v) => updateLooperParams(selectedId, { release: v })} />
+          <div className="flex gap-3 items-end mb-3">
+            <Knob label="Steps" value={targetInst.loopSize} min={1} max={64} step={1} decimals={0} color={color} size={72}
+              onChange={(v) => setLoopSize(selectedId, v)} />
+            <div className="flex gap-2 flex-1 justify-around">
+              <Knob label="Vol" value={lp.gain} min={0} max={1} decimals={2} color={color}
+                onChange={(v) => updateLooperParams(selectedId, { gain: v })} />
+              <Knob label="A" value={lp.attack} min={0} max={2} decimals={3} unit="s" color={color}
+                onChange={(v) => updateLooperParams(selectedId, { attack: v })} />
+              <Knob label="R" value={lp.release} min={0} max={2} decimals={3} unit="s" color={color}
+                onChange={(v) => updateLooperParams(selectedId, { release: v })} />
+            </div>
           </div>
           <div className="flex gap-2 justify-around">
             <Knob label="Pan" value={lp.pan} min={-1} max={1} decimals={2} color={color}

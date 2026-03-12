@@ -13,7 +13,7 @@
  * Intercepted once at init; the side-tap analyser on destinationGain is unaffected.
  */
 
-import { getAudioContext, getSuperdoughAudioController } from 'superdough';
+import { getSuperdoughAudioController } from 'superdough';
 import { useStore } from '../state/store';
 import type { Effect } from '../types/effects';
 import { EQ_BAND_TYPES, getTranceGatePhase as _getTranceGatePhase } from './orbitEffects';
@@ -455,10 +455,17 @@ function getDestinationGain(): GainNode | null {
 }
 
 function tryIntercept(): void {
-  if (masterChainIntercepted || !masterChain) return;
+  if (masterChainIntercepted) return;
   const dg = getDestinationGain();
   if (!dg) { requestAnimationFrame(tryIntercept); return; }
-  const ac = getAudioContext() as AudioContext;
+
+  // Create the master chain on the SAME context as destinationGain.
+  // superdough may have created its audio controller before setAudioContext()
+  // took effect, so getAudioContext() can return a different context than
+  // the one destinationGain lives on.
+  const ac = dg.context as AudioContext;
+  if (!masterChain) masterChain = createMasterChain(ac);
+
   try { dg.disconnect(ac.destination); } catch { /* may already be disconnected */ }
   dg.connect(masterChain.masterInput);
   masterChain.masterOutput.connect(ac.destination);
@@ -466,8 +473,6 @@ function tryIntercept(): void {
 }
 
 export function initMasterChain(): void {
-  const ac = getAudioContext() as AudioContext;
-  masterChain = createMasterChain(ac);
   tryIntercept();
 
   // Subscribe to store changes

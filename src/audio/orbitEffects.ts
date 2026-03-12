@@ -17,7 +17,7 @@
  *     → [orbit.output] → ... → destination
  */
 
-import { getAudioContext, getSuperdoughAudioController } from 'superdough';
+import { getSuperdoughAudioController } from 'superdough';
 import type { Effect } from '../types/effects';
 import { isAudioReady } from './engine';
 import { DELAY_SYNC_DIVS } from './effectParams';
@@ -935,18 +935,18 @@ function createChain(ac: AudioContext): OrbitEffectChain {
 }
 
 function ensureIntercepted(orbitIndex: number): OrbitEffectChain {
-  let chain = chains.get(orbitIndex);
-  if (!chain) {
-    const ac = getAudioContext() as AudioContext;
-    chain = createChain(ac);
-    chains.set(orbitIndex, chain);
-  }
-
-  if (!chain.intercepted) {
+  if (!chains.has(orbitIndex)) {
+    // Defer chain creation until we have the orbit's actual context —
+    // superdough may have created orbit nodes on a context that differs
+    // from getAudioContext() if setAudioContext() was called after init.
     const controller = getSuperdoughAudioController();
     const orbit = controller.getOrbit(orbitIndex);
     const summingNode = orbit.summingNode as unknown as AudioNode;
     const outputNode = orbit.output as unknown as AudioNode;
+    const ac = summingNode.context as AudioContext;
+
+    const chain = createChain(ac);
+    chains.set(orbitIndex, chain);
 
     try {
       (summingNode as GainNode).disconnect(outputNode as AudioNode);
@@ -955,13 +955,11 @@ function ensureIntercepted(orbitIndex: number): OrbitEffectChain {
     }
 
     summingNode.connect(chain.eqLow);
-    // Chain tail → outputNode (limiterMix is now the final node)
     chain.limiterMix.connect(outputNode);
-
     chain.intercepted = true;
   }
 
-  return chain;
+  return chains.get(orbitIndex)!;
 }
 
 const BIQUAD_FILTER_TYPES: BiquadFilterType[] = ['lowpass', 'highpass', 'bandpass', 'notch'];

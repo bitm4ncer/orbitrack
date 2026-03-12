@@ -1,25 +1,64 @@
 /**
- * Auto-persists the current session (instruments, effects, BPM, grid, etc.)
- * to IndexedDB so it survives page refresh.
+ * Auto-persists the current session to IndexedDB.
  *
- * Uses the existing `sets` IDB store with a reserved autosave ID.
- * Custom sample blobs are stored separately in the `samples` store.
+ * Conditional: only runs after the user has saved manually at least once
+ * (currentSetId is set). Writes directly to the real set ID, updating
+ * or appending an autosave version entry.
+ *
+ * Settings stored in localStorage:
+ *   orbeat:autosave:enabled  — "true" | "false" (default: "true")
+ *   orbeat:autosave:interval — ms string (default: "3000")
  */
 
 import { useStore, setOrbitCounter } from '../state/store';
-import { put, get } from './idb';
+import { put, get, del } from './idb';
 import type { Instrument } from '../types/instrument';
 import type { Effect } from '../types/effects';
 import type { InstrumentScene } from '../types/scene';
-import { base64ToBlob } from './serializer';
+import type { OrbeatSet, SetVersionEntry } from '../types/storage';
+import { base64ToBlob, serializeSet } from './serializer';
 import { registerSampleForPlayback } from '../audio/engine';
 import { loadSample } from '../audio/sampler';
 import { generateName } from '../utils/nameGenerator';
+import { gzipAsync, toBase64Url, strToU8 } from './compressionUtils';
 
-const AUTOSAVE_ID = '__autosave__';
-const DEBOUNCE_MS = 1000;
+// Legacy autosave ID — used for migration only
+const LEGACY_AUTOSAVE_ID = '__autosave__';
 
-interface AutosaveData {
+const MAX_VERSIONS = 50;
+
+// ── localStorage helpers ────────────────────────────────────────────────────
+
+export function getAutosaveEnabled(): boolean {
+  return localStorage.getItem('orbeat:autosave:enabled') !== 'false';
+}
+
+export function setAutosaveEnabled(enabled: boolean): void {
+  localStorage.setItem('orbeat:autosave:enabled', String(enabled));
+}
+
+export function getAutosaveInterval(): number {
+  const raw = localStorage.getItem('orbeat:autosave:interval');
+  const ms = raw ? parseInt(raw, 10) : 3000;
+  return isNaN(ms) ? 3000 : ms;
+}
+
+export function setAutosaveInterval(ms: number): void {
+  localStorage.setItem('orbeat:autosave:interval', String(ms));
+}
+
+export function getLastSetId(): string | null {
+  return localStorage.getItem('orbeat:lastSetId');
+}
+
+export function setLastSetId(id: string | null): void {
+  if (id) localStorage.setItem('orbeat:lastSetId', id);
+  else localStorage.removeItem('orbeat:lastSetId');
+}
+
+// ── Legacy autosave data (for migration) ────────────────────────────────────
+
+interface LegacyAutosaveData {
   id: string;
   version: 1;
   meta: { id: string; name: string; createdAt: number; updatedAt: number };
@@ -38,15 +77,11 @@ interface AutosaveData {
   scaleType?: string;
   trackMode?: boolean;
   arrangement?: { id: string; sceneId: string; bars: number }[];
-  /** Custom sample blobs stored inline for autosave (avoids extra IDB reads on restore) */
   customSampleBlobs?: { key: string; name: string; mimeType: string; base64: string }[];
 }
 
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+// ── Blob URL helpers ────────────────────────────────────────────────────────
 
-/**
- * Convert a blob URL to base64 + mimeType.
- */
 async function blobUrlToBase64(url: string): Promise<{ base64: string; mimeType: string }> {
   const resp = await fetch(url);
   const blob = await resp.blob();
@@ -63,11 +98,37 @@ async function blobUrlToBase64(url: string): Promise<{ base64: string; mimeType:
   });
 }
 
+// ── Snapshot helper ─────────────────────────────────────────────────────────
+
+function uid(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+async function createSnapshot(set: OrbeatSet): Promise<string> {
+  // Strip versions from the snapshot to avoid nesting
+  const { versions: _, ...setWithoutVersions } = set;
+  const json = JSON.stringify(setWithoutVersions);
+  const compressed = await gzipAsync(strToU8(json));
+  return toBase64Url(compressed);
+}
+
+// ── Core autosave ───────────────────────────────────────────────────────────
+
+let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 async function saveSession(): Promise<void> {
   const s = useStore.getState();
+  let setId = s.currentSetId;
 
-  // Convert custom sample blob URLs to base64 for persistence
-  let customSampleBlobs: AutosaveData['customSampleBlobs'];
+  // Auto-create a session ID so unsaved projects also persist across reloads
+  if (!setId) {
+    setId = '__session__' + uid();
+    useStore.setState({ currentSetId: setId });
+    setLastSetId(setId);
+  }
+
+  // Serialize current state
+  let customSampleBlobs: { key: string; name: string; mimeType: string; base64: string }[] | undefined;
   if (s.customSamples.length > 0) {
     try {
       customSampleBlobs = await Promise.all(
@@ -77,54 +138,101 @@ async function saveSession(): Promise<void> {
         }),
       );
     } catch {
-      // If blob URLs are stale, skip custom samples
       customSampleBlobs = undefined;
     }
   }
 
-  const data: AutosaveData = {
-    id: AUTOSAVE_ID,
-    version: 1,
-    meta: {
-      id: AUTOSAVE_ID,
-      name: s.currentSetName,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    },
-    bpm: s.bpm,
-    masterVolume: s.masterVolume,
-    instruments: s.instruments,
-    gridNotes: s.gridNotes,
-    gridGlide: s.gridGlide,
-    gridLengths: s.gridLengths,
-    instrumentEffects: s.instrumentEffects,
-    masterEffects: s.masterEffects,
-    scenes: s.scenes,
-    sceneEffects: s.sceneEffects,
-    gridResolution: s.gridResolution,
-    scaleRoot: s.scaleRoot,
-    scaleType: s.scaleType,
-    trackMode: s.trackMode,
-    arrangement: s.arrangement,
-    customSampleBlobs,
+  const serState = s.getSerializableState();
+  const set = await serializeSet(serState, {
+    name: s.currentSetName,
+    embedSamples: true,
+    includeInstruments: true,
+    includeEffects: true,
+    includeSynthParams: true,
+  });
+
+  // Override the set ID to match the existing saved set
+  set.id = setId;
+  set.meta.id = setId;
+
+  // If custom samples were serialized via blobUrlToBase64, use those
+  // (serializeSet may have failed to convert stale blob URLs)
+  if (customSampleBlobs) {
+    set.customSamples = customSampleBlobs;
+  }
+
+  // Load existing set to preserve its thumbnail and versions
+  const existing = await get<OrbeatSet>('sets', setId);
+  if (existing?.meta?.thumbnail) {
+    set.meta.thumbnail = existing.meta.thumbnail;
+  }
+  const versions = existing?.versions ?? [];
+
+  // Create autosave version entry
+  const snapshot = await createSnapshot(set);
+  const entry: SetVersionEntry = {
+    versionId: uid(),
+    timestamp: Date.now(),
+    source: 'autosave',
+    snapshot,
   };
 
-  await put('sets', data);
+  // If the latest version is an autosave, replace it; otherwise append
+  if (versions.length > 0 && versions[0].source === 'autosave') {
+    versions[0] = entry;
+  } else {
+    versions.unshift(entry);
+  }
+
+  // Cap versions
+  if (versions.length > MAX_VERSIONS) {
+    versions.length = MAX_VERSIONS;
+  }
+
+  set.versions = versions;
+  set.meta.versionCount = versions.length;
+  set.meta.updatedAt = Date.now();
+
+  await put('sets', set);
 }
 
 function debouncedSave(): void {
+  const enabled = getAutosaveEnabled();
+  if (!enabled) return;
+
   if (debounceTimer) clearTimeout(debounceTimer);
+  const interval = getAutosaveInterval();
   debounceTimer = setTimeout(() => {
-    saveSession().catch(console.error);
-  }, DEBOUNCE_MS);
+    saveSession().catch((e) => console.error('[autosave] save failed:', e));
+  }, interval);
+}
+
+// ── Restore ─────────────────────────────────────────────────────────────────
+
+/**
+ * Restore a saved set by ID from IndexedDB.
+ * Used on app startup when lastSetId is available.
+ */
+export async function restoreFromSetId(setId: string): Promise<boolean> {
+  try {
+    const set = await get<OrbeatSet>('sets', setId);
+    if (!set || !set.instruments || set.instruments.length === 0) return false;
+
+    useStore.getState().loadSet(set);
+    return true;
+  } catch (err) {
+    console.error('[autosave] restore from set ID failed:', err);
+    return false;
+  }
 }
 
 /**
- * Try to restore the autosaved session. Returns true if restored.
+ * Try to restore the legacy __autosave__ session (migration path).
+ * Returns true if restored. Deletes the legacy entry after successful restore.
  */
-export async function restoreAutosave(): Promise<boolean> {
+export async function restoreLegacyAutosave(): Promise<boolean> {
   try {
-    const data = await get<AutosaveData>('sets', AUTOSAVE_ID);
+    const data = await get<LegacyAutosaveData>('sets', LEGACY_AUTOSAVE_ID);
     if (!data || !data.instruments || data.instruments.length === 0) return false;
 
     // Reconstruct custom samples from stored blobs
@@ -181,18 +289,32 @@ export async function restoreAutosave(): Promise<boolean> {
     const baseUrl = ((import.meta.env.BASE_URL as string) ?? '/').replace(/\/$/, '') + '/';
     for (const inst of data.instruments) {
       if (inst.type === 'looper' && inst.samplePath) {
-        const isCustom = customSamples.some((c) => c.key === inst.samplePath);
-        const url = isCustom
-          ? customSamples.find((c) => c.key === inst.samplePath)!.url
-          : inst.samplePath.startsWith('blob:') || inst.samplePath.startsWith('http')
-            ? inst.samplePath
-            : baseUrl + inst.samplePath;
+        const custom = customSamples.find((c) => c.key === inst.samplePath);
+        let url: string | null;
+        if (custom) {
+          url = custom.url;
+        } else if (inst.samplePath.startsWith('blob:') || inst.samplePath.startsWith('http')) {
+          url = inst.samplePath;
+        } else if (inst.samplePath.startsWith('__recorded_input__/') || inst.samplePath.startsWith('__imported__/')) {
+          console.warn('[autosave] skipping looper without embedded audio:', inst.samplePath);
+          url = null;
+        } else {
+          url = baseUrl + inst.samplePath;
+        }
+        if (!url) continue;
         try {
-          // Tone.js may not be started yet at autosave restore, use plain AudioContext
           const ctx = new AudioContext();
           fetch(url)
-            .then((r) => r.arrayBuffer())
-            .then((buf) => ctx.decodeAudioData(buf))
+            .then((r) => {
+              if (!r.ok) throw new Error(`fetch failed: ${r.status} ${r.statusText}`);
+              const ct = r.headers.get('content-type') ?? '';
+              if (ct.includes('text/html')) throw new Error('got HTML instead of audio');
+              return r.arrayBuffer();
+            })
+            .then((buf) => {
+              if (buf.byteLength === 0) throw new Error('empty response');
+              return ctx.decodeAudioData(buf);
+            })
             .then((decoded) => useStore.getState().initLooperEditor(inst.id, decoded))
             .catch((e) => console.error('[autosave] looper decode failed:', e));
         } catch (e) {
@@ -201,19 +323,23 @@ export async function restoreAutosave(): Promise<boolean> {
       }
     }
 
+    // Delete legacy autosave entry after successful restore
+    await del('sets', LEGACY_AUTOSAVE_ID).catch(() => {});
+
     return true;
   } catch (err) {
-    console.error('Failed to restore autosave:', err);
+    console.error('Failed to restore legacy autosave:', err);
     return false;
   }
 }
+
+// ── Init ────────────────────────────────────────────────────────────────────
 
 /**
  * Subscribe to store changes and auto-save on mutations.
  * Call once on app startup.
  */
 export function initSessionAutosave(): void {
-  // Watch the relevant slices of state
   useStore.subscribe(
     (state, prevState) => {
       if (

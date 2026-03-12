@@ -76,6 +76,15 @@ export const usePresetStore = create<PresetStoreState>((set, get) => ({
     };
     await storage.savePreset(preset);
     await get().loadPresets();
+    // Auto-expand the folder path so the new preset is visible
+    const expanded = new Set(get().expandedFolders);
+    const parts = preset.folder.split('/');
+    let path = '';
+    for (const part of parts) {
+      path = path ? `${path}/${part}` : part;
+      expanded.add(path);
+    }
+    set({ expandedFolders: expanded });
     return preset;
   },
 

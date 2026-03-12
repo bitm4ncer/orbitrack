@@ -1,8 +1,10 @@
 /** Settings popup with audio, MIDI, and app settings */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../../state/store';
 import { MidiSettingsPanel } from '../MidiSettings/MidiSettingsPanel';
+import { getAudioInputDevices, requestMicPermission, getInputLevel, isCapturing, getCaptureDuration, onAudioDeviceChange, type AudioInputDevice } from '../../audio/audioInput';
+import { getAutosaveEnabled, setAutosaveEnabled, getAutosaveInterval, setAutosaveInterval } from '../../storage/sessionAutosave';
 
 interface SettingsSection {
   id: string;
@@ -14,6 +16,7 @@ const SECTIONS: SettingsSection[] = [
   { id: 'info', label: 'Info', icon: 'info' },
   { id: 'midi', label: 'MIDI', icon: 'midi' },
   { id: 'audio', label: 'Audio', icon: 'audio' },
+  { id: 'storage', label: 'Storage', icon: 'storage' },
   { id: 'display', label: 'Display', icon: 'display' },
   { id: 'shortcuts', label: 'Shortcuts', icon: 'shortcuts' },
   { id: 'about', label: 'About', icon: 'about' },
@@ -33,11 +36,206 @@ function renderIcon(iconName: string): React.ReactNode {
       return <svg className={iconProps} fill="none" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="1" stroke="currentColor" strokeWidth="2"/><path d="M8 17h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M9 20h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
     case 'shortcuts':
       return <svg className={iconProps} fill="none" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
+    case 'storage':
+      return <svg className={iconProps} fill="none" viewBox="0 0 24 24"><path d="M4 7v10c0 1.1.9 2 2 2h12a2 2 0 002-2V7" stroke="currentColor" strokeWidth="2"/><path d="M20 7H4a2 2 0 01-2-2V5a2 2 0 012-2h16a2 2 0 012 2v0a2 2 0 01-2 2z" stroke="currentColor" strokeWidth="2"/><path d="M10 12h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
     case 'about':
       return <svg className={iconProps} fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><path d="M12 16v-4M12 8h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
     default:
       return null;
   }
+}
+
+function AudioInputSection() {
+  const audioInputDeviceId = useStore((s) => s.audioInputDeviceId);
+  const audioInputMonitor = useStore((s) => s.audioInputMonitor);
+  const isCapturingInput = useStore((s) => s.isCapturingInput);
+  const setAudioInputDevice = useStore((s) => s.setAudioInputDevice);
+  const setAudioInputMonitor = useStore((s) => s.setAudioInputMonitor);
+  const startAudioCapture = useStore((s) => s.startAudioCapture);
+  const stopAudioCapture = useStore((s) => s.stopAudioCapture);
+
+  const [devices, setDevices] = useState<AudioInputDevice[]>([]);
+  const [level, setLevel] = useState(-Infinity);
+  const [elapsed, setElapsed] = useState(0);
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const rafRef = useRef(0);
+
+  const refreshDevices = useCallback(async () => {
+    const d = await getAudioInputDevices();
+    setDevices(d);
+    // If we got devices with labels, permission was already granted
+    if (d.length > 0 && d.some(dev => dev.label && !dev.label.startsWith('Input '))) {
+      setPermissionGranted(true);
+    }
+  }, []);
+
+  const handleGrantPermission = useCallback(async () => {
+    setError(null);
+    const err = await requestMicPermission();
+    if (err) {
+      setError(err);
+    } else {
+      setPermissionGranted(true);
+      await refreshDevices();
+    }
+  }, [refreshDevices]);
+
+  // Enumerate on mount (labels appear if permission was previously granted)
+  // getUserMedia must only be called from a user click — browsers silently block it otherwise
+  useEffect(() => {
+    refreshDevices();
+    const unsub = onAudioDeviceChange(() => { refreshDevices(); });
+    return unsub;
+  }, [refreshDevices]);
+
+  // Level meter + timer animation loop
+  useEffect(() => {
+    if (!isCapturingInput) { setLevel(-Infinity); setElapsed(0); return; }
+    const tick = () => {
+      setLevel(getInputLevel());
+      setElapsed(getCaptureDuration());
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [isCapturingInput]);
+
+  // Also show level when device is selected (even before recording)
+  useEffect(() => {
+    if (isCapturingInput) return; // already handled above
+    if (!isCapturing()) return;
+    const tick = () => {
+      setLevel(getInputLevel());
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [audioInputDeviceId, isCapturingInput]);
+
+  const levelDb = level > -Infinity ? Math.max(-60, level) : -60;
+  const levelPct = Math.max(0, Math.min(100, ((levelDb + 60) / 60) * 100));
+
+  const formatTime = useCallback((ms: number) => {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, '0')}`;
+  }, []);
+
+  return (
+    <div className="border-t border-border/30 pt-4 mt-4">
+      <h3 className="text-sm font-semibold text-text-primary mb-4">Audio Input</h3>
+
+      {/* Permission grant */}
+      {!permissionGranted && (
+        <div className="mb-4 space-y-2">
+          <button
+            onClick={handleGrantPermission}
+            className="flex items-center gap-2 px-3 py-2 rounded text-xs font-medium bg-accent/20 text-accent border border-accent/30 hover:bg-accent/30 transition-colors"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+            </svg>
+            Allow Microphone Access
+          </button>
+          {error && (
+            <p className="text-xs text-red-400">{error}</p>
+          )}
+        </div>
+      )}
+
+      {/* Device selector */}
+      <div className="space-y-1 mb-4">
+        <label className="text-xs font-medium text-text-secondary">Input Device</label>
+        <select
+          value={audioInputDeviceId ?? 'none'}
+          onChange={(e) => setAudioInputDevice(e.target.value === 'none' ? null : e.target.value)}
+          className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded"
+          disabled={!permissionGranted && devices.length === 0}
+        >
+          <option value="none">— None —</option>
+          {devices.map((d) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+        {permissionGranted && devices.length === 0 && (
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-text-secondary/50">No audio input devices detected</p>
+            <button
+              onClick={refreshDevices}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-bg-tertiary border border-border hover:bg-bg-tertiary/80 text-text-secondary"
+            >
+              Refresh
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Monitor toggle */}
+      <div className="flex items-center gap-2 mb-4">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={audioInputMonitor}
+            onChange={(e) => setAudioInputMonitor(e.target.checked)}
+            className="w-4 h-4 rounded"
+            disabled={!isCapturingInput}
+          />
+          <span className="text-xs text-text-secondary">Monitor (hear input)</span>
+        </label>
+      </div>
+
+      {/* Level meter */}
+      {isCapturingInput && (
+        <div className="mb-4 space-y-1">
+          <label className="text-xs font-medium text-text-secondary">Input Level</label>
+          <div className="h-3 bg-bg-tertiary rounded border border-border/30 overflow-hidden">
+            <div
+              className="h-full transition-all duration-75 rounded"
+              style={{
+                width: `${levelPct}%`,
+                background: levelPct > 85 ? '#ef4444' : levelPct > 65 ? '#f59e0b' : '#22c55e',
+              }}
+            />
+          </div>
+          <div className="flex justify-between text-[10px] text-text-secondary/50 font-mono">
+            <span>-60 dB</span>
+            <span>{levelDb > -60 ? `${levelDb.toFixed(0)} dB` : '—'}</span>
+            <span>0 dB</span>
+          </div>
+        </div>
+      )}
+
+      {/* Record button + timer */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => isCapturingInput ? stopAudioCapture() : startAudioCapture()}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+            isCapturingInput
+              ? 'bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 animate-pulse'
+              : 'bg-bg-tertiary border border-border hover:bg-bg-tertiary/80 text-text-primary cursor-pointer'
+          }`}
+        >
+          <span className={`w-2.5 h-2.5 rounded-full ${isCapturingInput ? 'bg-red-500' : 'bg-red-400/60'}`} />
+          {isCapturingInput ? 'Stop' : 'Record'}
+        </button>
+
+        {isCapturingInput && (
+          <span className="text-xs font-mono text-red-400">{formatTime(elapsed)}</span>
+        )}
+
+        {!isCapturingInput && (
+          <span className="text-xs text-text-secondary/50">
+            Recording auto-loads into selected looper
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function SettingsPopup({ onClose }: { onClose: () => void }) {
@@ -218,6 +416,8 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
                       </p>
                     </div>
                   </div>
+
+                  <AudioInputSection />
                 </div>
               )}
 
@@ -270,6 +470,10 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
                 </div>
               )}
 
+              {activeTab === 'storage' && (
+                <StorageSettings />
+              )}
+
               {activeTab === 'about' && (
                 <div className="p-6 space-y-6">
                   <div>
@@ -302,5 +506,69 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
         </div>
       </div>
     </>
+  );
+}
+
+// ── Storage Settings Tab ──────────────────────────────────────────────────────
+
+function StorageSettings() {
+  const [enabled, setEnabled] = useState(getAutosaveEnabled);
+  const [interval, setInterval_] = useState(getAutosaveInterval);
+
+  const handleToggle = (checked: boolean) => {
+    setEnabled(checked);
+    setAutosaveEnabled(checked);
+  };
+
+  const handleInterval = (ms: number) => {
+    setInterval_(ms);
+    setAutosaveInterval(ms);
+  };
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h3 className="text-sm font-semibold text-text-primary mb-4">Autosave</h3>
+        <div className="space-y-4">
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => handleToggle(e.target.checked)}
+              className="accent-accent w-3.5 h-3.5"
+            />
+            <span className="text-xs text-text-secondary">Enable autosave</span>
+          </label>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-medium text-text-secondary/60 uppercase tracking-wider">
+              Autosave interval
+            </label>
+            <select
+              value={interval}
+              onChange={(e) => handleInterval(Number(e.target.value))}
+              disabled={!enabled}
+              className="w-full px-3 py-2 text-xs bg-bg-tertiary text-text-primary border border-border rounded outline-none focus:border-accent disabled:opacity-40 transition-opacity"
+            >
+              <option value={1000}>Quick (1s)</option>
+              <option value={3000}>Normal (3s)</option>
+              <option value={5000}>Relaxed (5s)</option>
+              <option value={10000}>Slow (10s)</option>
+            </select>
+          </div>
+
+          <p className="text-[11px] text-text-secondary/40 leading-relaxed">
+            Autosave activates after your first manual save. Each save creates a version snapshot you can restore from My Sets.
+          </p>
+        </div>
+      </div>
+
+      <div className="pt-4 border-t border-border/30">
+        <h3 className="text-sm font-semibold text-text-primary mb-3">Version History</h3>
+        <p className="text-[11px] text-text-secondary/40 leading-relaxed">
+          Manual saves create named versions. Autosave keeps a single rolling snapshot between manual saves. Up to 50 versions per set.
+        </p>
+      </div>
+    </div>
   );
 }

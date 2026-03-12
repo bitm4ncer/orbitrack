@@ -20,7 +20,7 @@ import * as Tone from 'tone';
 import { seedFactory } from './storage/seedFactory';
 import { seedEffectFactory } from './storage/seedEffectFactory';
 import { initRecordingSync } from './storage/recordingSync';
-import { restoreAutosave, initSessionAutosave } from './storage/sessionAutosave';
+import { restoreFromSetId, restoreLegacyAutosave, initSessionAutosave, getLastSetId } from './storage/sessionAutosave';
 import { initUndoHistory } from './state/undoHistory';
 import { parseShareHash, decodeSetFromUrl } from './storage/urlShare';
 import { perfMonitor } from './debug/perfMonitor';
@@ -112,12 +112,20 @@ function App() {
           history.replaceState(null, '', window.location.pathname + window.location.search);
         } catch (e) {
           console.error('[App] Failed to load shared URL:', e);
-          // Fall through to autosave restore
-          restored = await restoreAutosave();
         }
-      } else {
-        // Restore session from IDB (instruments, effects, BPM, grid, etc.)
-        restored = await restoreAutosave();
+      }
+
+      if (!restored) {
+        // Try restoring from last saved set ID
+        const lastSetId = getLastSetId();
+        if (lastSetId) {
+          restored = await restoreFromSetId(lastSetId);
+        }
+      }
+
+      if (!restored) {
+        // Migration: try legacy __autosave__ entry
+        restored = await restoreLegacyAutosave();
       }
 
       // Seed factory presets & hydrate recordings

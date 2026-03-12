@@ -1,5 +1,5 @@
 import * as Tone from 'tone';
-import { samples, loadBuffer, getAudioContext as getSdAudioContext, setAudioContext, loadWorklets } from 'superdough';
+import { samples, loadBuffer, getAudioContext as getSdAudioContext, loadWorklets } from 'superdough';
 import { initRoutingEngine } from './routingEngine';
 import { initSceneBusesFromState } from './sceneBus';
 
@@ -51,15 +51,15 @@ const DEFAULT_SAMPLES: Record<string, string> = {
 
 export async function initAudio(): Promise<void> {
   if (initialized) return;
-  await Tone.start();
 
-  // Tone.js uses standardized-audio-context (a polyfill wrapper). Its internal
-  // native AudioContext is at _nativeContext. We point superdough at the same
-  // native context so that (a) Tone-scheduled times are valid for superdough,
-  // and (b) superdough's ChannelMergerNode / stereo routing use the real
-  // AudioContext with correct destination.maxChannelCount.
-  const nativeCtx = (Tone.context.rawContext as unknown as { _nativeContext: AudioContext })._nativeContext;
-  if (nativeCtx) setAudioContext(nativeCtx);
+  // Let superdough own the AudioContext — then tell Tone.js to use it.
+  // This guarantees a single AudioContext for everything: superdough orbits,
+  // per-note nodes, Tone.js scheduling, our effect chains, and the synth engine.
+  // The old approach (Tone creates context → setAudioContext) caused cross-context
+  // errors because superdough could create orbit nodes before setAudioContext ran.
+  const sdCtx = getSdAudioContext() as AudioContext;
+  Tone.setContext(sdCtx);
+  await Tone.start();
 
   // 200ms lookahead: buffers against brief main-thread blocks without
   // throwing off the step-counter logic in transport.ts (which uses
@@ -75,12 +75,10 @@ export async function initAudio(): Promise<void> {
   }
 
   // Load our bitcrusher sample-rate-reduction AudioWorklet
-  if (nativeCtx) {
-    try {
-      await nativeCtx.audioWorklet.addModule(import.meta.env.BASE_URL + 'bitcrusher-processor.js');
-    } catch (e) {
-      console.warn('[engine] bitcrusher worklet failed to load:', e);
-    }
+  try {
+    await sdCtx.audioWorklet.addModule(import.meta.env.BASE_URL + 'bitcrusher-processor.js');
+  } catch (e) {
+    console.warn('[engine] bitcrusher worklet failed to load:', e);
   }
 
   // Pre-decode all default samples into superdough's buffer cache so the

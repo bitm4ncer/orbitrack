@@ -143,7 +143,7 @@ function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }
     if (!canvas) return;
 
     // Pre-allocate outside draw loop — avoids 16 KB GC pressure every frame
-    let dataBuffer: Float32Array | null = null;
+    let dataBuffer: Float32Array<ArrayBuffer> | null = null;
     // Cache gradient — recreated only when canvas height changes
     let cachedGrad: CanvasGradient | null = null;
     let cachedGradH = 0;
@@ -185,7 +185,7 @@ function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }
       const s = stateRef.current;
       if (analyser) {
         if (!dataBuffer || dataBuffer.length !== analyser.fftSize) {
-          dataBuffer = new Float32Array(analyser.fftSize);
+          dataBuffer = new Float32Array(analyser.fftSize) as Float32Array<ArrayBuffer>;
         }
         const buf = dataBuffer;
         analyser.getFloatTimeDomainData(buf);
@@ -731,7 +731,7 @@ export function InstrumentRack() {
       solo: false,
       volume: 0,
       orbitIndex: store.instruments.length,
-      looperParams: { gain: 0.9, speed: 1, attack: 0.001, release: 0.05, pan: 0, cutoff: 20000, resonance: 0, pitchSemitones: 0, reverse: false, startOffset: 0 },
+      looperParams: { gain: 0.9, speed: 1, attack: 0.001, release: 0.05, pan: 0, cutoff: 20000, resonance: 0, pitchSemitones: 0, reverse: false, startOffset: 0, stretchToSteps: false },
     };
     store.setInstruments([...store.instruments, newInst]);
     store.selectInstrument(newInst.id);

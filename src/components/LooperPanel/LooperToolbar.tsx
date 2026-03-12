@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useStore } from '../../state/store';
+import { getCaptureDuration, getInputLevel } from '../../audio/audioInput';
 
 /** Tiny inline knob for toolbar use (20×20px) */
 function MiniKnob({ value, min, max, step, color, onChange, title }: {
@@ -57,14 +58,7 @@ export function LooperToolbar({ instrumentId, color, sensitivity, onSensitivityC
   const redetectTransients = useStore((s) => s.redetectTransients);
   const setLooperLoop = useStore((s) => s.setLooperLoop);
   const setLooperPeakResolution = useStore((s) => s.setLooperPeakResolution);
-  const setDetectedBpm = useStore((s) => s.setDetectedBpm);
-  const setLooperBpmMultiplier = useStore((s) => s.setLooperBpmMultiplier);
   const updateLooperParams = useStore((s) => s.updateLooperParams);
-  const autoMatchBpm = useStore((s) => s.autoMatchBpm);
-  const projectBpm = useStore((s) => s.bpm);
-
-  const [editingBpm, setEditingBpm] = useState(false);
-  const [bpmInput, setBpmInput] = useState('');
 
   const hasSelection = editor?.selectionStart != null && editor?.selectionEnd != null;
   const hasClipboard = !!editor?.clipboard;
@@ -72,15 +66,8 @@ export function LooperToolbar({ instrumentId, color, sensitivity, onSensitivityC
   const hasLoop = editor != null && (editor.loopIn > 0 || editor.loopOut < 1);
   const peakRes = editor?.peakResolution ?? 512;
 
-  const detectedBpm = instrument?.detectedBpm ?? 0;
-  const bpmMultiplier = instrument?.bpmMultiplier ?? 1;
   const isReversed = instrument?.looperParams?.reverse ?? false;
-  const currentSpeed = instrument?.looperParams?.speed ?? 1;
-
-  // Check if speed is synced to project BPM
-  const idealSpeed = detectedBpm > 0 ? projectBpm / (detectedBpm * bpmMultiplier) : 0;
-  const isSynced = idealSpeed > 0 && Math.abs(currentSpeed - idealSpeed) / idealSpeed < 0.01;
-  const effectiveBpm = detectedBpm > 0 ? (detectedBpm * bpmMultiplier * currentSpeed) : 0;
+  const isStretchToSteps = instrument?.looperParams?.stretchToSteps ?? false;
 
   const btnClass = (enabled: boolean) =>
     `px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider rounded transition-colors ${
@@ -100,36 +87,9 @@ export function LooperToolbar({ instrumentId, color, sensitivity, onSensitivityC
     setLooperLoop(instrumentId, 0, 1);
   };
 
-  const handleBpmClick = () => {
-    setEditingBpm(true);
-    setBpmInput(detectedBpm > 0 ? detectedBpm.toFixed(0) : '');
-  };
-
-  const handleBpmSubmit = () => {
-    const val = parseFloat(bpmInput);
-    if (val >= 30 && val <= 300) {
-      setDetectedBpm(instrumentId, val);
-      // Recalculate with current multiplier
-      setLooperBpmMultiplier(instrumentId, bpmMultiplier);
-    }
-    setEditingBpm(false);
-  };
-
-  const handleBpmKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleBpmSubmit();
-    if (e.key === 'Escape') setEditingBpm(false);
-  };
-
   const handleReverse = () => {
     updateLooperParams(instrumentId, { reverse: !isReversed });
   };
-
-  const mulBtnClass = (mul: number) =>
-    `px-1.5 py-0.5 text-[9px] font-medium rounded transition-colors cursor-pointer ${
-      bpmMultiplier === mul
-        ? 'bg-cyan-500/20 text-cyan-400'
-        : 'text-text-secondary/60 hover:bg-white/10 hover:text-text-primary'
-    }`;
 
   return (
     <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border/50 shrink-0 bg-bg-secondary">
@@ -178,6 +138,17 @@ export function LooperToolbar({ instrumentId, color, sensitivity, onSensitivityC
         Rev
       </button>
 
+      {/* Stretch to Steps toggle */}
+      <button
+        className={`px-2 py-1 text-[10px] font-medium uppercase tracking-wider rounded transition-colors cursor-pointer ${
+          isStretchToSteps ? 'bg-cyan-500/20 text-cyan-400' : 'text-text-primary hover:bg-white/10'
+        }`}
+        onClick={() => updateLooperParams(instrumentId, { stretchToSteps: !isStretchToSteps })}
+        title="Stretch slices to fill grid slots (time-warp)"
+      >
+        Stretch
+      </button>
+
       <div className="w-px h-4 bg-border/40 mx-1" />
 
       {/* Loop in/out */}
@@ -205,61 +176,6 @@ export function LooperToolbar({ instrumentId, color, sensitivity, onSensitivityC
 
       <div className="w-px h-4 bg-border/40 mx-1" />
 
-      {/* BPM display + half/double time */}
-      <span className="text-[9px] text-text-secondary/60 uppercase tracking-wider">BPM</span>
-      {editingBpm ? (
-        <input
-          type="number"
-          min={30} max={300}
-          value={bpmInput}
-          onChange={(e) => setBpmInput(e.target.value)}
-          onBlur={handleBpmSubmit}
-          onKeyDown={handleBpmKeyDown}
-          autoFocus
-          className="w-12 h-5 text-[10px] font-mono text-center bg-bg-primary border border-border rounded px-1 text-text-primary outline-none focus:border-cyan-500"
-        />
-      ) : (
-        <button
-          className={`px-1.5 py-0.5 text-[10px] font-mono rounded transition-colors cursor-pointer ${
-            detectedBpm > 0 ? 'text-cyan-400 hover:bg-cyan-500/10' : 'text-text-secondary/40 hover:bg-white/10'
-          }`}
-          onClick={handleBpmClick}
-          title={detectedBpm > 0 ? `Detected BPM: ${detectedBpm.toFixed(1)} — click to override` : 'No BPM detected — click to set manually'}
-        >
-          {detectedBpm > 0 ? detectedBpm.toFixed(0) : '—'}
-        </button>
-      )}
-      <div className="flex items-center gap-0.5 ml-0.5">
-        <button className={mulBtnClass(2)} onClick={() => setLooperBpmMultiplier(instrumentId, 2)} title="Half-time (double loop length)">÷2</button>
-        <button className={mulBtnClass(1)} onClick={() => setLooperBpmMultiplier(instrumentId, 1)} title="Normal">1×</button>
-        <button className={mulBtnClass(0.5)} onClick={() => setLooperBpmMultiplier(instrumentId, 0.5)} title="Double-time (halve loop length)">×2</button>
-      </div>
-
-      {/* SYNC button + effective BPM */}
-      <button
-        className={`px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider rounded transition-colors cursor-pointer ml-1 ${
-          isSynced
-            ? 'bg-cyan-500/20 text-cyan-400'
-            : detectedBpm > 0
-              ? 'text-text-primary hover:bg-white/10'
-              : 'text-text-secondary/30 cursor-default'
-        }`}
-        disabled={detectedBpm <= 0}
-        onClick={() => detectedBpm > 0 && autoMatchBpm(instrumentId)}
-        title={detectedBpm > 0
-          ? `Sync speed to project BPM (${projectBpm}). Current effective: ${effectiveBpm.toFixed(0)} BPM`
-          : 'No BPM detected — cannot sync'}
-      >
-        Sync
-      </button>
-      {effectiveBpm > 0 && !isSynced && (
-        <span className="text-[8px] text-text-secondary/40 font-mono">
-          {effectiveBpm.toFixed(0)}
-        </span>
-      )}
-
-      <div className="w-px h-4 bg-border/40 mx-1" />
-
       {/* Sensitivity slider */}
       <span className="text-[9px] text-text-secondary/60 uppercase tracking-wider ml-1">Sens</span>
       <input
@@ -281,6 +197,119 @@ export function LooperToolbar({ instrumentId, color, sensitivity, onSensitivityC
         onChange={(v) => setLooperPeakResolution(instrumentId, v)}
         title={`Waveform resolution: ${peakRes}`} />
       <span className="text-[9px] text-text-secondary/50 font-mono w-8">{peakRes}</span>
+
+      <div className="w-px h-4 bg-border/40 mx-1" />
+
+      {/* Record audio input */}
+      <RecordInputButton instrumentId={instrumentId} />
+    </div>
+  );
+}
+
+/** Thin 2px horizontal level meter for audio input */
+function InputLevelMeter() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef = useRef<number>(0);
+  const gradientRef = useRef<CanvasGradient | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const draw = () => {
+      const w = canvas.width;
+      const h = canvas.height;
+      const dB = getInputLevel();
+      const level = Math.max(0, (dB + 48) / 48);
+
+      // Cache gradient
+      if (!gradientRef.current) {
+        const g = ctx.createLinearGradient(0, 0, w, 0);
+        g.addColorStop(0, '#16a34a');
+        g.addColorStop(0.55, '#22c55e');
+        g.addColorStop(0.75, '#f59e0b');
+        g.addColorStop(0.88, '#f97316');
+        g.addColorStop(1, '#ef4444');
+        gradientRef.current = g;
+      }
+
+      ctx.clearRect(0, 0, w, h);
+      const fillW = level * w;
+      if (fillW > 0) {
+        ctx.fillStyle = gradientRef.current;
+        ctx.fillRect(0, 0, fillW, h);
+      }
+
+      rafRef.current = requestAnimationFrame(draw);
+    };
+
+    rafRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={80}
+      height={2}
+      className="block"
+      style={{ width: 80, height: 2, borderRadius: 1 }}
+    />
+  );
+}
+
+function RecordInputButton({ instrumentId }: { instrumentId: string }) {
+  const isCapturingInput = useStore((s) => s.isCapturingInput);
+  const startAudioCapture = useStore((s) => s.startAudioCapture);
+  const stopAudioCapture = useStore((s) => s.stopAudioCapture);
+  const selectInstrument = useStore((s) => s.selectInstrument);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!isCapturingInput) { setElapsed(0); return; }
+    const id = setInterval(() => setElapsed(getCaptureDuration()), 200);
+    return () => clearInterval(id);
+  }, [isCapturingInput]);
+
+  const handleClick = () => {
+    if (isCapturingInput) {
+      stopAudioCapture();
+    } else {
+      // Select this looper so stopAudioCapture auto-assigns to it
+      selectInstrument(instrumentId);
+      startAudioCapture();
+    }
+  };
+
+  const formatTime = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        onClick={handleClick}
+        className={`flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium uppercase tracking-wider rounded transition-colors cursor-pointer ${
+          isCapturingInput
+            ? 'bg-red-500/20 text-red-400 animate-pulse'
+            : 'text-text-primary hover:bg-white/10'
+        }`}
+        title={isCapturingInput ? 'Stop recording input' : 'Record from audio input (uses default mic if no device selected in Settings)'}
+      >
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+          <line x1="12" y1="19" x2="12" y2="23" />
+        </svg>
+        {isCapturingInput ? 'Stop' : 'Rec'}
+      </button>
+      {isCapturingInput && (
+        <span className="text-[9px] font-mono text-red-400">{formatTime(elapsed)}</span>
+      )}
+      {isCapturingInput && <InputLevelMeter />}
     </div>
   );
 }

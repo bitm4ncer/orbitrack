@@ -35,6 +35,7 @@ import { removeSynthEngine } from '../audio/synthManager';
 import { destroyOrbitChain } from '../audio/orbitEffects';
 import type { MidiSettings } from '../types/midi';
 import { saveMidiSettings, loadMidiSettings } from '../storage/midiSettingsStorage';
+import { startInputCapture, stopInputCapture, setInputMonitor } from '../audio/audioInput';
 
 // LLM Generation settings types
 export type LLMEndpointType = 'none' | 'ollama' | 'claude' | 'custom';
@@ -391,6 +392,15 @@ export interface StoreState {
   setMidiRecordArmed: (armed: boolean) => void;
   setMidiRecordMode: (mode: 'overdub' | 'replace') => void;
 
+  // Audio input recording
+  audioInputDeviceId: string | null;
+  audioInputMonitor: boolean;
+  isCapturingInput: boolean;
+  setAudioInputDevice: (id: string | null) => void;
+  setAudioInputMonitor: (enabled: boolean) => void;
+  startAudioCapture: () => Promise<boolean>;
+  stopAudioCapture: () => void;
+
   // Sample favorites
   sampleFavorites: string[];
   toggleSampleFavorite: (path: string) => void;
@@ -398,7 +408,9 @@ export interface StoreState {
   // Set (project) management
   currentSetId: string | null;
   currentSetName: string;
+  currentSetThumbnail: string | null;
   setCurrentSetName: (name: string) => void;
+  setCurrentSetThumbnail: (thumb: string | null) => void;
   getSerializableState: () => {
     bpm: number;
     masterVolume: number;
@@ -691,8 +703,11 @@ export const useStore = create<StoreState>((set, get) => ({
     const inst = s.instruments.find((i) => i.id === id);
     // Clean up synth engine if it's a synth instrument
     if (inst?.type === 'synth') removeSynthEngine(id);
-    // Destroy the orbit effect chain (stops oscillators, disconnects all nodes)
-    if (inst) destroyOrbitChain(inst.orbitIndex);
+    // Destroy the orbit effect chain ONLY if no other instrument shares this orbit
+    if (inst) {
+      const otherOnSameOrbit = s.instruments.some((i) => i.id !== id && i.orbitIndex === inst.orbitIndex);
+      if (!otherOnSameOrbit) destroyOrbitChain(inst.orbitIndex);
+    }
     // Unroute from group bus if grouped
     if (inst) unrouteOrbitFromScene(inst.orbitIndex);
     const instruments = s.instruments.filter((i) => i.id !== id);
@@ -972,17 +987,18 @@ export const useStore = create<StoreState>((set, get) => ({
           gridLengths: { ...s.gridLengths, [id]: s.gridLengths[id] || [] },
         };
       } else {
-        const newHits = Math.min(inst.hits, newLoopSize);
-        const hitsReduced = newHits !== inst.hits;
+        // Re-quantize hit positions to the new grid to avoid bunching/zero-length slices
+        const requantized = mapTransientsToGrid(inst.hitPositions, newLoopSize);
+        const newHits = requantized.length;
         newInstruments = s.instruments.map((i) =>
           i.id !== id ? i : {
             ...i,
             loopSize: newLoopSize,
             hits: newHits,
-            hitPositions: hitsReduced ? generateEvenHits(newHits) : i.hitPositions,
+            hitPositions: requantized,
           }
         );
-        if (hitsReduced) {
+        if (newHits < inst.hits) {
           const trimArr = <T,>(arr: T[]) => arr.slice(0, newHits);
           gridUpdate = {
             gridNotes: { ...s.gridNotes, [id]: trimArr(s.gridNotes[id] || []) },
@@ -1231,6 +1247,69 @@ export const useStore = create<StoreState>((set, get) => ({
   midiRecordMode: 'overdub' as const,
   setMidiRecordArmed: (armed) => set({ midiRecordArmed: armed }),
   setMidiRecordMode: (mode) => set({ midiRecordMode: mode }),
+
+  // Audio input recording
+  audioInputDeviceId: null,
+  audioInputMonitor: false,
+  isCapturingInput: false,
+  setAudioInputDevice: (id) => set({ audioInputDeviceId: id }),
+  setAudioInputMonitor: (enabled) => {
+    set({ audioInputMonitor: enabled });
+    setInputMonitor(enabled);
+  },
+  startAudioCapture: async () => {
+    const { audioInputDeviceId } = get();
+    const ok = await startInputCapture(audioInputDeviceId ?? undefined);
+    if (ok) set({ isCapturingInput: true });
+    return ok;
+  },
+  stopAudioCapture: () => {
+    const buffer = stopInputCapture();
+    set({ isCapturingInput: false });
+    if (!buffer) return;
+
+    // Convert to blob URL and register as custom sample
+    const url = bufferToBlobUrl(buffer);
+    const name = `Recording ${new Date().toLocaleTimeString()}`;
+    const key = `__recorded_input__/${name}_${Date.now()}`;
+    get().addCustomSample({ key, url, name });
+
+    // If the selected instrument is a looper, assign directly
+    // (can't use assignLoop because key isn't a fetchable URL — we already have the buffer)
+    const state = get();
+    const inst = state.instruments.find((i) => i.id === state.selectedInstrumentId);
+    if (inst?.type === 'looper') {
+      const sdKey = registerSampleForPlayback(key, url);
+      set((s) => ({
+        instruments: s.instruments.map((i) =>
+          i.id === inst.id
+            ? { ...i, sampleName: sdKey, samplePath: key, name }
+            : i
+        ),
+      }));
+      // Init looper editor directly with the captured buffer (no fetch needed)
+      get().initLooperEditor(inst.id, buffer);
+
+      // Override to natural playback: single hit covering the full buffer at 1x speed.
+      // Without this, initLooperEditor's transient detection slices the recording
+      // and triggerLooperSlice time-stretches each slice to fit grid slots.
+      const bpm = get().bpm;
+      const stepsPerBeat = get().stepsPerBeat;
+      const secondsPerStep = 60 / (bpm * stepsPerBeat);
+      const naturalLoopSize = Math.max(1, Math.round(buffer.duration / secondsPerStep));
+      set((s) => ({
+        instruments: s.instruments.map((i) =>
+          i.id === inst.id
+            ? { ...i, hits: 1, hitPositions: [0], loopSize: naturalLoopSize }
+            : i
+        ),
+        gridNotes: {
+          ...s.gridNotes,
+          [inst.id]: [[60]],
+        },
+      }));
+    }
+  },
 
   toggleSampleFavorite: (path: string) => set((state) => {
     const favorites = state.sampleFavorites.includes(path)
@@ -1675,7 +1754,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
     // Use cached BPM for initial estimate if available, otherwise fall back to project BPM
     const initialBpm = cachedBpm > 0 ? cachedBpm : 0;
-    const fallbackLoopSize = estimateLoopSize(buffer, projectBpm, initialBpm);
+    const stepsPerBeat = get().stepsPerBeat;
+    const fallbackLoopSize = estimateLoopSize(buffer, projectBpm, initialBpm, stepsPerBeat);
     const fallbackMaxPeaks = Math.min(fallbackLoopSize, 64);
     const transients = detectTransients(buffer, 0.5, fallbackMaxPeaks);
     const transientTails = detectTransientTails(buffer, transients);
@@ -1704,9 +1784,7 @@ export const useStore = create<StoreState>((set, get) => ({
       },
     }));
 
-    // Auto-match speed if we have a cached BPM
     if (cachedBpm > 0) {
-      get().autoMatchBpm(instrumentId);
       if (import.meta.env.DEV) console.log(`[looper] Using cached BPM: ${cachedBpm}, loopSize: ${fallbackLoopSize}`);
     }
 
@@ -1722,22 +1800,17 @@ export const useStore = create<StoreState>((set, get) => ({
 
       // If we already applied this BPM from cache, just ensure it's on the instrument
       const currentInst = get().instruments.find((i) => i.id === instrumentId);
-      if (currentInst?.detectedBpm === detectedBpm) {
-        // Still auto-match speed in case project BPM changed
-        get().autoMatchBpm(instrumentId);
-        return;
-      }
+      if (currentInst?.detectedBpm === detectedBpm) return;
 
-      const refinedLoopSize = estimateLoopSize(buffer, projectBpm, detectedBpm);
+      const refinedLoopSize = estimateLoopSize(buffer, projectBpm, detectedBpm, stepsPerBeat);
 
       if (refinedLoopSize === fallbackLoopSize) {
-        // loopSize unchanged, but still store detectedBpm and auto-match speed
+        // loopSize unchanged, but still store detectedBpm
         set((s) => ({
           instruments: s.instruments.map((i) =>
             i.id === instrumentId ? { ...i, detectedBpm } : i
           ),
         }));
-        get().autoMatchBpm(instrumentId);
         if (import.meta.env.DEV) console.log(`[looper] BPM detected: ${detectedBpm.toFixed(1)}, loopSize unchanged: ${refinedLoopSize}`);
         return;
       }
@@ -1766,7 +1839,6 @@ export const useStore = create<StoreState>((set, get) => ({
           [instrumentId]: refinedHits.map(() => [60]),
         },
       }));
-      get().autoMatchBpm(instrumentId);
       if (import.meta.env.DEV) console.log(`[looper] BPM detected: ${detectedBpm.toFixed(1)}, loopSize: ${refinedLoopSize} (was ${fallbackLoopSize})`);
     }).catch((e) => {
       if (import.meta.env.DEV) console.warn('[looper] BPM detection error:', e);
@@ -2179,7 +2251,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const projectBpm = get().bpm;
     const effectiveBpm = detectedBpm * multiplier;
-    const newLoopSize = estimateLoopSize(editor.audioBuffer, projectBpm, effectiveBpm);
+    const newLoopSize = estimateLoopSize(editor.audioBuffer, projectBpm, effectiveBpm, get().stepsPerBeat);
     const maxPeaks = Math.min(newLoopSize, 64);
     const transients = detectTransients(editor.audioBuffer, 0.5, maxPeaks);
     const transientTails = detectTransientTails(editor.audioBuffer, transients);
@@ -2201,8 +2273,6 @@ export const useStore = create<StoreState>((set, get) => ({
       },
     }));
 
-    // Auto-match speed after multiplier change
-    get().autoMatchBpm(instrumentId);
   },
 
   autoMatchBpm: (instrumentId) => {
@@ -2219,8 +2289,10 @@ export const useStore = create<StoreState>((set, get) => ({
   // Set (project) management
   currentSetId: null,
   currentSetName: generateName(),
+  currentSetThumbnail: null,
 
   setCurrentSetName: (name) => set({ currentSetName: name }),
+  setCurrentSetThumbnail: (thumb) => set({ currentSetThumbnail: thumb }),
 
   getSerializableState: () => {
     const s = get();
@@ -2294,6 +2366,7 @@ export const useStore = create<StoreState>((set, get) => ({
       customSamples,
       currentSetId: orbeatSet.meta.id,
       currentSetName: orbeatSet.meta.name,
+      currentSetThumbnail: orbeatSet.meta.thumbnail ?? null,
       selectedInstrumentId: orbeatSet.instruments[0]?.id ?? null,
       selectedInstrumentIds: orbeatSet.instruments[0] ? [orbeatSet.instruments[0].id] : [],
       selectedSceneId: null,
@@ -2304,21 +2377,44 @@ export const useStore = create<StoreState>((set, get) => ({
       arrangement: orbeatSet.arrangement ?? [],
     });
 
+    // Persist last set ID for session restore on next load
+    try {
+      localStorage.setItem('orbeat:lastSetId', orbeatSet.meta.id);
+    } catch { /* quota exceeded or private mode */ }
+
     // Re-init looper editors — async decode + BPM detection
     const baseUrl = ((import.meta.env.BASE_URL as string) ?? '/').replace(/\/$/, '') + '/';
     for (const inst of orbeatSet.instruments) {
       if (inst.type === 'looper' && inst.samplePath) {
-        const isCustom = customSamples.some((c) => c.key === inst.samplePath);
-        const url = isCustom
-          ? customSamples.find((c) => c.key === inst.samplePath)!.url
-          : inst.samplePath.startsWith('blob:') || inst.samplePath.startsWith('http')
-            ? inst.samplePath
-            : baseUrl + inst.samplePath;
+        const custom = customSamples.find((c) => c.key === inst.samplePath);
+        let url: string | null;
+        if (custom) {
+          url = custom.url;
+        } else if (inst.samplePath.startsWith('blob:') || inst.samplePath.startsWith('http')) {
+          url = inst.samplePath;
+        } else if (inst.samplePath.startsWith('__recorded_input__/') || inst.samplePath.startsWith('__imported__/')) {
+          // Custom sample whose data wasn't embedded — skip (can't fetch from file system)
+          console.warn('[loadSet] skipping looper without embedded audio:', inst.samplePath);
+          url = null;
+        } else {
+          url = baseUrl + inst.samplePath;
+        }
+        if (!url) continue;
         try {
-          const ctx = Tone.getContext().rawContext as AudioContext;
+          // Use native AudioContext (not the standardized-audio-context polyfill)
+          const rawCtx = Tone.getContext().rawContext as unknown as { _nativeContext?: AudioContext };
+          const ctx = rawCtx._nativeContext ?? (Tone.getContext().rawContext as unknown as AudioContext);
           fetch(url)
-            .then((r) => r.arrayBuffer())
-            .then((buf) => ctx.decodeAudioData(buf))
+            .then((r) => {
+              if (!r.ok) throw new Error(`fetch failed: ${r.status} ${r.statusText} for ${url}`);
+              const ct = r.headers.get('content-type') ?? '';
+              if (ct.includes('text/html')) throw new Error(`got HTML instead of audio for ${url}`);
+              return r.arrayBuffer();
+            })
+            .then((buf) => {
+              if (buf.byteLength === 0) throw new Error(`empty response for ${url}`);
+              return ctx.decodeAudioData(buf);
+            })
             .then((decoded) => get().initLooperEditor(inst.id, decoded))
             .catch((e) => console.error('[loadSet] looper decode failed:', e));
         } catch (e) {
@@ -2363,6 +2459,7 @@ export const useStore = create<StoreState>((set, get) => ({
       customSamples: [],
       currentSetId: null,
       currentSetName: generateName(),
+      currentSetThumbnail: null,
       selectedInstrumentId: null,
       selectedInstrumentIds: [],
       selectedSceneId: null,
@@ -2376,6 +2473,9 @@ export const useStore = create<StoreState>((set, get) => ({
       arrangement: [],
       trackPosition: -1,
     });
+
+    // Clear last set ID so autosave doesn't run for unsaved new sets
+    try { localStorage.removeItem('orbeat:lastSetId'); } catch { /* ignore */ }
 
     // Assign random samples to default sampler instruments
     const CATEGORIES: { keywords: string[]; index: number }[] = [

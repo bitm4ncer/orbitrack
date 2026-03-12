@@ -1,7 +1,7 @@
 import { SynthEngine } from './synth/SynthEngine';
 import { getSynthOrbitInput } from './orbitEffects';
 import type { SynthParams } from './synth/types';
-import * as Tone from 'tone';
+import { getAudioContext } from 'superdough';
 
 interface EngineEntry {
   engine: SynthEngine;
@@ -40,11 +40,9 @@ export function getSynthEngine(instrumentId: string, orbitIndex: number, initial
     return existing.engine;
   }
 
-  // Use the native AudioContext (not the standardized-audio-context polyfill that
-  // Tone.js wraps). The polyfill throws InvalidAccessError after cancelScheduledValues
-  // + linearRampToValueAtTime sequences that are valid in the native Web Audio API.
-  const rawCtx = Tone.getContext().rawContext as unknown as { _nativeContext?: AudioContext };
-  const ac: AudioContext = rawCtx._nativeContext ?? (Tone.getContext().rawContext as unknown as AudioContext);
+  // Use superdough's AudioContext — it's the single shared context for everything
+  // (Tone.js, superdough orbits, synth engines, effect chains).
+  const ac = getAudioContext() as AudioContext;
   const engine = new SynthEngine(ac);
   engine.init();
 

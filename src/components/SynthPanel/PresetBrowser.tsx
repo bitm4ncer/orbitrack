@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { usePresetStore } from '../../state/presetStore';
 import { useClickOutside } from '../../hooks/useClickOutside';
 import { PresetSaveDialog } from './PresetSaveDialog';
+import { exportPresetFile, importPresetFiles } from '../../storage/presetIO';
 import type { SynthPreset } from '../../types/storage';
 import type { SynthEngine } from '../../audio/synth/SynthEngine';
 
@@ -205,8 +206,8 @@ function DotMenu({
   useClickOutside(ref, onClose);
 
   const items = source === 'user'
-    ? [{ label: 'Rename', action: 'rename' }, { label: 'Delete', action: 'delete' }]
-    : [{ label: 'Duplicate to User', action: 'duplicate' }];
+    ? [{ label: 'Rename', action: 'rename' }, { label: 'Export .json', action: 'export' }, { label: 'Delete', action: 'delete' }]
+    : [{ label: 'Duplicate to User', action: 'duplicate' }, { label: 'Export .json', action: 'export' }];
 
   return (
     <div
@@ -277,7 +278,22 @@ export function PresetBrowser({ engine, color, currentPresetName, onPresetLoaded
       setRenameValue(preset.name);
     } else if (action === 'duplicate') {
       await duplicatePreset(preset.id);
+    } else if (action === 'export') {
+      exportPresetFile(preset);
     }
+  };
+
+  const handleImport = async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.multiple = true;
+    input.onchange = async () => {
+      if (!input.files?.length) return;
+      await importPresetFiles(Array.from(input.files));
+      await loadPresets();
+    };
+    input.click();
   };
 
   const handleRenameConfirm = async () => {
@@ -377,15 +393,21 @@ export function PresetBrowser({ engine, color, currentPresetName, onPresetLoaded
           </div>
 
           {/* Footer */}
-          <div className="px-3 py-2 border-t border-border flex justify-between items-center">
+          <div className="px-3 py-2 border-t border-border flex items-center gap-2">
             <button
               onClick={() => setSaveOpen(true)}
               className="text-[9px] px-2 py-0.5 rounded font-medium"
               style={{ background: `${color}20`, color, border: `1px solid ${color}40` }}
             >
-              Save Preset
+              Save
             </button>
-            <span className="text-[8px] text-text-secondary/40">{filtered.length} presets</span>
+            <button
+              onClick={handleImport}
+              className="text-[9px] px-2 py-0.5 rounded font-medium text-text-secondary border border-border hover:border-white/20 hover:text-text-primary transition-colors"
+            >
+              Import .json
+            </button>
+            <span className="text-[8px] text-text-secondary/40 ml-auto">{filtered.length} presets</span>
           </div>
         </div>,
         document.body,

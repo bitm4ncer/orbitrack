@@ -204,7 +204,7 @@ function ShareMenu({ anchorRef, onClose }: { anchorRef: React.RefObject<HTMLButt
     try {
       const store = useStore.getState();
       const state = store.getSerializableState();
-      const { encoded, hasCustomSamples: hcs } = await encodeSetToUrl(state, store.currentSetName);
+      const { encoded, hasCustomSamples: hcs } = await encodeSetToUrl(state, store.currentSetName, store.currentSetThumbnail ?? undefined);
       setHasCustomSamples(hcs);
       await navigator.clipboard.writeText(buildShareUrl(encoded));
       setCopyStatus('copied');
