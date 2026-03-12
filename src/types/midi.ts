@@ -8,6 +8,7 @@ export type MidiTargetType =
   | 'orbitMute'
   | 'orbitSolo'
   | 'effectParam'
+  | 'synthParam'
   | 'triggerClip';
 
 export type MidiSyncMode = 'internal' | 'midiClockOut' | 'midiClockIn';

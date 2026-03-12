@@ -143,7 +143,7 @@ export class OrbitRenderer {
     const maxLoopSize = ordered.reduce((m, i) => Math.max(m, i.loopSize), 1);
     const globalProgress = (totalSteps % maxLoopSize) / maxLoopSize;
     const globalRotation = globalProgress * TWO_PI;
-    const lineAngle = spinMode ? TRIGGER_ANGLE + globalRotation : TRIGGER_ANGLE;
+    const lineAngle = spinMode ? TRIGGER_ANGLE - globalRotation : TRIGGER_ANGLE;
 
     // Per-instrument real-time progress
     const instProgressRT: Record<string, number> = {};
@@ -167,7 +167,7 @@ export class OrbitRenderer {
       ctx.beginPath();
       for (let g = 0; g < OUTER_GRID_STEPS; g++) {
         if (!match(g)) continue;
-        const tickAngle = (g / OUTER_GRID_STEPS) * TWO_PI + TRIGGER_ANGLE;
+        const tickAngle = TRIGGER_ANGLE - (g / OUTER_GRID_STEPS) * TWO_PI;
         const cos = Math.cos(tickAngle);
         const sin = Math.sin(tickAngle);
         ctx.moveTo(cx + cos * innerR, cy + sin * innerR);
@@ -209,7 +209,7 @@ export class OrbitRenderer {
           const is16th = g % 4 === 0 && !isBeat;
           const ga = isBeat ? 0.3 : is16th ? 0.15 : 0.07;
           if (ga !== tickAlpha) continue;
-          const tickAngle = (g / gridDiv) * TWO_PI + TRIGGER_ANGLE - dotRotation;
+          const tickAngle = TRIGGER_ANGLE - (g / gridDiv) * TWO_PI + dotRotation;
           const cos = Math.cos(tickAngle);
           const sin = Math.sin(tickAngle);
           ctx.moveTo(cx + cos * (radius - tickLen), cy + sin * (radius - tickLen));
@@ -227,7 +227,7 @@ export class OrbitRenderer {
 
       for (let i = 0; i < inst.hitPositions.length; i++) {
         const hitPos = inst.hitPositions[i];
-        const hitAngle = hitPos * TWO_PI - dotRotation + TRIGGER_ANGLE;
+        const hitAngle = TRIGGER_ANGLE - hitPos * TWO_PI + dotRotation;
         const hx = cx + Math.cos(hitAngle) * radius;
         const hy = cy + Math.sin(hitAngle) * radius;
 
@@ -283,7 +283,7 @@ export class OrbitRenderer {
     // Trigger line (plain, no shadow)
     const maxLoopSize = ordered.reduce((m, i) => Math.max(m, i.loopSize), 1);
     const globalProgress = (totalSteps % maxLoopSize) / maxLoopSize;
-    const lineAngle = state.spinMode ? TRIGGER_ANGLE + globalProgress * TWO_PI : TRIGGER_ANGLE;
+    const lineAngle = state.spinMode ? TRIGGER_ANGLE - globalProgress * TWO_PI : TRIGGER_ANGLE;
     const cos0 = Math.cos(lineAngle);
     const sin0 = Math.sin(lineAngle);
     ctx.beginPath();
@@ -328,7 +328,7 @@ export class OrbitRenderer {
       ctx.beginPath();
       for (let g = 0; g < loopSize; g++) {
         if (hitSteps.has(g)) continue;
-        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE - dotRotation;
+        const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI + dotRotation;
         const x = cx + Math.cos(angle) * radius;
         const y = cy + Math.sin(angle) * radius;
         ctx.moveTo(x + 2, y);
@@ -342,7 +342,7 @@ export class OrbitRenderer {
       for (let g = 0; g < loopSize; g++) {
         if (!hitSteps.has(g)) continue;
         if (isPlaying && g === currentStep) continue;
-        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE - dotRotation;
+        const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI + dotRotation;
         const x = cx + Math.cos(angle) * radius;
         const y = cy + Math.sin(angle) * radius;
         ctx.moveTo(x + 4, y);
@@ -352,7 +352,7 @@ export class OrbitRenderer {
 
       // Pass 3: triggered step (white)
       if (isPlaying && hitSteps.has(currentStep)) {
-        const angle = (currentStep / loopSize) * TWO_PI + TRIGGER_ANGLE - dotRotation;
+        const angle = TRIGGER_ANGLE - (currentStep / loopSize) * TWO_PI + dotRotation;
         const x = cx + Math.cos(angle) * radius;
         const y = cy + Math.sin(angle) * radius;
         ctx.beginPath();
@@ -429,7 +429,7 @@ export class OrbitRenderer {
       // Rotate hit positions by currentStep
       const rotatedHits = new Set<number>();
       for (const s of hitSteps) {
-        rotatedHits.add((s + currentStep) % loopSize);
+        rotatedHits.add((s - currentStep + loopSize) % loopSize);
       }
 
       const triggerDisplayStep = 0;
@@ -440,7 +440,7 @@ export class OrbitRenderer {
       ctx.beginPath();
       for (let g = 0; g < loopSize; g++) {
         if (rotatedHits.has(g)) continue;
-        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+        const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
         const x = cx + Math.cos(angle) * radius;
         const y = cy + Math.sin(angle) * radius;
         ctx.moveTo(x + 2, y);
@@ -454,7 +454,7 @@ export class OrbitRenderer {
       for (let g = 0; g < loopSize; g++) {
         if (!rotatedHits.has(g)) continue;
         if (isPlaying && g === triggerDisplayStep) continue;
-        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+        const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
         const x = cx + Math.cos(angle) * radius;
         const y = cy + Math.sin(angle) * radius;
         ctx.moveTo(x + 4, y);
@@ -539,7 +539,7 @@ export class OrbitRenderer {
         rotatedHits = cached2?.set ?? new Set<number>();
         rotatedHits.clear();
         for (const s of hitSteps) {
-          rotatedHits.add((s + currentStep) % loopSize);
+          rotatedHits.add((s - currentStep + loopSize) % loopSize);
         }
         this._chaseRotatedSets.set(inst.id, { step: currentStep, hitRef: inst.hitPositions, set: rotatedHits });
       }
@@ -556,7 +556,7 @@ export class OrbitRenderer {
       ctx.beginPath();
       for (let g = 0; g < loopSize; g++) {
         if (rotatedHits.has(g)) continue;
-        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+        const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
         const x = cx + Math.cos(angle) * radius;
         const y = cy + Math.sin(angle) * radius;
         ctx.moveTo(x + baseDotR, y);
@@ -570,7 +570,7 @@ export class OrbitRenderer {
       for (let g = 0; g < loopSize; g++) {
         if (!rotatedHits.has(g)) continue;
         if (isPlaying && g === triggerDisplayStep) continue;
-        const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+        const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
         const x = cx + Math.cos(angle) * radius;
         const y = cy + Math.sin(angle) * radius;
         ctx.moveTo(x + hitDotR, y);

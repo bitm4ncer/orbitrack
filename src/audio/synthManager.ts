@@ -94,3 +94,13 @@ export function getAllEngines(): Map<string, SynthEngine> {
 export function getActiveSynthCount(): number {
   return engines.size;
 }
+
+/** Sync BPM to all active ModulationEngines (for tempo-synced LFOs). */
+let _lastSyncedBpm = 0;
+export function syncBpmToEngines(bpm: number): void {
+  if (bpm === _lastSyncedBpm) return;
+  _lastSyncedBpm = bpm;
+  for (const [, entry] of engines) {
+    entry.engine.setBpm(bpm);
+  }
+}

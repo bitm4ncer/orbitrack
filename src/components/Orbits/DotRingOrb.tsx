@@ -65,7 +65,7 @@ export function DotRingOrb({ instrumentId, size }: Props) {
   const dotPositions = useRef<{ x: number; y: number }[]>([]);
   if (dotPositions.current.length !== loopSize) {
     dotPositions.current = Array.from({ length: loopSize }, (_, g) => {
-      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
       return { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
     });
   }
@@ -99,7 +99,7 @@ export function DotRingOrb({ instrumentId, size }: Props) {
       // Rotate: original hit at step s → display at (s + currentStep) % ls
       const rotatedHits = new Set<number>();
       for (const s of hitSteps) {
-        rotatedHits.add((s + currentStep) % ls);
+        rotatedHits.add((s - currentStep + ls) % ls);
       }
 
       const isMuted = inst.muted;

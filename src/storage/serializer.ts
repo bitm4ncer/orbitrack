@@ -1,6 +1,8 @@
 import type { OrbeatSet, SetMeta, EmbeddedSample } from '../types/storage';
 import type { Instrument } from '../types/instrument';
 import type { Effect } from '../types/effects';
+import type { InstrumentScene } from '../types/scene';
+import type { ArrangementStep } from '../types/arrangement';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,8 +50,17 @@ export interface SerializableState {
   gridNotes: Record<string, number[][]>;
   gridGlide: Record<string, boolean[]>;
   gridLengths: Record<string, number[]>;
+  gridVelocities?: Record<string, number[]>;
   instrumentEffects: Record<string, Effect[]>;
+  masterEffects?: Effect[];
+  scenes?: InstrumentScene[];
+  sceneEffects?: Record<string, Effect[]>;
   customSamples: { key: string; url: string; name: string }[];
+  gridResolution?: number;
+  scaleRoot?: number;
+  scaleType?: string;
+  trackMode?: boolean;
+  arrangement?: ArrangementStep[];
 }
 
 export async function serializeSet(
@@ -100,8 +111,17 @@ export async function serializeSet(
     gridNotes,
     gridGlide,
     gridLengths,
+    gridVelocities: state.gridVelocities,
     instrumentEffects: effects,
+    masterEffects: state.masterEffects,
+    scenes: state.scenes,
+    sceneEffects: state.sceneEffects,
     customSamples: embedded,
+    gridResolution: state.gridResolution,
+    scaleRoot: state.scaleRoot,
+    scaleType: state.scaleType,
+    trackMode: state.trackMode,
+    arrangement: state.arrangement,
   };
 }
 

@@ -3,6 +3,7 @@ import { useStore } from '../state/store';
 import { triggerSuperdough, triggerLooperSlice } from './superdoughAdapter';
 import { applyOrbitToneEffects } from './orbitEffects';
 import { applySceneEffects, setSceneBusVolume, setSceneBusMuted } from './sceneBus';
+import { syncBpmToEngines } from './synthManager';
 
 let schedulerId: number | null = null;
 let effectSyncId: ReturnType<typeof setInterval> | null = null;
@@ -145,6 +146,8 @@ function startEffectSync(): void {
   effectSyncId = setInterval(() => {
     try {
       const state = useStore.getState();
+      // Sync BPM to all synth engines (for tempo-synced LFOs)
+      syncBpmToEngines(state.bpm);
       for (const inst of state.instruments) {
         const effects = state.instrumentEffects[inst.id] ?? [];
 

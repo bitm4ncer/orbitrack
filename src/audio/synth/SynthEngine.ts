@@ -7,7 +7,7 @@
  *   sub2Osc ───── ┘                      ↓
  *   fmOsc → fmGain → mainOscs[].freq   voiceSumNode
  *                                         ↓
- *                                     filterNode (+ filterEnv + LFO)
+ *                                     filterNode (+ filterEnv + ModulationEngine)
  *                                         ↓
  *                                     distortionNode
  *                                         ↓
@@ -25,13 +25,41 @@ import { Reverb } from './nodes/Reverb';
 import { Distortion } from './nodes/Distortion';
 import { BitCrusher } from './nodes/BitCrusher';
 import { SYNTH_PRESETS } from './presets';
-import type { SynthParams, LFODestination } from './types';
+import type { SynthParams } from './types';
+import { DEFAULT_LFO_SLOT } from './types';
 import { isNativeType, getPeriodicWave } from './wavetables';
+import { getInterpolatedPeriodicWave } from './wavetableEngine';
+import { ModulationEngine } from './ModulationEngine';
 import { midiNoteToFreq } from '../../utils/music';
+
+/** Fill in missing fields for backward-compatible preset loading. */
+function ensureDefaults(p: Partial<SynthParams>): SynthParams {
+  if (p.wtPosition === undefined) p.wtPosition = 0;
+  if (!p.lfos) {
+    p.lfos = [
+      { ...DEFAULT_LFO_SLOT, rate: p.lfo1Rate ?? 4, shape: (p.lfo1Shape as OscillatorType) ?? 'sine' },
+      { ...DEFAULT_LFO_SLOT, rate: p.lfo2Rate ?? 0.5, shape: (p.lfo2Shape as OscillatorType) ?? 'sine' },
+      { ...DEFAULT_LFO_SLOT },
+      { ...DEFAULT_LFO_SLOT },
+    ];
+  }
+  if (!p.modAssignments) {
+    p.modAssignments = [];
+    // Migrate old LFO destinations to mod assignments
+    if (p.lfo1Dest && p.lfo1Dest !== 'none' && (p.lfo1Depth ?? 0) > 0) {
+      const target = p.lfo1Dest === 'filter' ? 'filterFreq' : 'vcoDetune';
+      p.modAssignments.push({ id: 'legacy_lfo1', source: 'lfo1', target: target as keyof SynthParams, depth: (p.lfo1Depth ?? 0) / 1000 });
+    }
+    if (p.lfo2Dest && p.lfo2Dest !== 'none' && (p.lfo2Depth ?? 0) > 0) {
+      const target = p.lfo2Dest === 'filter' ? 'filterFreq' : 'vcoDetune';
+      p.modAssignments.push({ id: 'legacy_lfo2', source: 'lfo2', target: target as keyof SynthParams, depth: (p.lfo2Depth ?? 0) / 1000 });
+    }
+  }
+  return p as SynthParams;
+}
 
 const MAX_VOICES = 8;
 const MAX_UNISON = 5;
-const WAVEFORMS: OscillatorType[] = ['sine', 'triangle', 'square', 'sawtooth'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PolyVoice: one polyphonic slot
@@ -174,7 +202,11 @@ class PolyVoice {
         const detuneCents = t * detuneSpread * 0.5 + p.vcoDetune;
         const panVal = t * spreadWidth;
 
-        if (isNativeType(p.vcoType)) {
+        if (p.vcoType.startsWith('wt:')) {
+          const bankId = p.vcoType.slice(3);
+          const wave = getInterpolatedPeriodicWave(this.ac, bankId, p.wtPosition ?? 0);
+          if (wave) this.mainOscs[i].setPeriodicWave(wave);
+        } else if (isNativeType(p.vcoType)) {
           this.mainOscs[i].type = p.vcoType;
         } else {
           const wave = getPeriodicWave(this.ac, p.vcoType);
@@ -259,20 +291,15 @@ export class SynthEngine {
   private reverbNode: Reverb;
   private volumeNode: GainNode;          // master output volume
 
-  // LFOs
-  private lfo1: OscillatorNode;
-  private lfo1Gain: GainNode;
-  private lfo2: OscillatorNode;
-  private lfo2Gain: GainNode;
-  private lfo1Dest: LFODestination = 'none';
-  private lfo2Dest: LFODestination = 'none';
+  // Modulation Engine (replaces old lfo1/lfo2)
+  private modEngine: ModulationEngine;
 
   // Voice pool
   private voices: PolyVoice[] = [];
 
   constructor(ac: AudioContext) {
     this.ac = ac;
-    this.params = { ...SYNTH_PRESETS['INIT'] };
+    this.params = ensureDefaults({ ...SYNTH_PRESETS['INIT'] });
 
     this.voiceSumNode = ac.createGain();
     this.voiceSumNode.gain.value = 1;
@@ -292,13 +319,18 @@ export class SynthEngine {
     this.volumeNode = ac.createGain();
     this.volumeNode.gain.value = 0.75;
 
-    this.lfo1 = ac.createOscillator();
-    this.lfo1Gain = ac.createGain();
-    this.lfo1.connect(this.lfo1Gain);
+    // Create ModulationEngine
+    this.modEngine = new ModulationEngine(
+      ac,
+      () => this.params,
+      (key, val) => this.applyParam(key, val as never),
+    );
 
-    this.lfo2 = ac.createOscillator();
-    this.lfo2Gain = ac.createGain();
-    this.lfo2.connect(this.lfo2Gain);
+    // Wire up voice activity check for trigger mode gating
+    this.modEngine.hasActiveVoices = () => {
+      const now = this.ac.currentTime;
+      return this.voices.some(v => !v.isIdle(now));
+    };
   }
 
   init(): void {
@@ -326,16 +358,27 @@ export class SynthEngine {
     // filterEnvGain → filterNode.detune (used for filter envelope)
     this.filterEnvGain.connect(this.filterNode.detune);
 
-    // LFOs start (they always run, gain=0 when not routed)
-    this.lfo1Gain.gain.value = 0;
-    this.lfo2Gain.gain.value = 0;
-    this.lfo1.start();
-    this.lfo2.start();
-
     // Voice pool
     for (let i = 0; i < MAX_VOICES; i++) {
       this.voices.push(new PolyVoice(this.ac, this.voiceSumNode));
     }
+
+    // Set up audio-rate modulation targets
+    this.modEngine.audioParamGetters.set('filterFreq', () => [this.filterNode.frequency]);
+    this.modEngine.audioParamGetters.set('vcoDetune', () => {
+      const params: AudioParam[] = [];
+      const now = this.ac.currentTime;
+      for (const voice of this.voices) {
+        if (!voice.isIdle(now)) {
+          for (const osc of voice.mainOscs) params.push(osc.detune);
+        }
+      }
+      return params;
+    });
+
+    // Start modulation engine
+    this.modEngine.start();
+    this.modEngine.syncFromParams(this.params);
 
     this.syncNodesToParams();
     this.initialized = true;
@@ -351,6 +394,7 @@ export class SynthEngine {
     const voice = this.getOrStealVoice(audioTime);
     voice.trigger(midiNote, audioTime, duration, this.params, gainScale);
     this.scheduleFilterEnv(audioTime, duration);
+    this.modEngine.onNoteOn(audioTime);
   }
 
   /** Called from SynthPanel for live keyboard/mouse playback (no scheduled time). */
@@ -363,6 +407,7 @@ export class SynthEngine {
     voice.trigger(midiNote, now, 10, p, gainScale); // 10s sustain — noteOff stops it
     this._lastLiveVoice = voice;
     this.scheduleFilterEnv(now, 10);
+    this.modEngine.onNoteOn();
   }
 
   private _lastLiveVoice: PolyVoice | null = null;
@@ -399,10 +444,7 @@ export class SynthEngine {
 
   dispose(): void {
     this.noteStop();
-    try { this.lfo1.stop(); } catch { /* already stopped */ }
-    try { this.lfo2.stop(); } catch { /* already stopped */ }
-    try { this.lfo1.disconnect(); } catch { /* ignore */ }
-    try { this.lfo2.disconnect(); } catch { /* ignore */ }
+    this.modEngine.dispose();
     // Dispose all poly voices (stops 64 oscillators)
     for (const v of this.voices) v.dispose();
     // Disconnect shared chain nodes
@@ -499,32 +541,29 @@ export class SynthEngine {
       case 'reverbAmount':
         this.reverbNode.setAmount(v);
         break;
-      case 'lfo1Rate':
-        this.lfo1.frequency.setTargetAtTime(Math.max(0.01, v), now, 0.02);
+
+      // LFO params — forward to ModulationEngine
+      case 'lfos':
+      case 'modAssignments':
+        this.modEngine.syncFromParams(this.params);
         break;
-      case 'lfo1Depth':
-        this.lfo1Gain.gain.setTargetAtTime(v, now, 0.02);
+
+      // Legacy LFO params — ignored (handled by ensureDefaults migration)
+      case 'lfo1Rate': case 'lfo1Depth': case 'lfo1Shape': case 'lfo1Dest':
+      case 'lfo2Rate': case 'lfo2Depth': case 'lfo2Shape': case 'lfo2Dest':
         break;
-      case 'lfo1Shape':
-        if (WAVEFORMS.includes(value as OscillatorType)) this.lfo1.type = value as OscillatorType;
+
+      // Wavetable position: live-update playing voices
+      case 'wtPosition':
+        this.updatePlayingVoicesWaveform();
         break;
-      case 'lfo1Dest':
-        this.reroute(1, value as LFODestination);
-        break;
-      case 'lfo2Rate':
-        this.lfo2.frequency.setTargetAtTime(Math.max(0.01, v), now, 0.02);
-        break;
-      case 'lfo2Depth':
-        this.lfo2Gain.gain.setTargetAtTime(v, now, 0.02);
-        break;
-      case 'lfo2Shape':
-        if (WAVEFORMS.includes(value as OscillatorType)) this.lfo2.type = value as OscillatorType;
-        break;
-      case 'lfo2Dest':
-        this.reroute(2, value as LFODestination);
-        break;
-      // Live oscillator updates: applied to all voices
       case 'vcoType':
+        // If switching to/from wavetable mode, update playing voices
+        if ((value as string).startsWith('wt:')) {
+          this.updatePlayingVoicesWaveform();
+        }
+        break;
+      // Live oscillator updates: applied to all voices on next noteOn
       case 'vcoGain':
       case 'vcoPan':
       case 'vcoDetune':
@@ -547,37 +586,41 @@ export class SynthEngine {
     }
   }
 
-  /** Reroute an LFO to a new destination, disconnecting from old one first. */
-  private reroute(lfoIdx: 1 | 2, newDest: LFODestination): void {
-    const lfoGain = lfoIdx === 1 ? this.lfo1Gain : this.lfo2Gain;
-    const oldDest = lfoIdx === 1 ? this.lfo1Dest : this.lfo2Dest;
+  /** Update wavetable waveform on all currently playing voices (for live WT position scanning). */
+  private _lastWTUpdate = 0;
+  private updatePlayingVoicesWaveform(): void {
+    if (!this.params.vcoType.startsWith('wt:')) return;
+    // Throttle to ~60Hz
+    const now = performance.now();
+    if (now - this._lastWTUpdate < 16) return;
+    this._lastWTUpdate = now;
 
-    // Disconnect from old destination
-    try {
-      if (oldDest === 'filter') lfoGain.disconnect(this.filterNode.frequency);
-      else if (oldDest === 'pitch') {
-        for (const v of this.voices) {
-          for (const osc of v.mainOscs) {
-            try { lfoGain.disconnect(osc.detune); } catch { /* ignore */ }
-          }
-        }
-      }
-    } catch { /* ignore if not connected */ }
+    const bankId = this.params.vcoType.slice(3);
+    const wave = getInterpolatedPeriodicWave(this.ac, bankId, this.params.wtPosition ?? 0);
+    if (!wave) return;
 
-    if (lfoIdx === 1) this.lfo1Dest = newDest;
-    else this.lfo2Dest = newDest;
-
-    // Connect to new destination
-    if (newDest === 'filter') {
-      lfoGain.connect(this.filterNode.frequency);
-    } else if (newDest === 'pitch') {
-      for (const v of this.voices) {
-        for (const osc of v.mainOscs) {
-          lfoGain.connect(osc.detune);
+    const acNow = this.ac.currentTime;
+    for (const voice of this.voices) {
+      if (!voice.isIdle(acNow)) {
+        const numUnison = Math.max(1, Math.round(this.params.unisonVoices));
+        for (let i = 0; i < numUnison && i < MAX_UNISON; i++) {
+          voice.mainOscs[i].setPeriodicWave(wave);
         }
       }
     }
-    // 'none', 'amp', 'pan' — no connection for now
+  }
+
+  /** Update BPM for tempo-synced LFOs */
+  setBpm(bpm: number): void {
+    this.modEngine.bpm = bpm;
+    // Re-apply LFO rates if any are tempo-synced
+    if (this.params.lfos) {
+      for (let i = 0; i < this.params.lfos.length; i++) {
+        if (this.params.lfos[i].tempoSync) {
+          this.modEngine.updateLFO(i, this.params.lfos[i]);
+        }
+      }
+    }
   }
 
   getParams(): SynthParams {
@@ -585,9 +628,10 @@ export class SynthEngine {
   }
 
   loadPreset(preset: SynthParams): void {
-    this.params = { ...preset };
+    this.params = ensureDefaults({ ...preset });
     if (this.initialized) {
       this.syncNodesToParams();
+      this.modEngine.syncFromParams(this.params);
     }
   }
 
@@ -609,17 +653,5 @@ export class SynthEngine {
     this.reverbNode.setAmount(p.reverbAmount);
     this.bitCrusherNode.setBitDepth(p.bitCrushDepth);
     this.bitCrusherNode.setAmount(p.bitCrushAmount);
-
-    // LFO 1
-    this.lfo1.frequency.setValueAtTime(Math.max(0.01, p.lfo1Rate), now);
-    this.lfo1Gain.gain.setValueAtTime(p.lfo1Depth, now);
-    if (WAVEFORMS.includes(p.lfo1Shape)) this.lfo1.type = p.lfo1Shape;
-    this.reroute(1, p.lfo1Dest);
-
-    // LFO 2
-    this.lfo2.frequency.setValueAtTime(Math.max(0.01, p.lfo2Rate), now);
-    this.lfo2Gain.gain.setValueAtTime(p.lfo2Depth, now);
-    if (WAVEFORMS.includes(p.lfo2Shape)) this.lfo2.type = p.lfo2Shape;
-    this.reroute(2, p.lfo2Dest);
   }
 }

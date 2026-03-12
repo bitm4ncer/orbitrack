@@ -12,6 +12,12 @@ import { useStore } from './store';
 import type { StoreState } from './store';
 import type { Instrument } from '../types/instrument';
 import type { Effect } from '../types/effects';
+import type { InstrumentScene } from '../types/scene';
+import {
+  destroyAllSceneBuses,
+  initSceneBusesFromState,
+  applySceneEffects,
+} from '../audio/sceneBus';
 
 // --- Undoable state slice ---
 
@@ -30,6 +36,8 @@ interface UndoableState {
   gridResolution: number;
   scaleRoot: number;
   scaleType: string;
+  scenes: InstrumentScene[];
+  sceneEffects: Record<string, Effect[]>;
 }
 
 const UNDOABLE_KEYS: (keyof UndoableState)[] = [
@@ -38,6 +46,7 @@ const UNDOABLE_KEYS: (keyof UndoableState)[] = [
   'instrumentEffects', 'masterEffects', 'customSamples',
   'octaveOffset', 'snapEnabled', 'gridResolution',
   'scaleRoot', 'scaleType',
+  'scenes', 'sceneEffects',
 ];
 
 function pickUndoable(state: StoreState): UndoableState {
@@ -56,7 +65,24 @@ function pickUndoable(state: StoreState): UndoableState {
     gridResolution: state.gridResolution,
     scaleRoot: state.scaleRoot,
     scaleType: state.scaleType,
+    scenes: state.scenes,
+    sceneEffects: state.sceneEffects,
   };
+}
+
+/** Rebuild scene audio buses to match restored state (after undo/redo). */
+function reconcileSceneBuses(snapshot: UndoableState): void {
+  destroyAllSceneBuses();
+  if (snapshot.scenes.length > 0) {
+    initSceneBusesFromState(snapshot.scenes, snapshot.instruments);
+    const bpm = snapshot.bpm;
+    for (const scene of snapshot.scenes) {
+      const fx = snapshot.sceneEffects[scene.id];
+      if (fx && fx.length > 0) {
+        applySceneEffects(scene.id, fx, bpm);
+      }
+    }
+  }
 }
 
 /** Shallow reference equality — leverages Zustand's structural sharing. */
@@ -112,6 +138,7 @@ export function undo(): void {
 
   isProgrammaticUpdate = true;
   useStore.setState(currentSnapshot);
+  reconcileSceneBuses(currentSnapshot);
   isProgrammaticUpdate = false;
 }
 
@@ -126,6 +153,7 @@ export function redo(): void {
 
   isProgrammaticUpdate = true;
   useStore.setState(currentSnapshot);
+  reconcileSceneBuses(currentSnapshot);
   isProgrammaticUpdate = false;
 }
 

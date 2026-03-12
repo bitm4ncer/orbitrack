@@ -106,6 +106,7 @@ export function GridSequencer() {
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const selRectRef = useRef<SelectionRect | null>(null);
   const [showVelocity, setShowVelocity] = useState(false);
+  const clipboardRef = useRef<{ step: number; midi: number; length: number; velocity: number; glide: boolean }[]>([]);
 
   // GEN sidebar state
   const [genOpen, setGenOpen] = useState(false);
@@ -170,20 +171,48 @@ export function GridSequencer() {
     };
   }, [instrument]);
 
-  // ── Keyboard handler for delete ──────────────────────────────────────
+  // ── Helper: build step→hitIndex map from fresh store state ──────────
+  const buildStepMap = useCallback((inst: { hitPositions: number[]; loopSize: number }) => {
+    const map = new Map<number, number>();
+    for (let i = 0; i < inst.hitPositions.length; i++) {
+      const s = Math.round(inst.hitPositions[i] * inst.loopSize) % inst.loopSize;
+      map.set(s, i);
+    }
+    return map;
+  }, []);
+
+  // ── Helper: collect full note data for selected notes ──────────────
+  const collectSelectedNoteData = useCallback((instrumentId: string) => {
+    const store = useStore.getState();
+    const inst = store.instruments.find((i) => i.id === instrumentId);
+    if (!inst) return [];
+    const map = buildStepMap(inst);
+    const lens = store.gridLengths[instrumentId] || [];
+    const vels = store.gridVelocities[instrumentId] || [];
+    const glds = store.gridGlide[instrumentId] || [];
+    const result: { step: number; midi: number; length: number; velocity: number; glide: boolean }[] = [];
+    for (const key of selectedNotes) {
+      const { step, midi } = parseNoteKey(key);
+      const hIdx = map.get(step);
+      if (hIdx !== undefined) {
+        result.push({ step, midi, length: lens[hIdx] ?? 1, velocity: vels[hIdx] ?? 100, glide: glds[hIdx] ?? false });
+      }
+    }
+    return result;
+  }, [selectedNotes, buildStepMap]);
+
+  // ── Keyboard handler ──────────────────────────────────────────────────
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!instrument) return;
+    const ctrl = e.ctrlKey || e.metaKey;
+
+    // ── Delete / Backspace ─────────────────────────────────────────────
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNotes.size > 0) {
       e.preventDefault();
       const store = useStore.getState();
       const inst = store.instruments.find((i) => i.id === instrument.id);
       if (!inst) return;
-      const totalSteps = inst.loopSize;
-      const freshMap = new Map<number, number>();
-      for (let i = 0; i < inst.hitPositions.length; i++) {
-        const s = Math.round(inst.hitPositions[i] * totalSteps) % totalSteps;
-        freshMap.set(s, i);
-      }
+      const freshMap = buildStepMap(inst);
       const toRemove: { hitIdx: number; midi: number }[] = [];
       for (const key of selectedNotes) {
         const { step, midi } = parseNoteKey(key);
@@ -200,11 +229,147 @@ export function GridSequencer() {
         }
       }
       setSelectedNotes(new Set());
+      return;
     }
+
+    // ── Escape — clear selection ───────────────────────────────────────
     if (e.key === 'Escape') {
       setSelectedNotes(new Set());
+      return;
     }
-  }, [instrument, selectedNotes]);
+
+    // ── Ctrl+A — select all notes ──────────────────────────────────────
+    if (ctrl && e.key === 'a') {
+      e.preventDefault();
+      const store = useStore.getState();
+      const inst = store.instruments.find((i) => i.id === instrument.id);
+      if (!inst) return;
+      const allNotes = store.gridNotes[instrument.id] || [];
+      const ts = inst.loopSize;
+      const all = new Set<string>();
+      for (let i = 0; i < inst.hitPositions.length; i++) {
+        const step = Math.round(inst.hitPositions[i] * ts) % ts;
+        for (const midi of (allNotes[i] || [])) {
+          all.add(noteKey(step, midi));
+        }
+      }
+      setSelectedNotes(all);
+      return;
+    }
+
+    // ── Ctrl+C — copy selected notes ───────────────────────────────────
+    if (ctrl && e.key === 'c' && selectedNotes.size > 0) {
+      e.preventDefault();
+      const data = collectSelectedNoteData(instrument.id);
+      if (data.length === 0) return;
+      // Normalize steps relative to earliest note
+      const minStep = Math.min(...data.map((n) => n.step));
+      clipboardRef.current = data.map((n) => ({ ...n, step: n.step - minStep }));
+      return;
+    }
+
+    // ── Ctrl+V — paste notes ───────────────────────────────────────────
+    if (ctrl && e.key === 'v' && clipboardRef.current.length > 0) {
+      e.preventDefault();
+      const store = useStore.getState();
+      const inst = store.instruments.find((i) => i.id === instrument.id);
+      if (!inst) return;
+      const ts = inst.loopSize;
+      // Paste at step 0 offset (or after last selected note if selection exists)
+      let pasteOffset = 0;
+      if (selectedNotes.size > 0) {
+        let maxEnd = 0;
+        const data = collectSelectedNoteData(instrument.id);
+        for (const n of data) maxEnd = Math.max(maxEnd, n.step + n.length);
+        pasteOffset = maxEnd;
+      }
+      const pastedNotes = clipboardRef.current.map((n) => ({
+        ...n,
+        step: (n.step + pasteOffset) % ts,
+      }));
+      store.addNotesBatch(instrument.id, pastedNotes);
+      // Remove overlaps from pasted notes
+      const ranges = pastedNotes.filter((n) => n.length > 1).map((n) => ({ step: n.step, midi: n.midi, length: n.length }));
+      if (ranges.length > 0) store.removeOverlappedNotes(instrument.id, ranges);
+      // Select the pasted notes
+      setSelectedNotes(new Set(pastedNotes.map((n) => noteKey(n.step, n.midi))));
+      return;
+    }
+
+    // ── Ctrl+D — duplicate selection ───────────────────────────────────
+    if (ctrl && e.key === 'd' && selectedNotes.size > 0) {
+      e.preventDefault();
+      const store = useStore.getState();
+      const inst = store.instruments.find((i) => i.id === instrument.id);
+      if (!inst) return;
+      const ts = inst.loopSize;
+      const data = collectSelectedNoteData(instrument.id);
+      if (data.length === 0) return;
+      // Find span: rightmost note end - leftmost note start
+      const minStep = Math.min(...data.map((n) => n.step));
+      const maxEnd = Math.max(...data.map((n) => n.step + n.length));
+      const span = maxEnd - minStep;
+      const duped = data.map((n) => ({ ...n, step: (n.step + span) % ts }));
+      store.addNotesBatch(instrument.id, duped);
+      const ranges = duped.filter((n) => n.length > 1).map((n) => ({ step: n.step, midi: n.midi, length: n.length }));
+      if (ranges.length > 0) store.removeOverlappedNotes(instrument.id, ranges);
+      setSelectedNotes(new Set(duped.map((n) => noteKey(n.step, n.midi))));
+      return;
+    }
+
+    // ── Arrow keys — nudge selected notes ──────────────────────────────
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) && selectedNotes.size > 0) {
+      e.preventDefault();
+      const store = useStore.getState();
+      const inst = store.instruments.find((i) => i.id === instrument.id);
+      if (!inst) return;
+      const ts = inst.loopSize;
+      const gridRes = Math.max(1, store.gridResolution);
+
+      let stepDelta = 0;
+      let pitchDelta = 0;
+
+      if (e.key === 'ArrowLeft') stepDelta = -gridRes;
+      if (e.key === 'ArrowRight') stepDelta = gridRes;
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        // Shift = octave (12 semitones), otherwise 1 semitone
+        pitchDelta = e.key === 'ArrowUp' ? (e.shiftKey ? 12 : 1) : (e.shiftKey ? -12 : -1);
+      }
+
+      const batchNotes = [...selectedNotes].map(parseNoteKey);
+
+      // Validate: all target midis in range
+      for (const n of batchNotes) {
+        const newMidi = n.midi + pitchDelta;
+        if (newMidi < 0 || newMidi > 127) return;
+      }
+
+      store.moveNotesBatch(instrument.id, batchNotes, stepDelta, pitchDelta);
+
+      // Update selection keys
+      const newKeys = batchNotes.map((n) => noteKey(
+        ((n.step + stepDelta) % ts + ts) % ts,
+        n.midi + pitchDelta,
+      ));
+      setSelectedNotes(new Set(newKeys));
+
+      // Clean up overlaps from nudged notes
+      const postInst = useStore.getState().instruments.find((i) => i.id === instrument.id);
+      if (postInst) {
+        const postMap = buildStepMap(postInst);
+        const postLens = useStore.getState().gridLengths[instrument.id] || [];
+        const ranges = newKeys
+          .map((key) => {
+            const { step, midi } = parseNoteKey(key);
+            const hIdx = postMap.get(step);
+            return hIdx !== undefined ? { step, midi, length: postLens[hIdx] ?? 1 } : null;
+          })
+          .filter((r): r is { step: number; midi: number; length: number } => r !== null && r.length > 1);
+        if (ranges.length > 0) useStore.getState().removeOverlappedNotes(instrument.id, ranges);
+      }
+      return;
+    }
+  }, [instrument, selectedNotes, buildStepMap, collectSelectedNoteData]);
 
   // Scroll to center C4 in viewport (must be before early return)
   const centerNote = (octaveOffset + 3) * 12;
@@ -330,6 +495,42 @@ export function GridSequencer() {
     };
 
     const handleMouseUp = () => {
+      // Remove notes that the resized note(s) now overlap
+      const store = useStore.getState();
+      const inst = store.instruments.find((i) => i.id === instrument.id);
+      if (inst) {
+        const ts = inst.loopSize;
+        const curLengths = store.gridLengths[instrument.id] || [];
+        const ranges: { step: number; midi: number; length: number }[] = [];
+
+        if (isSelected && initialLengths.size > 0) {
+          for (const key of selectedNotes) {
+            const { step, midi } = parseNoteKey(key);
+            const hMap = new Map<number, number>();
+            for (let i = 0; i < inst.hitPositions.length; i++) {
+              hMap.set(Math.round(inst.hitPositions[i] * ts) % ts, i);
+            }
+            const hIdx = hMap.get(step);
+            if (hIdx !== undefined) {
+              ranges.push({ step, midi, length: curLengths[hIdx] ?? 1 });
+            }
+          }
+        } else {
+          const hMap = new Map<number, number>();
+          for (let i = 0; i < inst.hitPositions.length; i++) {
+            hMap.set(Math.round(inst.hitPositions[i] * ts) % ts, i);
+          }
+          const hIdx = hMap.get(stepIndex);
+          if (hIdx !== undefined) {
+            ranges.push({ step: stepIndex, midi: midiNote, length: curLengths[hIdx] ?? 1 });
+          }
+        }
+
+        if (ranges.length > 0) {
+          store.removeOverlappedNotes(instrument.id, ranges);
+        }
+      }
+
       dragRef.current = null;
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
@@ -448,6 +649,24 @@ export function GridSequencer() {
       };
 
       const handleMouseUp = () => {
+        // Remove notes overlapped by moved notes
+        const store = useStore.getState();
+        const inst = store.instruments.find((i) => i.id === instrument.id);
+        if (inst) {
+          const ts = inst.loopSize;
+          const curLengths = store.gridLengths[instrument.id] || [];
+          const hMap = new Map<number, number>();
+          for (let i = 0; i < inst.hitPositions.length; i++) {
+            hMap.set(Math.round(inst.hitPositions[i] * ts) % ts, i);
+          }
+          const ranges = batchNotes
+            .map((n) => {
+              const hIdx = hMap.get(n.step);
+              return hIdx !== undefined ? { step: n.step, midi: n.midi, length: curLengths[hIdx] ?? 1 } : null;
+            })
+            .filter((r): r is { step: number; midi: number; length: number } => r !== null && r.length > 1);
+          if (ranges.length > 0) store.removeOverlappedNotes(instrument.id, ranges);
+        }
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('mouseup', handleMouseUp);
       };
@@ -521,6 +740,27 @@ export function GridSequencer() {
       };
 
       const handleMouseUp = () => {
+        // Remove notes overlapped by the moved note
+        const drag = dragRef.current;
+        if (drag) {
+          const store = useStore.getState();
+          const inst = store.instruments.find((i) => i.id === instrument.id);
+          if (inst) {
+            const ts = inst.loopSize;
+            const curLengths = store.gridLengths[instrument.id] || [];
+            const hMap = new Map<number, number>();
+            for (let i = 0; i < inst.hitPositions.length; i++) {
+              hMap.set(Math.round(inst.hitPositions[i] * ts) % ts, i);
+            }
+            const hIdx = hMap.get(currentStep);
+            if (hIdx !== undefined) {
+              const len = curLengths[hIdx] ?? 1;
+              if (len > 1) {
+                store.removeOverlappedNotes(instrument.id, [{ step: currentStep, midi: drag.midiNote, length: len }]);
+              }
+            }
+          }
+        }
         dragRef.current = null;
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('mouseup', handleMouseUp);

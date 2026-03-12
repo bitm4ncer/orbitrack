@@ -151,17 +151,55 @@ function EffectStrip({ instrumentId }: { instrumentId: string }) {
 
 // ── SceneBadge ───────────────────────────────────────────────────────────────
 
-function SceneBadge({ instrumentId }: { instrumentId: string }) {
-  const scene = useStore((s) => s.scenes.find((g) => g.instrumentIds.includes(instrumentId)));
-  if (!scene) return null;
+function SceneBadges({ instrumentId }: { instrumentId: string }) {
+  const scenes = useStore((s) => s.scenes);
+  const selectedSceneId = useStore((s) => s.selectedSceneId);
+  const memberScenes = scenes.filter((g) => g.instrumentIds.includes(instrumentId));
+  const selectedScene = selectedSceneId ? scenes.find((g) => g.id === selectedSceneId) : null;
+  const canAdd = selectedScene && !selectedScene.instrumentIds.includes(instrumentId);
+
   return (
-    <span
-      className="text-[7px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-full select-none cursor-pointer"
-      style={{ color: scene.color, background: `${scene.color}18`, border: `1px solid ${scene.color}33` }}
-      onClick={(e) => { e.stopPropagation(); useStore.getState().selectScene(scene.id); }}
-    >
-      {scene.name}
-    </span>
+    <div className="inline-flex items-center gap-1 flex-wrap justify-center">
+      {memberScenes.map((scene) => (
+        <span
+          key={scene.id}
+          className="inline-flex items-center gap-0.5 text-[7px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-full select-none cursor-pointer"
+          style={{ color: scene.color, background: `${scene.color}18`, border: `1px solid ${scene.color}33` }}
+          onClick={(e) => { e.stopPropagation(); useStore.getState().selectScene(scene.id); }}
+        >
+          {scene.name}
+          <button
+            className="ml-0.5 rounded-full hover:bg-white/20 transition-colors leading-none"
+            style={{ width: 10, height: 10, fontSize: 8, color: scene.color }}
+            title="Remove from scene"
+            onClick={(e) => {
+              e.stopPropagation();
+              useStore.getState().removeInstrumentFromScene(instrumentId, scene.id);
+            }}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {canAdd && (
+        <button
+          className="inline-flex items-center justify-center rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+          style={{
+            width: 14, height: 14,
+            fontSize: 10, fontWeight: 'bold',
+            color: selectedScene.color,
+            border: `1px dashed ${selectedScene.color}55`,
+          }}
+          title={`Add to ${selectedScene.name}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            useStore.getState().addInstrumentToScene(instrumentId, selectedSceneId!);
+          }}
+        >
+          +
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -195,19 +233,28 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
   const isMultiSelected = useStore((s) => s.selectedInstrumentIds.includes(instrumentId));
   const displayMode = useStore((s) => s.orbitDisplayMode);
   const isDotRing = displayMode === 'rotate';
-  const sceneColorSelector = useCallback((s: { scenes: { instrumentIds: string[]; color: string }[] }) => {
+  const sceneColorsKey = useStore(useCallback((s: { scenes: { instrumentIds: string[]; color: string }[] }) => {
+    let key = '';
     for (const g of s.scenes) {
-      if (g.instrumentIds.includes(instrumentId)) return g.color;
+      if (g.instrumentIds.includes(instrumentId)) key += (key ? ',' : '') + g.color;
     }
-    return null;
-  }, [instrumentId]);
-  const sceneColor = useStore(sceneColorSelector);
+    return key;
+  }, [instrumentId]));
+  const sceneColors = sceneColorsKey ? sceneColorsKey.split(',') : [];
+  const inAnyScene = sceneColors.length > 0;
   const highlightSelector = useCallback((s: { selectedSceneId: string | null; scenes: { id: string; instrumentIds: string[] }[] }) => {
     if (!s.selectedSceneId) return false;
     const scene = s.scenes.find((sc) => sc.id === s.selectedSceneId);
     return scene?.instrumentIds.includes(instrumentId) ?? false;
   }, [instrumentId]);
   const isInHighlightedScene = useStore(highlightSelector);
+  const selectedSceneId = useStore((s) => s.selectedSceneId);
+  const selectedSceneColor = useStore((s) => {
+    if (!s.selectedSceneId) return null;
+    const sc = s.scenes.find((g) => g.id === s.selectedSceneId);
+    return sc?.color ?? null;
+  });
+  const canAssignToScene = selectedSceneId != null && !inAnyScene;
   const inst = useStore((s) => s.instruments.find((i) => i.id === instrumentId));
 
   useEffect(() => {
@@ -438,23 +485,30 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
       ref={cellRef}
       onClick={(e) => e.stopPropagation()}
       className={`knob-cell scene/card relative flex flex-col items-center gap-1 p-2 rounded-lg select-none transition-all
-                  ${isInHighlightedScene ? 'ring-2 ring-white/60' : isSelected ? 'ring-1 ring-white/20 bg-white/5' : isMultiSelected ? 'ring-1 ring-white/10 bg-white/[0.03]' : 'hover:bg-white/[0.02]'}`}
+                  ${isSelected ? 'ring-1 ring-white/20 bg-white/5' : isMultiSelected ? 'ring-1 ring-white/10 bg-white/[0.03]' : 'hover:bg-white/[0.02]'}`}
       style={{
-        border: `1px solid ${isInHighlightedScene ? 'white' : inst.color}${isInHighlightedScene ? '88' : '22'}`,
+        border: canAssignToScene
+          ? `1px dashed ${selectedSceneColor}66`
+          : isInHighlightedScene
+            ? `1px solid ${sceneColors[0]}88`
+            : `1px solid ${inst.color}22`,
         '--inst-color': inst.color,
-        boxShadow: isInHighlightedScene ? `0 0 16px ${inst.color}44` : 'none',
       } as React.CSSProperties}
+      onDoubleClick={canAssignToScene ? (e) => {
+        e.stopPropagation();
+        useStore.getState().addInstrumentToScene(instrumentId, selectedSceneId!);
+      } : undefined}
     >
-      {/* Scene color indicator — 1px line at bottom, inset to respect rounded corners */}
-      {sceneColor && (
+      {/* Scene color indicator — 1px line(s) at bottom, split per scene */}
+      {inAnyScene && (
         <div
-          className="absolute pointer-events-none"
-          style={{
-            bottom: 1, left: 6, right: 6, height: 1,
-            borderRadius: 0.5,
-            background: sceneColor,
-          }}
-        />
+          className="absolute pointer-events-none flex"
+          style={{ bottom: 1, left: 6, right: 6, height: 1, gap: 1, borderRadius: 0.5 }}
+        >
+          {sceneColors.map((c, i) => (
+            <div key={i} style={{ flex: 1, height: '100%', background: c, borderRadius: 0.5 }} />
+          ))}
+        </div>
       )}
 
       {/* Per-orbit level indicator — 2px bar centered on right border */}
@@ -558,12 +612,26 @@ export function KnobCanvas({ instrumentId, isResizing }: Props) {
           ? inst.samplePath.split('/').pop()?.replace(/\.[^.]+$/, '') ?? inst.name
           : inst.name}
       </span>
-      {/* Scene badge */}
-      {sceneColor && (
+      {/* Scene badge or assign hint */}
+      {inAnyScene ? (
         <div className="mt-1">
-          <SceneBadge instrumentId={instrumentId} />
+          <SceneBadges instrumentId={instrumentId} />
         </div>
-      )}
+      ) : canAssignToScene ? (
+        <div className="mt-1">
+          <span
+            className="text-[7px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-full select-none cursor-pointer hover:bg-white/10 transition-colors"
+            style={{ color: `${selectedSceneColor}88`, border: `1px dashed ${selectedSceneColor}44` }}
+            title="Double-click to add to scene"
+            onClick={(e) => {
+              e.stopPropagation();
+              useStore.getState().addInstrumentToScene(instrumentId, selectedSceneId!);
+            }}
+          >
+            + scene
+          </span>
+        </div>
+      ) : null}
       {/* Effect quick-access strip */}
       <div className="mt-1 w-full">
         <EffectStrip instrumentId={instrumentId} />

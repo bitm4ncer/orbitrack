@@ -13,7 +13,8 @@ const LEGACY_ALIASES: Record<string, string> = {
 };
 
 function ensureOutput(): Tone.Gain {
-  if (!output) {
+  // Recreate if output was disposed or belongs to a stale audio context
+  if (!output || output.disposed) {
     output = new Tone.Gain(1).toDestination();
   }
   return output;

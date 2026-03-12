@@ -63,6 +63,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   'error.api.link.unsupported': 'This platform is not supported',
   'error.api.fetch.fail': 'Could not fetch the content — it may be private or deleted',
   'error.api.fetch.rate': 'Rate limited — try again in a moment',
+  'error.api.youtube.login': 'YouTube requires cookies on the server — see Settings > Audio',
   'error.api.content.video.unavailable': 'Video is unavailable or region-locked',
   'error.api.content.video.live': 'Live streams cannot be downloaded',
   'error.api.content.post.age': 'Age-restricted content cannot be accessed',
@@ -85,6 +86,8 @@ export async function extractAudioFromUrl(
   } = options;
 
   const endpoint = apiEndpoint.replace(/\/+$/, '');
+
+  console.log(`[url-import] Requesting audio from: ${videoUrl}`);
 
   // 1. Request audio extraction from cobalt
   const headers: Record<string, string> = {
@@ -114,12 +117,13 @@ export async function extractAudioFromUrl(
       signal: postController.signal,
     });
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Cobalt API error (${res.status}): ${text || res.statusText}`);
+    // Cobalt returns JSON error bodies on 400 — parse them for friendly messages
+    cobaltRes = await res.json().catch(() => null) as CobaltResponse;
+    if (!cobaltRes) {
+      console.error(`[url-import] No parseable response (HTTP ${res.status})`);
+      throw new Error(`Cobalt API error (${res.status})`);
     }
-
-    cobaltRes = await res.json();
+    console.log(`[url-import] Cobalt response: status=${cobaltRes.status}, filename=${cobaltRes.filename ?? 'n/a'}`);
   } finally {
     clearTimeout(postTimeout);
   }
@@ -163,6 +167,7 @@ export async function extractAudioFromUrl(
     if (!dlRes.ok) throw new Error(`Audio download failed (${dlRes.status})`);
 
     const blob = await dlRes.blob();
+    console.log(`[url-import] Downloaded ${(blob.size / 1024).toFixed(1)} KiB, type=${blob.type}`);
     const contentType = dlRes.headers.get('content-type') ?? '';
     const mimeType =
       contentType.includes('audio') ? contentType.split(';')[0] :

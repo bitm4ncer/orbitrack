@@ -1,0 +1,8 @@
+.youtube.com	TRUE	/	TRUE	0	SOCS	CAISEwgDEgk4MzQ0OTk5MTgaAmVuIAEaBgiAwI7JBg
+.youtube.com	TRUE	/	TRUE	0	APISID	64N6if1_n-TwrrBF/AgbLPnQWGUc9_6SHf
+.youtube.com	TRUE	/	TRUE	0	SAPISID	5MIAqy__GOA9t_P7/ADVXMkheK5gajE3-p
+.youtube.com	TRUE	/	TRUE	0	__Secure-1PAPISID	5MIAqy__GOA9t_P7/ADVXMkheK5gajE3-p
+.youtube.com	TRUE	/	TRUE	0	__Secure-3PAPISID	5MIAqy__GOA9t_P7/ADVXMkheK5gajE3-p
+.youtube.com	TRUE	/	TRUE	0	SID	g.a0007AhVTNyLfNnEme8kfC3wuprj8OuyrZ3LIMA6quMW-fEiamx9HbvCf5vyFqEQGchGlaMIlgACgYKAfESARYSFQHGX2MiBQI34bV-gDc98ZAcJhR-GBoVAUF8yKrK2d9LXwgxioSrBMBJe6j40076
+.youtube.com	TRUE	/	TRUE	0	PREF	f6=40000080&f7=100&tz=Europe.Berlin&f3=8&f4=4000000&f5=30000
+.youtube.com	TRUE	/	TRUE	0	SIDCC	AKEyXzUKjYzwn-CbtOC9iyr6ox-zfGK_VTXzXilvlbG6WxXKKKqVWMpXD0FbMYASAEvOG9wRcA

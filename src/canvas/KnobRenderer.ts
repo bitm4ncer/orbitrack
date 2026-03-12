@@ -152,7 +152,7 @@ export class KnobRenderer {
       ctx.beginPath();
       for (let g = 0; g < stepCount; g++) {
         if (!match(g)) continue;
-        const tickAngle = (g / stepCount) * TWO_PI + TRIGGER_ANGLE + dotRotation;
+        const tickAngle = TRIGGER_ANGLE - (g / stepCount) * TWO_PI - dotRotation;
         const cos = Math.cos(tickAngle);
         const sin = Math.sin(tickAngle);
         ctx.moveTo(cx + cos * (radius - innerLen), cy + sin * (radius - innerLen));
@@ -182,8 +182,8 @@ export class KnobRenderer {
 
     if (hasLoopRegion) {
       // Draw dimmed full ring, then bright arc for loop region
-      const arcStart = loopIn * TWO_PI + dotRotation + TRIGGER_ANGLE;
-      const arcEnd = loopOut * TWO_PI + dotRotation + TRIGGER_ANGLE;
+      const arcStart = TRIGGER_ANGLE - loopIn * TWO_PI - dotRotation;
+      const arcEnd = TRIGGER_ANGLE - loopOut * TWO_PI - dotRotation;
 
       // Dim arc for the inactive region (draw full ring dimmed, then overdraw active)
       ctx.beginPath();
@@ -201,7 +201,7 @@ export class KnobRenderer {
 
       // Small ticks at loop in/out boundaries
       for (const pos of [loopIn, loopOut]) {
-        const tickAngle = pos * TWO_PI + dotRotation + TRIGGER_ANGLE;
+        const tickAngle = TRIGGER_ANGLE - pos * TWO_PI - dotRotation;
         const tc = Math.cos(tickAngle);
         const ts = Math.sin(tickAngle);
         ctx.beginPath();
@@ -217,7 +217,7 @@ export class KnobRenderer {
 
     for (let i = 0; i < inst.hitPositions.length; i++) {
       const hitPos = inst.hitPositions[i];
-      const hitAngle = hitPos * TWO_PI + dotRotation + TRIGGER_ANGLE;
+      const hitAngle = TRIGGER_ANGLE - hitPos * TWO_PI - dotRotation;
       const hx = cx + Math.cos(hitAngle) * radius;
       const hy = cy + Math.sin(hitAngle) * radius;
 
@@ -333,7 +333,7 @@ export class KnobRenderer {
     ctx.beginPath();
     for (let g = 0; g < loopSize; g++) {
       if (this._ledHitSteps.has(g)) continue;
-      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
       ctx.moveTo(cx + Math.cos(angle) * radius + 2.5, cy + Math.sin(angle) * radius);
       ctx.arc(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius, 2.5, 0, TWO_PI);
     }
@@ -346,7 +346,7 @@ export class KnobRenderer {
     for (let g = 0; g < loopSize; g++) {
       if (!this._ledHitSteps.has(g)) continue;
       if (state.isPlaying && g === currentStep) continue; // skip triggered — drawn in pass 3
-      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
       const x = cx + Math.cos(angle) * radius;
       const y = cy + Math.sin(angle) * radius;
       ctx.moveTo(x + 4.5, y);
@@ -356,7 +356,7 @@ export class KnobRenderer {
 
     // Pass 3: triggered step (white)
     if (state.isPlaying && this._ledHitSteps.has(currentStep)) {
-      const angle = (currentStep / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const angle = TRIGGER_ANGLE - (currentStep / loopSize) * TWO_PI;
       const x = cx + Math.cos(angle) * radius;
       const y = cy + Math.sin(angle) * radius;
       ctx.beginPath();
@@ -367,7 +367,7 @@ export class KnobRenderer {
 
     // Playhead indicator (small moving dot on the ring when playing)
     if (state.isPlaying) {
-      const playAngle = instProg * TWO_PI + TRIGGER_ANGLE;
+      const playAngle = TRIGGER_ANGLE - instProg * TWO_PI;
       const px = cx + Math.cos(playAngle) * (radius + 12);
       const py = cy + Math.sin(playAngle) * (radius + 12);
       ctx.beginPath();
@@ -379,7 +379,7 @@ export class KnobRenderer {
     // Beat markers (thin ticks at beat positions)
     ctx.beginPath();
     for (let g = 0; g < loopSize; g += stepsPerBeat) {
-      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
       ctx.moveTo(cx + cos * (radius - 8), cy + sin * (radius - 8));
@@ -461,10 +461,10 @@ export class KnobRenderer {
     ctx.stroke();
 
     // Rotated hit set: shift hit positions by currentStep
-    // A hit at original step `s` appears at display step `(s + currentStep) % loopSize`
+    // A hit at original step `s` appears at display step `(s - currentStep + loopSize) % loopSize`
     const rotatedHits = new Set<number>();
     for (const s of this._ledHitSteps) {
-      rotatedHits.add((s + currentStep) % loopSize);
+      rotatedHits.add((s - currentStep + loopSize) % loopSize);
     }
 
     // The step at the indicator (bottom) that is currently being triggered
@@ -476,7 +476,7 @@ export class KnobRenderer {
     ctx.beginPath();
     for (let g = 0; g < loopSize; g++) {
       if (rotatedHits.has(g)) continue;
-      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
       const x = cx + Math.cos(angle) * radius;
       const y = cy + Math.sin(angle) * radius;
       ctx.moveTo(x + 2.5, y);
@@ -490,7 +490,7 @@ export class KnobRenderer {
     for (let g = 0; g < loopSize; g++) {
       if (!rotatedHits.has(g)) continue;
       if (state.isPlaying && g === triggerDisplayStep) continue;
-      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
       const x = cx + Math.cos(angle) * radius;
       const y = cy + Math.sin(angle) * radius;
       ctx.moveTo(x + 4.5, y);
@@ -523,7 +523,7 @@ export class KnobRenderer {
     const stepsPerBeat = Math.round(loopSize / 4);
     ctx.beginPath();
     for (let g = 0; g < loopSize; g += stepsPerBeat) {
-      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
       ctx.moveTo(cx + cos * (radius - 8), cy + sin * (radius - 8));
@@ -591,7 +591,7 @@ export class KnobRenderer {
     if (currentStep !== this._chaseLastStep || hitsChanged) {
       this._chaseRotated.clear();
       for (const s of this._ledHitSteps) {
-        this._chaseRotated.add((s + currentStep) % loopSize);
+        this._chaseRotated.add((s - currentStep + loopSize) % loopSize);
       }
       this._chaseLastStep = currentStep;
     }
@@ -610,7 +610,7 @@ export class KnobRenderer {
     ctx.beginPath();
     for (let g = 0; g < loopSize; g++) {
       if (rotatedHits.has(g)) continue;
-      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
       const x = cx + Math.cos(angle) * radius;
       const y = cy + Math.sin(angle) * radius;
       ctx.moveTo(x + baseDotR, y);
@@ -624,7 +624,7 @@ export class KnobRenderer {
     for (let g = 0; g < loopSize; g++) {
       if (!rotatedHits.has(g)) continue;
       if (state.isPlaying && g === triggerDisplayStep) continue;
-      const angle = (g / loopSize) * TWO_PI + TRIGGER_ANGLE;
+      const angle = TRIGGER_ANGLE - (g / loopSize) * TWO_PI;
       const x = cx + Math.cos(angle) * radius;
       const y = cy + Math.sin(angle) * radius;
       ctx.moveTo(x + hitDotR, y);
@@ -683,7 +683,7 @@ export class KnobRenderer {
     const dotRotation = instProg * TWO_PI;
 
     for (let i = 0; i < inst.hitPositions.length; i++) {
-      const hitAngle = inst.hitPositions[i] * TWO_PI + dotRotation + TRIGGER_ANGLE;
+      const hitAngle = TRIGGER_ANGLE - inst.hitPositions[i] * TWO_PI - dotRotation;
       const hx = cx + Math.cos(hitAngle) * radius;
       const hy = cy + Math.sin(hitAngle) * radius;
       const dx = mouseX - hx;
@@ -716,7 +716,7 @@ export class KnobRenderer {
     const dotRotation = instProg * TWO_PI;
 
     const angle = Math.atan2(mouseY - cy, mouseX - cx);
-    const normalizedPos = (angle - TRIGGER_ANGLE - dotRotation) / TWO_PI;
+    const normalizedPos = (TRIGGER_ANGLE - angle - dotRotation) / TWO_PI;
     return ((normalizedPos % 1) + 1) % 1;
   }
 }

@@ -247,6 +247,10 @@ export interface StoreState {
   applyChordPreset: (instrumentId: string, chords: number[][], steps: number) => void;
   /** Move a batch of notes by a step/pitch delta atomically (for multi-select drag). */
   moveNotesBatch: (id: string, notes: { step: number; midi: number }[], stepDelta: number, pitchDelta: number) => void;
+  /** Remove notes that fall within the time range of other notes at the same pitch. */
+  removeOverlappedNotes: (id: string, ranges: { step: number; midi: number; length: number }[]) => void;
+  /** Add notes in batch (for paste/duplicate). Returns the new note keys for selection. */
+  addNotesBatch: (id: string, notes: { step: number; midi: number; length: number; velocity: number; glide: boolean }[]) => void;
 
   // Per-instrument progress (0-1) for polyrhythm
   instrumentProgress: Record<string, number>;
@@ -330,6 +334,8 @@ export interface StoreState {
   toggleSceneEffectEnabled: (groupId: string, effectId: string) => void;
   toggleSceneEffectCollapsed: (groupId: string, effectId: string) => void;
   reorderSceneEffects: (groupId: string, fromIdx: number, toIdx: number) => void;
+  addInstrumentToScene: (instrumentId: string, sceneId: string) => void;
+  removeInstrumentFromScene: (instrumentId: string, sceneId: string) => void;
 
   // Track Mode actions
   toggleTrackMode: () => void;
@@ -742,8 +748,8 @@ export const useStore = create<StoreState>((set, get) => ({
         ? { ...g, instrumentIds: g.instrumentIds.filter((x) => x !== id) }
         : g
     );
-    const dissolvedIds = scenes.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
-    scenes = scenes.filter((g) => g.instrumentIds.length >= 2);
+    const dissolvedIds = scenes.filter((g) => g.instrumentIds.length === 0).map((g) => g.id);
+    scenes = scenes.filter((g) => g.instrumentIds.length > 0);
     const sceneEffects = { ...s.sceneEffects };
     for (const did of dissolvedIds) {
       // Unroute remaining members and destroy dissolved bus
@@ -1044,6 +1050,127 @@ export const useStore = create<StoreState>((set, get) => ({
           gLen[targetHit] = info.len;
           gVel[targetHit] = info.vel;
           gGlide[targetHit] = info.glide;
+        }
+      }
+
+      return {
+        instruments: s.instruments.map((i) =>
+          i.id !== id ? i : { ...i, hits: positions.length, hitPositions: positions },
+        ),
+        gridNotes: { ...s.gridNotes, [id]: grid },
+        gridLengths: { ...s.gridLengths, [id]: gLen },
+        gridVelocities: { ...s.gridVelocities, [id]: gVel },
+        gridGlide: { ...s.gridGlide, [id]: gGlide },
+      };
+    }),
+
+  removeOverlappedNotes: (id, ranges) =>
+    set((s) => {
+      const inst = s.instruments.find((i) => i.id === id);
+      if (!inst || ranges.length === 0) return s;
+
+      const totalSteps = inst.loopSize;
+      let positions = [...inst.hitPositions];
+      const grid: number[][] = [...(s.gridNotes[id] || [])].map((a) => [...a]);
+      const gLen: number[] = [...(s.gridLengths[id] || [])];
+      const gVel: number[] = [...(s.gridVelocities[id] || [])];
+      const gGlide: boolean[] = [...(s.gridGlide[id] || [])];
+
+      // Build step→hitIndex map
+      const stepToHit = new Map<number, number>();
+      for (let i = 0; i < positions.length; i++) {
+        const step = Math.round(positions[i] * totalSteps) % totalSteps;
+        stepToHit.set(step, i);
+      }
+
+      // Collect hit indices to remove notes from
+      const hitsToRemove: { hitIdx: number; midi: number }[] = [];
+      for (const range of ranges) {
+        for (let offset = 1; offset < range.length; offset++) {
+          const coveredStep = (range.step + offset) % totalSteps;
+          const hitIdx = stepToHit.get(coveredStep);
+          if (hitIdx === undefined) continue;
+          const hitNotes = grid[hitIdx];
+          if (hitNotes && hitNotes.includes(range.midi)) {
+            hitsToRemove.push({ hitIdx, midi: range.midi });
+          }
+        }
+      }
+
+      if (hitsToRemove.length === 0) return s;
+
+      // Deduplicate and sort by descending hitIdx for stable removal
+      const seen = new Set<string>();
+      const unique = hitsToRemove.filter((h) => {
+        const k = `${h.hitIdx}-${h.midi}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      unique.sort((a, b) => b.hitIdx - a.hitIdx);
+
+      for (const { hitIdx, midi } of unique) {
+        const filtered = grid[hitIdx].filter((m) => m !== midi);
+        if (filtered.length === 0) {
+          grid.splice(hitIdx, 1);
+          positions.splice(hitIdx, 1);
+          gLen.splice(hitIdx, 1);
+          gVel.splice(hitIdx, 1);
+          gGlide.splice(hitIdx, 1);
+        } else {
+          grid[hitIdx] = filtered;
+        }
+      }
+
+      return {
+        instruments: s.instruments.map((i) =>
+          i.id !== id ? i : { ...i, hits: positions.length, hitPositions: positions },
+        ),
+        gridNotes: { ...s.gridNotes, [id]: grid },
+        gridLengths: { ...s.gridLengths, [id]: gLen },
+        gridVelocities: { ...s.gridVelocities, [id]: gVel },
+        gridGlide: { ...s.gridGlide, [id]: gGlide },
+      };
+    }),
+
+  addNotesBatch: (id, notes) =>
+    set((s) => {
+      const inst = s.instruments.find((i) => i.id === id);
+      if (!inst || notes.length === 0) return s;
+
+      const totalSteps = inst.loopSize;
+      let positions = [...inst.hitPositions];
+      const grid: number[][] = [...(s.gridNotes[id] || [])].map((a) => [...a]);
+      const gLen: number[] = [...(s.gridLengths[id] || [])];
+      const gVel: number[] = [...(s.gridVelocities[id] || [])];
+      const gGlide: boolean[] = [...(s.gridGlide[id] || [])];
+
+      for (const note of notes) {
+        const step = ((note.step % totalSteps) + totalSteps) % totalSteps;
+
+        // Build fresh step→hit map each iteration (positions may have grown)
+        const curMap = new Map<number, number>();
+        for (let i = 0; i < positions.length; i++) {
+          const st = Math.round(positions[i] * totalSteps) % totalSteps;
+          curMap.set(st, i);
+        }
+
+        const hitIdx = curMap.get(step);
+        if (hitIdx !== undefined) {
+          if (!grid[hitIdx].includes(note.midi)) {
+            grid[hitIdx] = [...grid[hitIdx], note.midi];
+          }
+          // Update metadata to match pasted note
+          gLen[hitIdx] = note.length;
+          gVel[hitIdx] = note.velocity;
+          gGlide[hitIdx] = note.glide;
+        } else {
+          const newIdx = positions.length;
+          positions.push(step / totalSteps);
+          grid[newIdx] = [note.midi];
+          gLen[newIdx] = note.length;
+          gVel[newIdx] = note.velocity;
+          gGlide[newIdx] = note.glide;
         }
       }
 
@@ -1448,7 +1575,7 @@ export const useStore = create<StoreState>((set, get) => ({
   sceneSelected: () => {
     const s = get();
     const ids = s.selectedInstrumentIds;
-    if (ids.length < 2) return;
+    if (ids.length < 1) return;
     // Remove selected instruments from any existing groups — unroute from old buses
     const oldGroups = s.scenes;
     for (const g of oldGroups) {
@@ -1463,9 +1590,9 @@ export const useStore = create<StoreState>((set, get) => ({
       ...g,
       instrumentIds: g.instrumentIds.filter((x) => !ids.includes(x)),
     }));
-    // Dissolve groups that became too small
-    const dissolvedIds = groups.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
-    groups = groups.filter((g) => g.instrumentIds.length >= 2);
+    // Dissolve groups that became empty
+    const dissolvedIds = groups.filter((g) => g.instrumentIds.length === 0).map((g) => g.id);
+    groups = groups.filter((g) => g.instrumentIds.length > 0);
     const sceneEffects = { ...s.sceneEffects };
     for (const did of dissolvedIds) {
       delete sceneEffects[did];
@@ -1551,8 +1678,8 @@ export const useStore = create<StoreState>((set, get) => ({
       ...g,
       instrumentIds: g.instrumentIds.filter((x) => !ids.includes(x)),
     }));
-    const dissolvedIds = scenes.filter((g) => g.instrumentIds.length < 2).map((g) => g.id);
-    scenes = scenes.filter((g) => g.instrumentIds.length >= 2);
+    const dissolvedIds = scenes.filter((g) => g.instrumentIds.length === 0).map((g) => g.id);
+    scenes = scenes.filter((g) => g.instrumentIds.length > 0);
     for (const did of dissolvedIds) {
       delete sceneEffects[did];
       // Unroute remaining members and destroy dissolved bus
@@ -1680,6 +1807,58 @@ export const useStore = create<StoreState>((set, get) => ({
       effects.splice(toIdx, 0, item);
       return { sceneEffects: { ...s.sceneEffects, [groupId]: effects } };
     }),
+
+  addInstrumentToScene: (instrumentId: string, sceneId: string) => {
+    const s = get();
+    const inst = s.instruments.find((i) => i.id === instrumentId);
+    if (!inst) return;
+    const targetScene = s.scenes.find((g) => g.id === sceneId);
+    if (!targetScene) return;
+    if (targetScene.instrumentIds.includes(instrumentId)) return; // already in scene
+
+    // Add to target scene (allow multi-scene membership)
+    const scenes = s.scenes.map((g) =>
+      g.id === sceneId ? { ...g, instrumentIds: [...g.instrumentIds, instrumentId] } : g,
+    );
+
+    // Route audio to this scene if not already routed to another
+    const alreadyInAScene = s.scenes.some((g) => g.instrumentIds.includes(instrumentId));
+    if (!alreadyInAScene) {
+      routeOrbitToScene(inst.orbitIndex, sceneId);
+    }
+
+    set({ scenes });
+  },
+
+  removeInstrumentFromScene: (instrumentId: string, sceneId: string) => {
+    const s = get();
+    const inst = s.instruments.find((i) => i.id === instrumentId);
+    if (!inst) return;
+    const scene = s.scenes.find((g) => g.id === sceneId);
+    if (!scene || !scene.instrumentIds.includes(instrumentId)) return;
+
+    // Unroute from scene bus
+    unrouteOrbitFromScene(inst.orbitIndex);
+
+    const sceneEffects = { ...s.sceneEffects };
+    let scenes = s.scenes.map((g) =>
+      g.id === sceneId ? { ...g, instrumentIds: g.instrumentIds.filter((id) => id !== instrumentId) } : g,
+    );
+
+    // Dissolve empty scenes
+    const dissolvedIds = scenes.filter((g) => g.instrumentIds.length === 0).map((g) => g.id);
+    scenes = scenes.filter((g) => g.instrumentIds.length > 0);
+    for (const did of dissolvedIds) {
+      delete sceneEffects[did];
+      destroySceneBus(did);
+    }
+
+    set({
+      scenes,
+      sceneEffects,
+      selectedSceneId: dissolvedIds.includes(s.selectedSceneId ?? '') ? null : s.selectedSceneId,
+    });
+  },
 
   // Track Mode
   toggleTrackMode: () => set((s) => {
@@ -1831,9 +2010,13 @@ export const useStore = create<StoreState>((set, get) => ({
 
   assignLoop: (instrumentId, loopPath, displayName) => {
     const baseUrl = (import.meta.env.BASE_URL as string) ?? '/';
-    const url = loopPath.startsWith('blob:') || loopPath.startsWith('http')
-      ? loopPath
-      : baseUrl.replace(/\/$/, '') + '/' + loopPath;
+    // Resolve blob URL from customSamples for imported samples
+    const customSample = get().customSamples.find((cs) => cs.key === loopPath);
+    const url = customSample?.url
+      ? customSample.url
+      : loopPath.startsWith('blob:') || loopPath.startsWith('http')
+        ? loopPath
+        : baseUrl.replace(/\/$/, '') + '/' + loopPath;
 
     const sdKey = registerSampleForPlayback(loopPath);
     loadSample(loopPath, url);

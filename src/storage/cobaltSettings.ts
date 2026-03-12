@@ -6,7 +6,7 @@
 const COBALT_ENDPOINT_KEY = 'orbeat_cobalt_endpoint';
 const COBALT_API_KEY_KEY = 'orbeat_cobalt_api_key';
 
-const DEFAULT_ENDPOINT = 'https://cobalt.orbeat.app';
+const DEFAULT_ENDPOINT = 'https://orbeat-cobalt.onrender.com';
 
 export function getCobaltEndpoint(): string {
   try {

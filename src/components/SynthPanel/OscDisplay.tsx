@@ -1,9 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { sampleWaveShape } from '../../audio/synth/wavetables';
+import { sampleWTWaveShape } from '../../audio/synth/wavetableEngine';
 
-const H = 36;
+const H = 64;
 
-function ySample(t: number, shape: string): number {
+function ySample(t: number, shape: string, wtPosition?: number): number {
+  if (shape.startsWith('wt:')) {
+    return sampleWTWaveShape(shape.slice(3), wtPosition ?? 0, t);
+  }
   switch (shape) {
     case 'sine':     return Math.sin(t * Math.PI * 2);
     case 'triangle': return 1 - 4 * Math.abs(t - Math.round(t));
@@ -15,25 +19,34 @@ function ySample(t: number, shape: string): number {
 
 // Per-shape peak amplitude cache (for normalization in display)
 const peakCache = new Map<string, number>();
-function getPeak(shape: string): number {
-  if (peakCache.has(shape)) return peakCache.get(shape)!;
+function getPeak(shape: string, wtPosition?: number): number {
+  const key = shape.startsWith('wt:')
+    ? `${shape}:${Math.round((wtPosition ?? 0) * 256)}`
+    : shape;
+  if (peakCache.has(key)) return peakCache.get(key)!;
   let peak = 0;
   const steps = 512;
   for (let i = 0; i < steps; i++) {
-    const v = Math.abs(ySample(i / steps, shape));
+    const v = Math.abs(ySample(i / steps, shape, wtPosition));
     if (v > peak) peak = v;
   }
   const p = Math.max(0.001, peak);
-  peakCache.set(shape, p);
+  // Limit cache for WT shapes (they vary by position)
+  if (shape.startsWith('wt:') && peakCache.size > 64) {
+    const firstKey = peakCache.keys().next().value;
+    if (firstKey !== undefined) peakCache.delete(firstKey);
+  }
+  peakCache.set(key, p);
   return p;
 }
 
 interface Props {
   waveType: string;
   color:    string;
+  wtPosition?: number;
 }
 
-export function OscDisplay({ waveType, color }: Props) {
+export function OscDisplay({ waveType, color, wtPosition }: Props) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -49,7 +62,7 @@ export function OscDisplay({ waveType, color }: Props) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const peak = getPeak(waveType);
+    const peak = getPeak(waveType, wtPosition);
     const pad  = 4;
 
     // Background
@@ -69,7 +82,7 @@ export function OscDisplay({ waveType, color }: Props) {
     ctx.moveTo(0, H / 2);
     for (let i = 0; i <= W; i++) {
       const t = i / W;
-      const y = H / 2 - (ySample(t, waveType) / peak) * (H / 2 - pad);
+      const y = H / 2 - (ySample(t, waveType, wtPosition) / peak) * (H / 2 - pad);
       ctx.lineTo(i, y);
     }
     ctx.lineTo(W, H / 2);
@@ -81,14 +94,14 @@ export function OscDisplay({ waveType, color }: Props) {
     ctx.beginPath();
     for (let i = 0; i <= W; i++) {
       const t = i / W;
-      const y = H / 2 - (ySample(t, waveType) / peak) * (H / 2 - pad);
+      const y = H / 2 - (ySample(t, waveType, wtPosition) / peak) * (H / 2 - pad);
       i === 0 ? ctx.moveTo(i, y) : ctx.lineTo(i, y);
     }
     ctx.strokeStyle = `${color}cc`;
     ctx.lineWidth   = 1.5;
     ctx.lineJoin    = 'round';
     ctx.stroke();
-  }, [waveType, color]);
+  }, [waveType, color, wtPosition]);
 
   return (
     <div ref={containerRef} className="w-full rounded overflow-hidden" style={{ height: H }}>

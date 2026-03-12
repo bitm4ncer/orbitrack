@@ -1,4 +1,5 @@
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 const SIZE_MAP = { sm: 38, md: 50, lg: 64 } as const;
 
@@ -32,6 +33,21 @@ function formatValue(v: number, step: number, unit?: string): string {
   return unit ? `${s} ${unit}` : s;
 }
 
+export interface KnobModulation {
+  color: string;
+  depth: number; // -1 to +1
+}
+
+/** Context menu item for LFO/MIDI assignment */
+export interface KnobContextItem {
+  label: string;
+  icon?: 'lfo' | 'midi' | 'remove';
+  active?: boolean;
+  disabled?: boolean;
+  color?: string;
+  onClick: () => void;
+}
+
 interface EffectKnobProps {
   value: number;
   min: number;
@@ -44,11 +60,85 @@ interface EffectKnobProps {
   format?: (v: number) => string;
   size?: 'sm' | 'md' | 'lg';
   onChange: (v: number) => void;
+  /** Modulation indicators — colored rings showing mod depth per LFO */
+  modulations?: KnobModulation[];
+  /** Context menu items (LFO assign, MIDI learn, etc.) */
+  contextItems?: KnobContextItem[];
 }
+
+// ── Context menu rendered via portal ────────────────────────────────────────
+
+function KnobContextMenu({
+  x, y, items, onClose,
+}: { x: number; y: number; items: KnobContextItem[]; onClose: () => void }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handle = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
+    };
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', handle);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handle);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [onClose]);
+
+  // Clamp to viewport
+  const style: React.CSSProperties = {
+    position: 'fixed',
+    left: Math.min(x, window.innerWidth - 180),
+    top: Math.min(y, window.innerHeight - items.length * 28 - 16),
+    zIndex: 9999,
+  };
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      style={style}
+      className="min-w-[160px] py-1 rounded-md border border-border bg-bg-secondary shadow-xl"
+    >
+      {items.map((item, i) => (
+        <button
+          key={i}
+          onClick={() => { item.onClick(); onClose(); }}
+          disabled={item.disabled}
+          className="w-full flex items-center gap-2 px-3 py-1 text-[11px] text-left transition-colors hover:bg-white/5 disabled:opacity-30 disabled:pointer-events-none"
+          style={{ color: item.active ? (item.color ?? '#6d8cff') : item.icon === 'remove' ? '#ef4444' : '#c8c8d8' }}
+        >
+          {item.icon === 'lfo' && (
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M1 8c2-6 4-6 6 0s4 6 6 0" />
+            </svg>
+          )}
+          {item.icon === 'midi' && (
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="2" y="3" width="12" height="10" rx="1" />
+              <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+            </svg>
+          )}
+          {item.icon === 'remove' && (
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="4" y1="4" x2="12" y2="12" /><line x1="12" y1="4" x2="4" y2="12" />
+            </svg>
+          )}
+          {!item.icon && <span className="w-[10px]" />}
+          <span className="flex-1">{item.label}</span>
+          {item.active && <span className="text-[9px] opacity-60">assigned</span>}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  );
+}
+
+// ── Main knob component ─────────────────────────────────────────────────────
 
 export function EffectKnob({
   value, min, max, step, defaultValue, label, color, unit, format,
-  size = 'md', onChange,
+  size = 'md', onChange, modulations, contextItems,
 }: EffectKnobProps) {
   const px = SIZE_MAP[size];
   const cx = px / 2;
@@ -66,6 +156,7 @@ export function EffectKnob({
   const dotY = cy + indR * Math.sin(toRad(valueDeg));
 
   const [dragging, setDragging] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const dragRef = useRef<{ startY: number; startVal: number } | null>(null);
 
   const SENSITIVITY = 180; // px for full range
@@ -97,13 +188,23 @@ export function EffectKnob({
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     const dir = e.deltaY < 0 ? 1 : -1;
-    const mult = e.shiftKey ? 1 : 1;
-    onChange(snapToStep(value + dir * step * mult, step, min, max));
+    onChange(snapToStep(value + dir * step, step, min, max));
   }, [value, min, max, step, onChange]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (!contextItems?.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY });
+  }, [contextItems]);
 
   const displayVal = format ? format(value) : formatValue(value, step, unit);
   const dimColor = `${color}40`; // 25% opacity for track
   const activeColor = color;
+
+  // Modulation ring arcs
+  const modR = trackR + (size === 'lg' ? 4 : size === 'md' ? 3.5 : 3);
+  const modStroke = size === 'lg' ? 2.5 : size === 'md' ? 2 : 1.5;
 
   return (
     <div
@@ -111,14 +212,18 @@ export function EffectKnob({
       style={{ width: px }}
     >
       <div
-        style={{ width: px, height: px, cursor: 'ns-resize', position: 'relative' }}
+        style={{
+          width: px, height: px, cursor: 'ns-resize', position: 'relative',
+          borderRadius: '50%',
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
-        title={`${label}: ${displayVal}${dragging ? '' : '\nDrag to adjust · Shift = fine · Dbl-click = reset'}`}
+        onContextMenu={handleContextMenu}
+        title={`${label}: ${displayVal}${dragging ? '' : '\nDrag to adjust · Shift = fine · Dbl-click = reset\nRight-click for LFO / MIDI'}`}
       >
         <svg width={px} height={px} style={{ display: 'block' }} overflow="visible">
           <defs>
@@ -136,6 +241,28 @@ export function EffectKnob({
             strokeWidth={size === 'lg' ? 3.5 : size === 'md' ? 3 : 2.5}
             strokeLinecap="round"
           />
+
+          {/* Modulation range arcs (behind active arc) */}
+          {modulations && modulations.map((mod, i) => {
+            const depthDeg = Math.abs(mod.depth) * RANGE_DEG;
+            const modStart = mod.depth >= 0
+              ? valueDeg
+              : Math.max(START_DEG, valueDeg - depthDeg);
+            const modEnd = mod.depth >= 0
+              ? Math.min(START_DEG + RANGE_DEG, valueDeg + depthDeg)
+              : valueDeg;
+            if (modEnd - modStart < 0.5) return null;
+            return (
+              <path
+                key={i}
+                d={arcPath(cx, cy, modR, modStart, modEnd)}
+                fill="none"
+                stroke={`${mod.color}70`}
+                strokeWidth={modStroke}
+                strokeLinecap="round"
+              />
+            );
+          })}
 
           {/* Active arc */}
           {t > 0.001 && (
@@ -166,13 +293,21 @@ export function EffectKnob({
         </svg>
       </div>
 
-      {/* Label */}
-      <span
-        className={`fx-knob-label ${size === 'lg' ? 'fx-knob-label-lg' : ''} truncate w-full`}
-        style={{ maxWidth: px }}
-      >
-        {label}
-      </span>
+      {/* Label + mod dots */}
+      <div className="flex items-center justify-center gap-0.5 w-full" style={{ maxWidth: px }}>
+        <span
+          className={`fx-knob-label ${size === 'lg' ? 'fx-knob-label-lg' : ''} truncate`}
+        >
+          {label}
+        </span>
+        {modulations && modulations.map((mod, i) => (
+          <span
+            key={i}
+            className="inline-block rounded-full shrink-0"
+            style={{ width: 4, height: 4, background: mod.color }}
+          />
+        ))}
+      </div>
 
       {/* Value */}
       <span
@@ -181,6 +316,16 @@ export function EffectKnob({
       >
         {displayVal}
       </span>
+
+      {/* Context menu */}
+      {ctxMenu && contextItems && contextItems.length > 0 && (
+        <KnobContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          items={contextItems}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
     </div>
   );
 }

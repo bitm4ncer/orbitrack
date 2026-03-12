@@ -1,19 +1,11 @@
 import { useEffect, useRef } from 'react';
+import type { LFOShape } from '../../audio/synth/types';
+import { sampleLFOShape } from '../../audio/synth/modConstants';
 
 const H = 22;
 
-function ySample(t: number, shape: OscillatorType): number {
-  switch (shape) {
-    case 'sine':     return Math.sin(t * Math.PI * 2);
-    case 'triangle': return 1 - 4 * Math.abs(t - Math.round(t));
-    case 'square':   return t < 0.5 ? 1 : -1;
-    case 'sawtooth': return 2 * (t - Math.floor(t + 0.5));
-    default:         return 0;
-  }
-}
-
 interface Props {
-  shape: OscillatorType;
+  shape: LFOShape;
   rate:  number; // Hz
   color: string;
 }
@@ -51,7 +43,7 @@ export function LFODisplay({ shape, rate, color }: Props) {
       ctx.moveTo(0, H / 2);
       for (let i = 0; i <= W; i++) {
         const t = i / W;
-        const y = H / 2 - ySample(t, shape) * (H / 2 - pad);
+        const y = H / 2 - sampleLFOShape(t, shape) * (H / 2 - pad);
         ctx.lineTo(i, y);
       }
       ctx.lineTo(W, H / 2);
@@ -63,7 +55,7 @@ export function LFODisplay({ shape, rate, color }: Props) {
       ctx.beginPath();
       for (let i = 0; i <= W; i++) {
         const t = i / W;
-        const y = H / 2 - ySample(t, shape) * (H / 2 - pad);
+        const y = H / 2 - sampleLFOShape(t, shape) * (H / 2 - pad);
         i === 0 ? ctx.moveTo(i, y) : ctx.lineTo(i, y);
       }
       ctx.strokeStyle = `${color}55`;
@@ -73,7 +65,7 @@ export function LFODisplay({ shape, rate, color }: Props) {
       // Phase position (wraps based on wall clock × LFO rate)
       const phase  = (performance.now() / 1000 * rate) % 1;
       const phaseX = phase * W;
-      const phaseY = H / 2 - ySample(phase, shape) * (H / 2 - pad);
+      const phaseY = H / 2 - sampleLFOShape(phase, shape) * (H / 2 - pad);
 
       // Glowing scan line
       ctx.save();

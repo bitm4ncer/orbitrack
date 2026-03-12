@@ -167,6 +167,18 @@ function routeCCMessage(mapping: MidiCCMapping, value: number): void {
       }
       break;
 
+    case 'synthParam':
+      if (mapping.paramName) {
+        const selId = store.selectedInstrumentId;
+        const selInst = selId ? store.instruments.find(i => i.id === selId) : null;
+        if (selId && selInst) {
+          const engine = getSynthEngine(selId, selInst.orbitIndex);
+          engine.setParam(mapping.paramName as any, value);
+          store.updateEngineParams(selId, engine.getParams());
+        }
+      }
+      break;
+
     default:
       console.warn('[MIDI] Unknown CC target:', mapping.targetType);
   }

@@ -819,8 +819,32 @@ export function InstrumentRack() {
                 const idx = instruments.findIndex((i) => i.id === instId);
                 const inst = instruments[idx];
                 if (!inst) continue;
-                rendered.add(instId);
-                memberCards.push(renderCard(inst, idx));
+                if (rendered.has(instId)) {
+                  // Ghost card — instrument's full card is in another scene
+                  const primaryScene = scenes.find((s) => s.id !== scene.id && s.instrumentIds.includes(instId));
+                  memberCards.push(
+                    <div
+                      key={`ghost-${scene.id}-${instId}`}
+                      className="flex items-center gap-2 mx-3 mt-1 px-3 py-1.5 rounded cursor-pointer hover:bg-white/5 transition-colors"
+                      style={{
+                        border: `1px dashed ${inst.color}33`,
+                        opacity: 0.5,
+                      }}
+                      onClick={() => {
+                        useStore.getState().selectInstrument(instId);
+                        document.querySelector(`[data-inst-id="${instId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                      }}
+                      title={`Go to ${inst.name}${primaryScene ? ` (in ${primaryScene.name})` : ''}`}
+                    >
+                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: inst.color, flexShrink: 0 }} />
+                      <span className="text-[9px] text-white/50 truncate">{inst.name}</span>
+                      <span className="text-[7px] text-white/30 ml-auto">↗</span>
+                    </div>
+                  );
+                } else {
+                  rendered.add(instId);
+                  memberCards.push(renderCard(inst, idx));
+                }
               }
               elements.push(
                 <div
@@ -893,6 +917,7 @@ export function InstrumentRack() {
               return (
             <div
               key={inst.id}
+              data-inst-id={inst.id}
               onDragOver={(e) => { e.preventDefault(); setDragOverIdx(index); }}
               onDragLeave={() => { if (dragOverIdx === index) setDragOverIdx(null); }}
               onDrop={() => {

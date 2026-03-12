@@ -69,7 +69,7 @@ const SHAPE_FNS: Record<string, (t: number) => number> = {
 
 // ── DFT → PeriodicWave ───────────────────────────────────────────────────────
 
-const NUM_HARMONICS = 128;
+export const NUM_HARMONICS = 128;
 const NUM_SAMPLES   = 2048;
 
 function computeCoeffs(fn: (t: number) => number) {
@@ -128,4 +128,59 @@ export function getPeriodicWave(ac: AudioContext, shape: string): PeriodicWave |
 export function sampleWaveShape(t: number, shape: string): number {
   const fn = SHAPE_FNS[shape];
   return fn ? fn(t) : 0;
+}
+
+// ── Native waveform coefficients (for wavetable bank generators) ────────────
+
+const nativeCoeffCache = new Map<string, { real: Float32Array; imag: Float32Array }>();
+
+/**
+ * Compute Fourier coefficients for the 4 native oscillator types.
+ * Used by wavetable banks to create morph targets from native shapes.
+ */
+export function computeNativeCoeffs(type: OscillatorType): { real: Float32Array; imag: Float32Array } {
+  if (nativeCoeffCache.has(type)) return nativeCoeffCache.get(type)!;
+
+  const real = new Float32Array(NUM_HARMONICS + 1);
+  const imag = new Float32Array(NUM_HARMONICS + 1);
+
+  for (let k = 1; k <= NUM_HARMONICS; k++) {
+    switch (type) {
+      case 'sine':
+        // Only fundamental
+        imag[k] = k === 1 ? 1 : 0;
+        break;
+      case 'sawtooth':
+        // -1^(k+1) / k  (descending ramp)
+        imag[k] = (k % 2 === 0 ? -1 : 1) * (2 / (k * Math.PI));
+        break;
+      case 'square':
+        // Odd harmonics only: 4/(kπ) for odd k
+        imag[k] = k % 2 === 1 ? 4 / (k * Math.PI) : 0;
+        break;
+      case 'triangle':
+        // Odd harmonics only: 8/(k²π²) alternating sign
+        if (k % 2 === 1) {
+          const sign = ((k - 1) / 2) % 2 === 0 ? 1 : -1;
+          imag[k] = sign * 8 / (k * k * Math.PI * Math.PI);
+        }
+        break;
+    }
+  }
+
+  const result = { real, imag };
+  nativeCoeffCache.set(type, result);
+  return result;
+}
+
+/**
+ * Get Fourier coefficients for any shape (native or custom).
+ * Used by wavetable banks to reference existing shapes as morph targets.
+ */
+export function getCoeffsForShape(shape: string): { real: Float32Array; imag: Float32Array } | null {
+  if (isNativeType(shape)) return computeNativeCoeffs(shape);
+  const fn = SHAPE_FNS[shape];
+  if (!fn) return null;
+  if (!coeffCache.has(shape)) coeffCache.set(shape, computeCoeffs(fn));
+  return coeffCache.get(shape)!;
 }

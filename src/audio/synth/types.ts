@@ -1,5 +1,56 @@
 export type LFODestination = 'none' | 'filter' | 'pitch' | 'amp' | 'pan';
 
+// ── Wavetable types ─────────────────────────────────────────────────────────
+
+export interface WTFrame {
+  real: Float32Array;   // length = NUM_HARMONICS + 1
+  imag: Float32Array;
+}
+
+export interface WTBank {
+  id: string;           // e.g. 'basic_shapes'
+  name: string;         // display name: 'Basic Shapes'
+  frameCount: number;   // typically 64
+  generate: () => WTFrame[];
+}
+
+// ── Modulation types ────────────────────────────────────────────────────────
+
+export type LFOTriggerMode = 'free' | 'retrig' | 'envelope';
+
+export type LFOShape = OscillatorType | 'expDecay' | 'expRise' | 'punch' | 'halfSine' | 'staircase';
+
+export interface LFOSlotParams {
+  shape: LFOShape;
+  rate: number;                   // Hz (when not tempo-synced)
+  tempoSync: boolean;
+  syncDiv: string;                // '1/1','1/2','1/4','1/8','1/16','1/32'
+  triggerMode: LFOTriggerMode;
+  smooth: number;                 // 0-1
+  delay: number;                  // 0-2s fade-in
+  phase: number;                  // 0-1 initial phase offset
+}
+
+export interface ModAssignment {
+  id: string;
+  source: 'lfo1' | 'lfo2' | 'lfo3' | 'lfo4';
+  target: keyof SynthParams;
+  depth: number;                  // -1 to +1 (bipolar)
+}
+
+export const DEFAULT_LFO_SLOT: LFOSlotParams = {
+  shape: 'sine',
+  rate: 1,
+  tempoSync: false,
+  syncDiv: '1/4',
+  triggerMode: 'free',
+  smooth: 0,
+  delay: 0,
+  phase: 0,
+};
+
+// ── Synth params ────────────────────────────────────────────────────────────
+
 export interface SynthParams {
   masterVolume: number;
 
@@ -75,6 +126,13 @@ export interface SynthParams {
   // Bit Crusher
   bitCrushDepth: number;
   bitCrushAmount: number;
+
+  // Wavetable
+  wtPosition: number;      // 0–1, position within wavetable bank
+
+  // Modulation (new system — 4 LFO slots + assignments)
+  lfos: [LFOSlotParams, LFOSlotParams, LFOSlotParams, LFOSlotParams];
+  modAssignments: ModAssignment[];
 
   // Poly / Glide
   maxVoices: number;       // 1–8
