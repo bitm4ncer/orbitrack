@@ -10,18 +10,10 @@ const FRAME_SIZE = 1024;
 const HOP_SIZE = 512;
 
 /**
- * Detect transient positions in an AudioBuffer.
- * @param buffer  - The audio to analyze
- * @param sensitivity - 0.0 (few peaks) to 1.0 (many peaks)
- * @param maxPeaks - Maximum number of transients to return
- * @returns Normalized positions [0..1] sorted ascending
+ * Compute RMS energy per frame for an AudioBuffer (mono-mixed).
+ * Shared by transient detection and tail detection.
  */
-export function detectTransients(
-  buffer: AudioBuffer,
-  sensitivity: number = 0.5,
-  maxPeaks: number = 16,
-): number[] {
-  // Merge all channels to mono
+export function computeEnergyFrames(buffer: AudioBuffer): { energy: Float32Array; numFrames: number } {
   const length = buffer.length;
   const mono = new Float32Array(length);
   for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
@@ -33,10 +25,7 @@ export function detectTransients(
   const scale = 1 / buffer.numberOfChannels;
   for (let i = 0; i < length; i++) mono[i] *= scale;
 
-  // Compute RMS energy per frame
   const numFrames = Math.floor((length - FRAME_SIZE) / HOP_SIZE) + 1;
-  if (numFrames < 3) return [];
-
   const energy = new Float32Array(numFrames);
   for (let f = 0; f < numFrames; f++) {
     const offset = f * HOP_SIZE;
@@ -47,6 +36,24 @@ export function detectTransients(
     }
     energy[f] = Math.sqrt(sum / FRAME_SIZE);
   }
+  return { energy, numFrames };
+}
+
+/**
+ * Detect transient positions in an AudioBuffer.
+ * @param buffer  - The audio to analyze
+ * @param sensitivity - 0.0 (few peaks) to 1.0 (many peaks)
+ * @param maxPeaks - Maximum number of transients to return
+ * @returns Normalized positions [0..1] sorted ascending
+ */
+export function detectTransients(
+  buffer: AudioBuffer,
+  sensitivity: number = 0.5,
+  maxPeaks: number = 16,
+): number[] {
+  const length = buffer.length;
+  const { energy, numFrames } = computeEnergyFrames(buffer);
+  if (numFrames < 3) return [];
 
   // Onset detection function: first-order difference (positive only)
   const onset = new Float32Array(numFrames);
@@ -97,6 +104,72 @@ export function detectTransients(
   }
 
   return positions;
+}
+
+/**
+ * Detect the tail (decay end) of each transient onset.
+ * For each onset, scans forward in the energy array until RMS drops below
+ * a fraction of the onset's peak energy, or the next onset is reached.
+ * @param buffer - The audio to analyze
+ * @param onsets - Normalized onset positions [0..1], sorted ascending
+ * @param decayThreshold - Fraction of onset peak energy to consider "decayed" (0-1)
+ * @returns Normalized tail positions [0..1], parallel to onsets array
+ */
+export function detectTransientTails(
+  buffer: AudioBuffer,
+  onsets: number[],
+  decayThreshold: number = 0.15,
+): number[] {
+  if (onsets.length === 0) return [];
+
+  const length = buffer.length;
+  const { energy, numFrames } = computeEnergyFrames(buffer);
+  if (numFrames < 3) return onsets.map((_, i) => i + 1 < onsets.length ? onsets[i + 1] : 1);
+
+  const tails: number[] = [];
+
+  for (let i = 0; i < onsets.length; i++) {
+    const onsetSample = Math.floor(onsets[i] * length);
+    const onsetFrame = Math.min(numFrames - 1, Math.floor(onsetSample / HOP_SIZE));
+
+    // Next onset frame (or end of buffer)
+    const nextOnsetSample = i + 1 < onsets.length ? Math.floor(onsets[i + 1] * length) : length;
+    const nextOnsetFrame = Math.min(numFrames, Math.floor(nextOnsetSample / HOP_SIZE));
+
+    // Find peak energy in the first few frames after onset (attack phase)
+    const searchEnd = Math.min(onsetFrame + 8, nextOnsetFrame);
+    let peakEnergy = 0;
+    for (let f = onsetFrame; f < searchEnd; f++) {
+      if (energy[f] > peakEnergy) peakEnergy = energy[f];
+    }
+
+    // If no significant energy, tail = next onset
+    if (peakEnergy < 0.001) {
+      tails.push(i + 1 < onsets.length ? onsets[i + 1] : 1);
+      continue;
+    }
+
+    // Scan forward from peak until energy drops below threshold
+    const threshold = peakEnergy * decayThreshold;
+    let tailFrame = nextOnsetFrame; // default: extends to next onset
+    for (let f = searchEnd; f < nextOnsetFrame; f++) {
+      if (energy[f] < threshold) {
+        tailFrame = f;
+        break;
+      }
+    }
+
+    // Convert frame to normalized position, clamp to not exceed next onset
+    const tailNorm = Math.min(
+      (tailFrame * HOP_SIZE) / length,
+      i + 1 < onsets.length ? onsets[i + 1] : 1,
+    );
+
+    // Ensure tail is at least slightly after onset
+    tails.push(Math.max(tailNorm, onsets[i] + 0.001));
+  }
+
+  return tails;
 }
 
 /**

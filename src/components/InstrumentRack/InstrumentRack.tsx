@@ -142,6 +142,12 @@ function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    // Pre-allocate outside draw loop — avoids 16 KB GC pressure every frame
+    let dataBuffer: Float32Array | null = null;
+    // Cache gradient — recreated only when canvas height changes
+    let cachedGrad: CanvasGradient | null = null;
+    let cachedGradH = 0;
+
     const draw = () => {
       rafRef.current = requestAnimationFrame(draw);
       const ctx = canvas.getContext('2d');
@@ -161,13 +167,27 @@ function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }
       const H = canvas.height;
       if (W === 0 || H === 0) return;
 
+      // Recreate gradient only when height changes
+      if (!cachedGrad || cachedGradH !== H) {
+        cachedGrad = ctx.createLinearGradient(0, H, 0, 0);
+        cachedGrad.addColorStop(0,    '#16a34a');
+        cachedGrad.addColorStop(0.55, '#22c55e');
+        cachedGrad.addColorStop(0.75, '#f59e0b');
+        cachedGrad.addColorStop(0.88, '#f97316');
+        cachedGrad.addColorStop(1.0,  '#ef4444');
+        cachedGradH = H;
+      }
+
       ctx.clearRect(0, 0, W, H);
 
       // Read orbit analyser
       const analyser = getOrbitAnalyser(orbitIndex);
       const s = stateRef.current;
       if (analyser) {
-        const buf = new Float32Array(analyser.fftSize);
+        if (!dataBuffer || dataBuffer.length !== analyser.fftSize) {
+          dataBuffer = new Float32Array(analyser.fftSize);
+        }
+        const buf = dataBuffer;
         analyser.getFloatTimeDomainData(buf);
         let sum = 0;
         for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
@@ -194,14 +214,8 @@ function VerticalVU({ orbitIndex, color }: { orbitIndex: number; color: string }
       }
 
       // Gradient level bar (bottom = quiet, top = loud) — same stops as VUMeter.tsx
-      if (s.level > 0.001) {
-        const grad = ctx.createLinearGradient(0, H, 0, 0);
-        grad.addColorStop(0,    '#16a34a');
-        grad.addColorStop(0.55, '#22c55e');
-        grad.addColorStop(0.75, '#f59e0b');
-        grad.addColorStop(0.88, '#f97316');
-        grad.addColorStop(1.0,  '#ef4444');
-        ctx.fillStyle = grad;
+      if (s.level > 0.001 && cachedGrad) {
+        ctx.fillStyle = cachedGrad;
         const yTop = H * (1 - s.level);
         ctx.fillRect(0, yTop, W, H - yTop);
       }
@@ -341,6 +355,10 @@ function MasterVU() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    let masterDataBuffer: Float32Array | null = null;
+    let masterGrad: CanvasGradient | null = null;
+    let masterGradH = 0;
+
     const draw = () => {
       rafRef.current = requestAnimationFrame(draw);
       const ctx = canvas.getContext('2d');
@@ -359,12 +377,25 @@ function MasterVU() {
       const H = canvas.height;
       if (W === 0 || H === 0) return;
 
+      if (!masterGrad || masterGradH !== H) {
+        masterGrad = ctx.createLinearGradient(0, H, 0, 0);
+        masterGrad.addColorStop(0,    '#16a34a');
+        masterGrad.addColorStop(0.55, '#22c55e');
+        masterGrad.addColorStop(0.75, '#f59e0b');
+        masterGrad.addColorStop(0.88, '#f97316');
+        masterGrad.addColorStop(1.0,  '#ef4444');
+        masterGradH = H;
+      }
+
       ctx.clearRect(0, 0, W, H);
 
       const analyser = getMasterAnalyser();
       const s = stateRef.current;
       if (analyser) {
-        const buf = new Float32Array(analyser.fftSize);
+        if (!masterDataBuffer || masterDataBuffer.length !== analyser.fftSize) {
+          masterDataBuffer = new Float32Array(analyser.fftSize);
+        }
+        const buf = masterDataBuffer;
         analyser.getFloatTimeDomainData(buf as Float32Array<ArrayBuffer>);
         let sum = 0;
         for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
@@ -388,14 +419,8 @@ function MasterVU() {
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
       }
 
-      if (s.level > 0.001) {
-        const grad = ctx.createLinearGradient(0, H, 0, 0);
-        grad.addColorStop(0,    '#16a34a');
-        grad.addColorStop(0.55, '#22c55e');
-        grad.addColorStop(0.75, '#f59e0b');
-        grad.addColorStop(0.88, '#f97316');
-        grad.addColorStop(1.0,  '#ef4444');
-        ctx.fillStyle = grad;
+      if (s.level > 0.001 && masterGrad) {
+        ctx.fillStyle = masterGrad;
         const yTop = H * (1 - s.level);
         ctx.fillRect(0, yTop, W, H - yTop);
       }

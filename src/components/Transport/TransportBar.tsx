@@ -8,6 +8,7 @@ import { useClickOutside } from '../../hooks/useClickOutside';
 import { FilesMenu } from './FilesMenu';
 import { SettingsPopup } from './SettingsPopup';
 import { encodeSetToUrl, buildShareUrl, exportSamplesZip, importSamplesZip } from '../../storage/urlShare';
+import { MidiLight } from './MidiLight';
 const orbeatLogo = `${import.meta.env.BASE_URL}ORBEAT_Logo.svg`;
 
 const SHORTCUTS = [
@@ -426,12 +427,7 @@ export function TransportBar() {
           <option value={8}>32nd</option>
           <option value={16}>64th</option>
         </select>
-        <button
-          className="text-[10px] uppercase tracking-wider text-text-secondary/60 hover:text-text-primary px-2 py-1 transition-colors"
-          title="Settings"
-        >
-          Settings
-        </button>
+        <MidiLight />
         <button
           onClick={() => setSettingsOpen(true)}
           className="px-2 py-1 rounded border border-border text-text-secondary hover:border-white/30 hover:text-text-primary transition-colors text-[11px] font-semibold cursor-pointer"

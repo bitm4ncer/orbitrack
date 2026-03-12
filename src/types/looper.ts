@@ -39,6 +39,7 @@ export interface LooperEditorState {
   viewStart: number;                // zoom range 0-1
   viewEnd: number;
   transients: number[];             // detected transient positions [0..1]
+  transientTails: number[];         // detected tail positions [0..1], parallel to transients
   undoStack: AudioBuffer[];
 }
 
@@ -58,6 +59,7 @@ export function createLooperEditorState(): LooperEditorState {
     viewStart: 0,
     viewEnd: 1,
     transients: [],
+    transientTails: [],
     undoStack: [],
   };
 }

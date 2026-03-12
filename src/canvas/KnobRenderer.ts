@@ -30,6 +30,9 @@ export class KnobRenderer {
   private ctx: CanvasRenderingContext2D;
   private animationId: number | null = null;
   private instrumentId: string;
+  // Cache instrument reference to avoid O(N) .find() every frame
+  private _lastInstrRef: unknown = null;
+  private _cachedInst: ReturnType<typeof useStore.getState>['instruments'][number] | null = null;
 
   constructor(canvas: HTMLCanvasElement, instrumentId: string) {
     this.canvas = canvas;
@@ -74,7 +77,12 @@ export class KnobRenderer {
 
   private render(): void {
     const state = useStore.getState();
-    const inst = state.instruments.find((i) => i.id === this.instrumentId);
+    // Only re-find when instruments array reference changes (immutable updates)
+    if (state.instruments !== this._lastInstrRef) {
+      this._lastInstrRef = state.instruments;
+      this._cachedInst = state.instruments.find((i) => i.id === this.instrumentId) ?? null;
+    }
+    const inst = this._cachedInst;
     if (!inst) return;
 
     const rect = this.canvas.getBoundingClientRect();

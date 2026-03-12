@@ -1487,7 +1487,14 @@ export function getParaEQBands(orbitIndex: number): BiquadFilterNode[] | null {
 }
 
 export function getSynthOrbitInput(orbitIndex: number): GainNode | null {
-  return chains.get(orbitIndex)?.synthInputGain ?? null;
+  // Lazily create orbit chain on first synth access (e.g. MIDI input while transport stopped)
+  try {
+    const chain = ensureIntercepted(orbitIndex);
+    return chain.synthInputGain;
+  } catch {
+    // Audio context not ready yet — fall back to existing chain if any
+    return chains.get(orbitIndex)?.synthInputGain ?? null;
+  }
 }
 
 export function getCompressorNode(orbitIndex: number): DynamicsCompressorNode | null {
@@ -1506,4 +1513,67 @@ export function getOrbitChainTail(orbitIndex: number): { limiterMix: GainNode; o
   } catch {
     return null;
   }
+}
+
+// ── Cleanup ──────────────────────────────────────────────────────────────────
+
+/** Stop all running oscillators/schedulers and disconnect every node in the chain. */
+export function destroyOrbitChain(orbitIndex: number): void {
+  const chain = chains.get(orbitIndex);
+  if (chain) {
+    // Stop all oscillators (they throw if already stopped — swallow)
+    const oscs: OscillatorNode[] = [
+      chain.chorusLFO, chain.chorusLFO2,
+      chain.phaserLFO, chain.filterLFO,
+      chain.delayModLFO, chain.tremoloLFO, chain.ringCarrier,
+    ];
+    for (const osc of oscs) {
+      try { osc.stop(); } catch { /* already stopped */ }
+      try { osc.disconnect(); } catch { /* ignore */ }
+    }
+
+    // Stop trance gate scheduler interval
+    chain.tranceGateScheduler.stop();
+
+    // Bulk-disconnect every AudioNode in the chain.
+    // Iterating the interface keys is safest — anything that has .disconnect()
+    // is an AudioNode (or AudioWorkletNode).
+    for (const key of Object.keys(chain) as (keyof OrbitEffectChain)[]) {
+      const node = chain[key];
+      if (node && typeof (node as AudioNode).disconnect === 'function') {
+        try { (node as AudioNode).disconnect(); } catch { /* ignore */ }
+      }
+      // Handle arrays of nodes (phaserAllpass, eqBands, reverbAllpass)
+      if (Array.isArray(node)) {
+        for (const item of node) {
+          if (item && typeof item === 'object' && 'delay' in item) {
+            // CombFilter objects have nested nodes
+            const cf = item as CombFilter;
+            try { cf.delay.disconnect(); } catch { /* ignore */ }
+            try { cf.feedback.disconnect(); } catch { /* ignore */ }
+            try { cf.damp.disconnect(); } catch { /* ignore */ }
+          } else if (item && typeof (item as AudioNode).disconnect === 'function') {
+            try { (item as AudioNode).disconnect(); } catch { /* ignore */ }
+          }
+        }
+      }
+    }
+
+    chains.delete(orbitIndex);
+  }
+
+  // Clean up analyser side-tap
+  const analyser = orbitAnalysers.get(orbitIndex);
+  if (analyser) {
+    try { analyser.disconnect(); } catch { /* ignore */ }
+    orbitAnalysers.delete(orbitIndex);
+  }
+
+  // Clean up trance gate phase ref
+  tranceGatePhaseRef.delete(orbitIndex);
+}
+
+/** Number of active orbit effect chains (for perf monitoring). */
+export function getActiveChainCount(): number {
+  return chains.size;
 }

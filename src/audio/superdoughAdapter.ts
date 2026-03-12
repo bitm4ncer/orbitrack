@@ -109,6 +109,7 @@ export function triggerLooperSlice(
   secondsPerStep: number,
   audioTime: number,
   state: StoreState,
+  overrideAvailableSec?: number,
 ): void {
   if (!instrument.sampleName) return;
 
@@ -127,9 +128,23 @@ export function triggerLooperSlice(
   // Skip hits outside the loop region
   if (rawBegin < loopIn || rawBegin >= loopOut) return;
 
-  // Use buffer-space coordinates directly (no rescaling)
+  // Use transient tail for tighter slice boundaries (avoids stretching silence).
+  // transientTails is parallel to editorState.transients, NOT to sortedHits —
+  // find the matching transient index by position to get the correct tail.
+  const transients = editorState?.transients ?? [];
+  const tails = editorState?.transientTails ?? [];
+  let tailEnd = rawEnd;
+  if (tails.length > 0) {
+    const tIdx = transients.findIndex(t => Math.abs(t - rawBegin) < 0.0001);
+    if (tIdx >= 0 && tIdx < tails.length) {
+      tailEnd = tails[tIdx];
+    }
+  }
+  // Slice end = min(tail, next hit, loop boundary) — prefer tail for cleaner slicing
+  const effectiveEnd = Math.min(tailEnd, rawEnd, loopOut);
+
   const sliceBegin = rawBegin;
-  const sliceEnd = Math.min(rawEnd, loopOut); // clamp end to loop boundary
+  const sliceEnd = Math.max(effectiveEnd, rawBegin + 0.001); // ensure non-zero length
 
   if (sliceBegin >= sliceEnd) return; // degenerate slice
 
@@ -142,7 +157,7 @@ export function triggerLooperSlice(
   const nextStep = hitIndex + 1 < sortedHits.length
     ? Math.round(sortedHits[hitIndex + 1] * instrument.loopSize)
     : instrument.loopSize;
-  const availableSec = (nextStep - thisStep) * secondsPerStep;
+  const availableSec = overrideAvailableSec ?? (nextStep - thisStep) * secondsPerStep;
 
   let sliceSpeed = lp.speed;
   if (bufferDuration && bufferDuration > 0) {

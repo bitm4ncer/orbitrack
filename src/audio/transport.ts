@@ -189,6 +189,14 @@ export function setBpm(bpm: number): void {
   useStore.getState().setBpm(bpm);
 }
 
+export function getGlobalStep(): number {
+  return _globalStep;
+}
+
+export function getStepsPerBeat(): number {
+  return useStore.getState().stepsPerBeat;
+}
+
 function tick(time: number): void {
   try {
     _tick(time);
@@ -281,7 +289,63 @@ function _tick(time: number): void {
     const offsetSteps = Math.round(startOffset * loopSize);
     const instStep = (globalStep + offsetSteps) % loopSize;
 
-    // Lazily built on first looper hit that fires this step; null = not built yet.
+    // ── Tiled loop mode: when a loop region is active, tile its hits across the full pattern ──
+    if (instrument.type === 'looper') {
+      const editorState = state.looperEditors[instrument.id];
+      const loopIn = editorState?.loopIn ?? 0;
+      const loopOut = editorState?.loopOut ?? 1;
+      const hasLoopRegion = loopIn > 0 || loopOut < 1;
+
+      if (hasLoopRegion) {
+        // Collect and sort hits within the loop region
+        const loopHits: number[] = [];
+        for (const hp of hitPositions) {
+          if (hp >= loopIn - 0.001 && hp <= loopOut + 0.001) {
+            loopHits.push(hp);
+          }
+        }
+
+        if (loopHits.length > 0) {
+          loopHits.sort((a, b) => a - b);
+
+          const regionSize = loopOut - loopIn;
+          const regionSteps = Math.max(1, Math.round(regionSize * loopSize));
+
+          // Map current step to position within the tiled loop region
+          const loopRelStep = ((instStep % regionSteps) + regionSteps) % regionSteps;
+
+          for (let j = 0; j < loopHits.length; j++) {
+            const hitRelNorm = (loopHits[j] - loopIn) / regionSize;
+            const hitRelStep = Math.round(hitRelNorm * regionSteps) % regionSteps;
+
+            if (hitRelStep === loopRelStep) {
+              const fireKey = j + 10000; // offset to avoid collision with non-tiled indices
+              if (fired.get(fireKey) === globalStep) continue;
+              fired.set(fireKey, globalStep);
+
+              // Available time until next hit in the tiled pattern
+              let nextRelStep: number;
+              if (j + 1 < loopHits.length) {
+                nextRelStep = Math.round(((loopHits[j + 1] - loopIn) / regionSize) * regionSteps);
+              } else {
+                // Wrap: next is the first hit of the next repetition
+                nextRelStep = regionSteps + Math.round(((loopHits[0] - loopIn) / regionSize) * regionSteps);
+              }
+              const tiledAvailSec = Math.max(0.01, (nextRelStep - hitRelStep) * secondsPerStep);
+
+              triggerLooperSlice(instrument, j, loopHits, secondsPerStep, time, state, tiledAvailSec);
+            }
+          }
+
+          // Update progress to cycle the playhead within the loop region
+          instProgress[instrument.id] = loopIn + (loopRelStep / regionSteps) * regionSize;
+        }
+
+        continue; // Skip normal hit iteration for this instrument
+      }
+    }
+
+    // ── Normal hit processing (non-loopers and loopers without loop region) ──
     let sortedHitsCache: number[] | null = null;
 
     for (let i = 0; i < hitPositions.length; i++) {
@@ -294,25 +358,13 @@ function _tick(time: number): void {
         fired.set(i, globalStep);
 
         if (instrument.type === 'looper') {
-          // Filter hits to loop region if loopIn/loopOut are set
-          const editorState = state.looperEditors[instrument.id];
-          const loopIn = editorState?.loopIn ?? 0;
-          const loopOut = editorState?.loopOut ?? 1;
-          const hasLoopRegion = loopIn > 0 || loopOut < 1;
-
-          // Skip hits outside the loop region
-          if (hasLoopRegion && (hitPos < loopIn - 0.001 || hitPos > loopOut + 0.001)) continue;
-
-          // Build sortedHits once per instrument per tick (lazy, shared by all hits that fire)
+          // No loop region — play all hits normally
           if (sortedHitsCache === null) {
-            sortedHitsCache = [...hitPositions]
-              .filter((h) => !hasLoopRegion || (h >= loopIn - 0.001 && h <= loopOut + 0.001))
-              .sort((a, b) => a - b);
+            sortedHitsCache = [...hitPositions].sort((a, b) => a - b);
           }
-          const sortedHits = sortedHitsCache;
-          const sortedIdx = sortedHits.indexOf(hitPos);
+          const sortedIdx = sortedHitsCache.indexOf(hitPos);
           if (sortedIdx >= 0) {
-            triggerLooperSlice(instrument, sortedIdx, sortedHits, secondsPerStep, time, state);
+            triggerLooperSlice(instrument, sortedIdx, sortedHitsCache, secondsPerStep, time, state);
           }
         } else {
           const notes = state.gridNotes[instrument.id]?.[i];

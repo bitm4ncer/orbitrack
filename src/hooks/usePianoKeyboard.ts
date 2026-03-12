@@ -127,13 +127,17 @@ export function usePianoKeyboard(): void {
 
         if (inst.type === 'synth') {
           const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-          const gainScale = velocityRef.current / 127;
-          engine.noteOnNow(midiNote, gainScale);
+          // noteOnNow expects 0-127 velocity, divides by 127 internally
+          engine.noteOnNow(midiNote, velocityRef.current);
           heldKeysRef.current.set(keyCode, midiNote);
         } else if (inst.type === 'sampler' && inst.sampleName) {
-          // Apply velocity scaling to sample volume
-          const gainScale = velocityRef.current / 127;
-          triggerSample(inst.sampleName, undefined, inst.volume * gainScale, 1.0);
+          // Velocity as dB attenuation added to instrument volume
+          const velocityLinear = velocityRef.current / 127;
+          const velocityDb = 20 * Math.log10(Math.max(0.001, velocityLinear));
+          const rootNote = inst.samplerParams?.rootNote ?? 60;
+          const speed = (inst.samplerParams?.speed ?? 1) * Math.pow(2, (midiNote - rootNote) / 12);
+          triggerSample(inst.sampleName, undefined, inst.volume + velocityDb, speed);
+          heldKeysRef.current.set(keyCode, midiNote);
         }
       } catch (err) {
         console.error('Piano keyboard: failed to trigger note:', err);
@@ -145,6 +149,7 @@ export function usePianoKeyboard(): void {
 
       if (e.code in PIANO_KEY_MAP && heldKeysRef.current.has(e.code)) {
         e.preventDefault();
+        const midiNote = heldKeysRef.current.get(e.code)!;
         heldKeysRef.current.delete(e.code);
 
         try {
@@ -153,10 +158,10 @@ export function usePianoKeyboard(): void {
 
           if (!inst || !audioInitializedRef.current) return;
 
-          // For synths: release the note if there are no more keys held
-          if (inst.type === 'synth' && heldKeysRef.current.size === 0) {
+          // For synths: release the specific voice for this note
+          if (inst.type === 'synth') {
             const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
-            engine.noteOff();
+            engine.noteOffForNote(midiNote);
           }
           // For samplers: nothing to do on key up (sample plays to completion)
         } catch (err) {

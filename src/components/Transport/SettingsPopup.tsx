@@ -53,11 +53,11 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
       />
 
       <div
-        className="fixed bottom-0 left-0 right-0 z-50 flex items-end justify-center p-4 animate-[slideUp_0.3s_ease-out]"
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-[slideUp_0.3s_ease-out]"
         onClick={onClose}
       >
         <div
-          className="bg-bg-secondary border border-border rounded-t-lg shadow-2xl overflow-hidden w-full max-w-5xl max-h-[90vh] flex flex-col"
+          className="bg-bg-secondary border border-border rounded-lg shadow-2xl overflow-hidden w-full max-w-5xl h-[50vh] flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-bg-tertiary/50">
@@ -91,7 +91,7 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
 
             <div className="flex-1 overflow-y-auto">
               {activeTab === 'info' && (
-                <div className="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                <div className="p-6 space-y-6">
                   {/* Polyrhythmic Concept */}
                   <div>
                     <h3 className="text-sm font-semibold text-text-primary mb-3">Polyrhythmic Sequencing</h3>
@@ -248,7 +248,7 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
               )}
 
               {activeTab === 'shortcuts' && (
-                <div className="p-6 space-y-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                <div className="p-6 space-y-6">
                   {/* General Shortcuts */}
                   <div>
                     <h3 className="text-sm font-semibold text-text-primary mb-3">General Shortcuts</h3>

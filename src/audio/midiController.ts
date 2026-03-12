@@ -6,6 +6,8 @@ import type { MidiCCMapping, MidiNoteMapping, MidiDeviceInfo } from '../types/mi
 
 type MidiCallback = (mapping: MidiCCMapping | MidiNoteMapping, value: number) => void;
 type DeviceChangeCallback = (devices: MidiDeviceInfo[]) => void;
+type MidiActivityCallback = () => void;
+type MidiSystemCallback = (statusByte: number) => void;
 
 let midiInputDevice: Input | null = null;
 let midiOutputDevice: Output | null = null;
@@ -13,6 +15,8 @@ let isWebMidiEnabled = false;
 let ccCallbacks: MidiCallback[] = [];
 let noteCallbacks: MidiCallback[] = [];
 let deviceChangeCallbacks: DeviceChangeCallback[] = [];
+let activityCallbacks: MidiActivityCallback[] = [];
+let systemCallbacks: MidiSystemCallback[] = [];
 
 export async function initMidi(): Promise<void> {
   try {
@@ -91,6 +95,7 @@ function setupInputListeners(): void {
   midiInputDevice.addListener('controlchange', (e: any) => {
     const ccValue = (e.value ?? e.rawValue ?? 0) / 127;
     ccCallbacks.forEach(cb => cb({ cc: e.controller?.number ?? 0 } as any, ccValue));
+    activityCallbacks.forEach(cb => cb());
   });
 
   midiInputDevice.addListener('noteon', (e: any) => {
@@ -98,10 +103,19 @@ function setupInputListeners(): void {
     const rawVelocity = e.note?.rawAttack ?? 100;
     const velocity = Math.max(0, Math.min(1, rawVelocity / 127));
     noteCallbacks.forEach(cb => cb({ note: e.note?.number ?? 0 } as any, velocity));
+    activityCallbacks.forEach(cb => cb());
   });
 
   midiInputDevice.addListener('noteoff', (e: any) => {
     noteCallbacks.forEach(cb => cb({ note: e.note?.number ?? 0 } as any, 0));
+  });
+
+  // Listen for system realtime messages (clock, start, stop, continue)
+  midiInputDevice.addListener('midimessage', (e: any) => {
+    const status = e.message?.data?.[0] ?? e.data?.[0];
+    if (status >= 0xf8) {
+      systemCallbacks.forEach(cb => cb(status));
+    }
   });
 }
 
@@ -116,6 +130,20 @@ export function onMidiNote(callback: MidiCallback): () => void {
   noteCallbacks.push(callback);
   return () => {
     noteCallbacks = noteCallbacks.filter(cb => cb !== callback);
+  };
+}
+
+export function onMidiActivity(callback: MidiActivityCallback): () => void {
+  activityCallbacks.push(callback);
+  return () => {
+    activityCallbacks = activityCallbacks.filter(cb => cb !== callback);
+  };
+}
+
+export function onMidiSystemMessage(callback: MidiSystemCallback): () => void {
+  systemCallbacks.push(callback);
+  return () => {
+    systemCallbacks = systemCallbacks.filter(cb => cb !== callback);
   };
 }
 
@@ -162,6 +190,15 @@ export function sendCC(cc: number, value: number, _channel: number = 1): void {
   }
 }
 
+export function sendMidiRawMessage(data: number[]): void {
+  if (!midiOutputDevice) return;
+  try {
+    midiOutputDevice.send(data);
+  } catch (e) {
+    console.error('[MIDI] Failed to send raw message:', e);
+  }
+}
+
 export function sendProgramChange(program: number, _channel: number = 1): void {
   if (!midiOutputDevice) return;
   try {
@@ -183,5 +220,7 @@ export function disableMidi(): void {
   midiOutputDevice = null;
   ccCallbacks = [];
   noteCallbacks = [];
+  activityCallbacks = [];
+  systemCallbacks = [];
   isWebMidiEnabled = false;
 }

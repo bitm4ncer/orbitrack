@@ -103,6 +103,26 @@ class PolyVoice {
     }
   }
 
+  /** Stop all oscillators and disconnect all nodes in this voice. */
+  dispose(): void {
+    for (const osc of this.mainOscs) {
+      try { osc.stop(); } catch { /* already stopped */ }
+      try { osc.disconnect(); } catch { /* ignore */ }
+    }
+    for (const g of this.mainGains) { try { g.disconnect(); } catch { /* ignore */ } }
+    for (const p of this.mainPanners) { try { p.disconnect(); } catch { /* ignore */ } }
+    try { this.sub1Osc.stop(); } catch { /* already stopped */ }
+    try { this.sub1Osc.disconnect(); } catch { /* ignore */ }
+    try { this.sub1Gain.disconnect(); } catch { /* ignore */ }
+    try { this.sub2Osc.stop(); } catch { /* already stopped */ }
+    try { this.sub2Osc.disconnect(); } catch { /* ignore */ }
+    try { this.sub2Gain.disconnect(); } catch { /* ignore */ }
+    try { this.fmOsc.stop(); } catch { /* already stopped */ }
+    try { this.fmOsc.disconnect(); } catch { /* ignore */ }
+    try { this.fmGain.disconnect(); } catch { /* ignore */ }
+    try { this.voiceGain.disconnect(); } catch { /* ignore */ }
+  }
+
   /** Schedule ADSR envelope and set frequencies. Called from noteOn. */
   trigger(
     midiNote: number,
@@ -381,6 +401,15 @@ export class SynthEngine {
     this.noteStop();
     try { this.lfo1.stop(); } catch { /* already stopped */ }
     try { this.lfo2.stop(); } catch { /* already stopped */ }
+    try { this.lfo1.disconnect(); } catch { /* ignore */ }
+    try { this.lfo2.disconnect(); } catch { /* ignore */ }
+    // Dispose all poly voices (stops 64 oscillators)
+    for (const v of this.voices) v.dispose();
+    // Disconnect shared chain nodes
+    try { this.voiceSumNode.disconnect(); } catch { /* ignore */ }
+    try { this.filterNode.disconnect(); } catch { /* ignore */ }
+    try { this.filterEnvGain.disconnect(); } catch { /* ignore */ }
+    try { this.volumeNode.disconnect(); } catch { /* ignore */ }
   }
 
   private scheduleFilterEnv(audioTime: number, duration: number): void {

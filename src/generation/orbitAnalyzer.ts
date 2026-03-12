@@ -144,27 +144,28 @@ function detectGrooveFingerprint(): GrooveFingerprint | null {
 
   if (!kickInstrument) return null;
 
-  // Extract kick pattern as step set
+  // Extract kick pattern as step set (no filter — all steps are valid)
+  const stepsPerQuarterNote = Math.round(kickInstrument.loopSize / 4);
   const kickPositions = kickInstrument.hitPositions ?? [];
   const kickSteps = new Set(
-    kickPositions.map((pos) => Math.round(pos * kickInstrument.loopSize)).filter((s) => s < 16),
+    kickPositions.map((pos) => Math.round(pos * kickInstrument.loopSize)),
   );
 
-  // Check for 4-on-floor (hits on steps 0, 4, 8, 12)
-  const fourOnFloorSteps = [0, 4, 8, 12];
+  // Check for 4-on-floor (hits on quarter notes: 0, spq, 2*spq, 3*spq)
+  const fourOnFloorSteps = [0, stepsPerQuarterNote, stepsPerQuarterNote * 2, stepsPerQuarterNote * 3];
   const fourOnFloorHits = fourOnFloorSteps.filter((step) => kickSteps.has(step)).length;
   const isFourOnFloor = fourOnFloorHits >= 3;
 
-  // Check for half-time (kick avoids 4+12, snare mostly on 8)
+  // Check for half-time (kick avoids spq and 3*spq, snare on 2*spq)
   let isHalfTime = false;
   if (snareInstrument) {
     const snarePositions = snareInstrument.hitPositions ?? [];
     const snareSteps = new Set(
-      snarePositions.map((pos) => Math.round(pos * snareInstrument.loopSize)).filter((s) => s < 16),
+      snarePositions.map((pos) => Math.round(pos * snareInstrument.loopSize)),
     );
-    const halfTimeKickMissing = !kickSteps.has(4) && !kickSteps.has(12);
-    const snareOnEight = snareSteps.has(8);
-    isHalfTime = halfTimeKickMissing && snareOnEight;
+    const halfTimeKickMissing = !kickSteps.has(stepsPerQuarterNote) && !kickSteps.has(stepsPerQuarterNote * 3);
+    const snareOnTwoBeats = snareSteps.has(stepsPerQuarterNote * 2);
+    isHalfTime = halfTimeKickMissing && snareOnTwoBeats;
   }
 
   // Suggest genre based on pattern (simple heuristic)
@@ -173,8 +174,8 @@ function detectGrooveFingerprint(): GrooveFingerprint | null {
     suggestedGenre = 'house'; // or techno
   } else if (isHalfTime) {
     suggestedGenre = 'hiphop';
-  } else if (kickSteps.has(0) && kickSteps.has(10)) {
-    suggestedGenre = 'dnb';
+  } else if (kickSteps.has(0) && kickSteps.has(Math.round(stepsPerQuarterNote * 2.5))) {
+    suggestedGenre = 'dnb'; // kick on 1 and ~beat 3
   } else {
     suggestedGenre = 'house';
   }

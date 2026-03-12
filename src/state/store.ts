@@ -16,7 +16,7 @@ import { preloadSample, preloadCustomSample } from '../audio/sampleCache';
 import type { LooperParams, LooperEditorState } from '../types/looper';
 import { DEFAULT_LOOPER_PARAMS, createLooperEditorState } from '../types/looper';
 import { sliceBuffer, deleteRange, silenceRange, insertBuffer, extractPeaks, bufferToBlobUrl } from '../audio/bufferOps';
-import { detectTransients, mapTransientsToGrid, estimateLoopSize, detectBpm } from '../audio/transientDetector';
+import { detectTransients, detectTransientTails, mapTransientsToGrid, estimateLoopSize, detectBpm } from '../audio/transientDetector';
 import { getCachedBpm, setCachedBpm } from '../audio/bpmCache';
 import type { OrbeatSet } from '../types/storage';
 import { base64ToBlob } from '../storage/serializer';
@@ -32,6 +32,7 @@ import { postSync } from '../storage/recordingSync';
 import { createSceneBus, routeOrbitToScene, unrouteOrbitFromScene, destroySceneBus, destroyAllSceneBuses, initSceneBusesFromState } from '../audio/sceneBus';
 import { fetchSampleTree, type SampleEntry } from '../audio/sampleApi';
 import { removeSynthEngine } from '../audio/synthManager';
+import { destroyOrbitChain } from '../audio/orbitEffects';
 import type { MidiSettings } from '../types/midi';
 import { saveMidiSettings, loadMidiSettings } from '../storage/midiSettingsStorage';
 
@@ -374,6 +375,7 @@ export interface StoreState {
   setLooperPeakResolution: (instrumentId: string, resolution: number) => void;
   setDetectedBpm: (instrumentId: string, bpm: number) => void;
   setLooperBpmMultiplier: (instrumentId: string, multiplier: number) => void;
+  autoMatchBpm: (instrumentId: string) => void;
 
   // Generation settings (LLM endpoints, etc.)
   genSettings: GenSettings;
@@ -382,6 +384,12 @@ export interface StoreState {
   // MIDI settings
   midiSettings: MidiSettings;
   setMidiSettings: (settings: Partial<MidiSettings>) => void;
+
+  // MIDI recording
+  midiRecordArmed: boolean;
+  midiRecordMode: 'overdub' | 'replace';
+  setMidiRecordArmed: (armed: boolean) => void;
+  setMidiRecordMode: (mode: 'overdub' | 'replace') => void;
 
   // Sample favorites
   sampleFavorites: string[];
@@ -683,6 +691,8 @@ export const useStore = create<StoreState>((set, get) => ({
     const inst = s.instruments.find((i) => i.id === id);
     // Clean up synth engine if it's a synth instrument
     if (inst?.type === 'synth') removeSynthEngine(id);
+    // Destroy the orbit effect chain (stops oscillators, disconnects all nodes)
+    if (inst) destroyOrbitChain(inst.orbitIndex);
     // Unroute from group bus if grouped
     if (inst) unrouteOrbitFromScene(inst.orbitIndex);
     const instruments = s.instruments.filter((i) => i.id !== id);
@@ -1216,6 +1226,12 @@ export const useStore = create<StoreState>((set, get) => ({
     return { midiSettings: newSettings };
   }),
 
+  // MIDI recording
+  midiRecordArmed: false,
+  midiRecordMode: 'overdub' as const,
+  setMidiRecordArmed: (armed) => set({ midiRecordArmed: armed }),
+  setMidiRecordMode: (mode) => set({ midiRecordMode: mode }),
+
   toggleSampleFavorite: (path: string) => set((state) => {
     const favorites = state.sampleFavorites.includes(path)
       ? state.sampleFavorites.filter(p => p !== path)
@@ -1662,6 +1678,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const fallbackLoopSize = estimateLoopSize(buffer, projectBpm, initialBpm);
     const fallbackMaxPeaks = Math.min(fallbackLoopSize, 64);
     const transients = detectTransients(buffer, 0.5, fallbackMaxPeaks);
+    const transientTails = detectTransientTails(buffer, transients);
     const hitPositions = mapTransientsToGrid(transients, fallbackLoopSize);
 
     set((s) => ({
@@ -1673,6 +1690,7 @@ export const useStore = create<StoreState>((set, get) => ({
           audioBuffer: buffer,
           peaks,
           transients,
+          transientTails,
         },
       },
       instruments: s.instruments.map((i) =>
@@ -1686,15 +1704,16 @@ export const useStore = create<StoreState>((set, get) => ({
       },
     }));
 
-    // If we already have a cached BPM and it matched the fallback, skip async detection
+    // Auto-match speed if we have a cached BPM
     if (cachedBpm > 0) {
-      console.log(`[looper] Using cached BPM: ${cachedBpm}, loopSize: ${fallbackLoopSize}`);
+      get().autoMatchBpm(instrumentId);
+      if (import.meta.env.DEV) console.log(`[looper] Using cached BPM: ${cachedBpm}, loopSize: ${fallbackLoopSize}`);
     }
 
     // Always run async BPM detection to verify/update cache
     detectBpm(buffer).then((detectedBpm) => {
       if (detectedBpm <= 0) {
-        console.log(`[looper] BPM detection returned 0, keeping loopSize=${fallbackLoopSize}`);
+        if (import.meta.env.DEV) console.log(`[looper] BPM detection returned 0, keeping loopSize=${fallbackLoopSize}`);
         return;
       }
 
@@ -1703,23 +1722,29 @@ export const useStore = create<StoreState>((set, get) => ({
 
       // If we already applied this BPM from cache, just ensure it's on the instrument
       const currentInst = get().instruments.find((i) => i.id === instrumentId);
-      if (currentInst?.detectedBpm === detectedBpm) return;
+      if (currentInst?.detectedBpm === detectedBpm) {
+        // Still auto-match speed in case project BPM changed
+        get().autoMatchBpm(instrumentId);
+        return;
+      }
 
       const refinedLoopSize = estimateLoopSize(buffer, projectBpm, detectedBpm);
 
       if (refinedLoopSize === fallbackLoopSize) {
-        // loopSize unchanged, but still store detectedBpm
+        // loopSize unchanged, but still store detectedBpm and auto-match speed
         set((s) => ({
           instruments: s.instruments.map((i) =>
             i.id === instrumentId ? { ...i, detectedBpm } : i
           ),
         }));
-        console.log(`[looper] BPM detected: ${detectedBpm.toFixed(1)}, loopSize unchanged: ${refinedLoopSize}`);
+        get().autoMatchBpm(instrumentId);
+        if (import.meta.env.DEV) console.log(`[looper] BPM detected: ${detectedBpm.toFixed(1)}, loopSize unchanged: ${refinedLoopSize}`);
         return;
       }
 
       const refinedMaxPeaks = Math.min(refinedLoopSize, 64);
       const refinedTransients = detectTransients(buffer, 0.5, refinedMaxPeaks);
+      const refinedTails = detectTransientTails(buffer, refinedTransients);
       const refinedHits = mapTransientsToGrid(refinedTransients, refinedLoopSize);
 
       set((s) => ({
@@ -1728,6 +1753,7 @@ export const useStore = create<StoreState>((set, get) => ({
           [instrumentId]: {
             ...(s.looperEditors[instrumentId] ?? createLooperEditorState()),
             transients: refinedTransients,
+            transientTails: refinedTails,
           },
         },
         instruments: s.instruments.map((i) =>
@@ -1740,9 +1766,10 @@ export const useStore = create<StoreState>((set, get) => ({
           [instrumentId]: refinedHits.map(() => [60]),
         },
       }));
-      console.log(`[looper] BPM detected: ${detectedBpm.toFixed(1)}, loopSize: ${refinedLoopSize} (was ${fallbackLoopSize})`);
+      get().autoMatchBpm(instrumentId);
+      if (import.meta.env.DEV) console.log(`[looper] BPM detected: ${detectedBpm.toFixed(1)}, loopSize: ${refinedLoopSize} (was ${fallbackLoopSize})`);
     }).catch((e) => {
-      console.warn('[looper] BPM detection error:', e);
+      if (import.meta.env.DEV) console.warn('[looper] BPM detection error:', e);
     });
   },
 
@@ -1830,6 +1857,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
     // Re-detect transients
     const transients = detectTransients(newBuffer, 0.5, 16);
+    const transientTails = detectTransientTails(newBuffer, transients);
     const gridSize = inst?.loopSize ?? 16;
     const hitPositions = mapTransientsToGrid(transients, gridSize);
 
@@ -1845,6 +1873,7 @@ export const useStore = create<StoreState>((set, get) => ({
           clipboardEnd: Math.max(editor.selectionStart!, editor.selectionEnd!),
           undoStack,
           transients,
+          transientTails,
           selectionStart: null,
           selectionEnd: null,
         },
@@ -1897,6 +1926,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }
 
     const transients = detectTransients(newBuffer, 0.5, 16);
+    const transientTails = detectTransientTails(newBuffer, transients);
     const gridSize = inst?.loopSize ?? 16;
     const hitPositions = mapTransientsToGrid(transients, gridSize);
 
@@ -1909,6 +1939,7 @@ export const useStore = create<StoreState>((set, get) => ({
           peaks,
           undoStack,
           transients,
+          transientTails,
           clipboardStart: null,
           clipboardEnd: null,
           selectionStart: null,
@@ -1942,6 +1973,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }
 
     const transients = detectTransients(newBuffer, 0.5, 16);
+    const transientTails = detectTransientTails(newBuffer, transients);
     const gridSize = inst?.loopSize ?? 16;
     const hitPositions = mapTransientsToGrid(transients, gridSize);
 
@@ -1954,6 +1986,7 @@ export const useStore = create<StoreState>((set, get) => ({
           peaks,
           undoStack,
           transients,
+          transientTails,
           selectionStart: null,
           selectionEnd: null,
           viewStart: 0,
@@ -1987,6 +2020,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }
 
     const transients = detectTransients(newBuffer, 0.5, 16);
+    const transientTails = detectTransientTails(newBuffer, transients);
     const gridSize = inst?.loopSize ?? 16;
     const hitPositions = mapTransientsToGrid(transients, gridSize);
 
@@ -1999,6 +2033,7 @@ export const useStore = create<StoreState>((set, get) => ({
           peaks,
           undoStack,
           transients,
+          transientTails,
           selectionStart: null,
           selectionEnd: null,
         },
@@ -2030,6 +2065,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }
 
     const transients = detectTransients(newBuffer, 0.5, 16);
+    const transientTails = detectTransientTails(newBuffer, transients);
     const gridSize = inst?.loopSize ?? 16;
     const hitPositions = mapTransientsToGrid(transients, gridSize);
 
@@ -2042,6 +2078,7 @@ export const useStore = create<StoreState>((set, get) => ({
           peaks,
           undoStack,
           transients,
+          transientTails,
           selectionStart: null,
           selectionEnd: null,
         },
@@ -2070,6 +2107,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }
 
     const transients = detectTransients(buffer, 0.5, 16);
+    const transientTails = detectTransientTails(buffer, transients);
     const gridSize = inst?.loopSize ?? 16;
     const hitPositions = mapTransientsToGrid(transients, gridSize);
 
@@ -2082,6 +2120,7 @@ export const useStore = create<StoreState>((set, get) => ({
           peaks,
           undoStack,
           transients,
+          transientTails,
           selectionStart: null,
           selectionEnd: null,
         },
@@ -2100,6 +2139,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const editor = get().looperEditors[instrumentId];
     if (!editor?.audioBuffer) return;
     const transients = detectTransients(editor.audioBuffer, sensitivity, 16);
+    const transientTails = detectTransientTails(editor.audioBuffer, transients);
     const inst = get().instruments.find((i) => i.id === instrumentId);
     const gridSize = inst?.loopSize ?? 16;
     const hitPositions = mapTransientsToGrid(transients, gridSize);
@@ -2107,7 +2147,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({
       looperEditors: {
         ...s.looperEditors,
-        [instrumentId]: { ...editor, transients },
+        [instrumentId]: { ...editor, transients, transientTails },
       },
       instruments: s.instruments.map((i) =>
         i.id === instrumentId ? { ...i, hits: hitPositions.length, hitPositions } : i
@@ -2142,6 +2182,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const newLoopSize = estimateLoopSize(editor.audioBuffer, projectBpm, effectiveBpm);
     const maxPeaks = Math.min(newLoopSize, 64);
     const transients = detectTransients(editor.audioBuffer, 0.5, maxPeaks);
+    const transientTails = detectTransientTails(editor.audioBuffer, transients);
     const hitPositions = mapTransientsToGrid(transients, newLoopSize);
 
     set((s) => ({
@@ -2152,13 +2193,27 @@ export const useStore = create<StoreState>((set, get) => ({
       ),
       looperEditors: {
         ...s.looperEditors,
-        [instrumentId]: { ...editor, transients },
+        [instrumentId]: { ...editor, transients, transientTails },
       },
       gridNotes: {
         ...s.gridNotes,
         [instrumentId]: hitPositions.map(() => [60]),
       },
     }));
+
+    // Auto-match speed after multiplier change
+    get().autoMatchBpm(instrumentId);
+  },
+
+  autoMatchBpm: (instrumentId) => {
+    const inst = get().instruments.find((i) => i.id === instrumentId);
+    if (!inst) return;
+    const detectedBpm = inst.detectedBpm ?? 0;
+    if (detectedBpm <= 0) return;
+    const multiplier = inst.bpmMultiplier ?? 1;
+    const projectBpm = get().bpm;
+    const speed = Math.max(0.25, Math.min(4, projectBpm / (detectedBpm * multiplier)));
+    get().updateLooperParams(instrumentId, { speed });
   },
 
   // Set (project) management

@@ -60,6 +60,8 @@ export function LooperToolbar({ instrumentId, color, sensitivity, onSensitivityC
   const setDetectedBpm = useStore((s) => s.setDetectedBpm);
   const setLooperBpmMultiplier = useStore((s) => s.setLooperBpmMultiplier);
   const updateLooperParams = useStore((s) => s.updateLooperParams);
+  const autoMatchBpm = useStore((s) => s.autoMatchBpm);
+  const projectBpm = useStore((s) => s.bpm);
 
   const [editingBpm, setEditingBpm] = useState(false);
   const [bpmInput, setBpmInput] = useState('');
@@ -73,6 +75,12 @@ export function LooperToolbar({ instrumentId, color, sensitivity, onSensitivityC
   const detectedBpm = instrument?.detectedBpm ?? 0;
   const bpmMultiplier = instrument?.bpmMultiplier ?? 1;
   const isReversed = instrument?.looperParams?.reverse ?? false;
+  const currentSpeed = instrument?.looperParams?.speed ?? 1;
+
+  // Check if speed is synced to project BPM
+  const idealSpeed = detectedBpm > 0 ? projectBpm / (detectedBpm * bpmMultiplier) : 0;
+  const isSynced = idealSpeed > 0 && Math.abs(currentSpeed - idealSpeed) / idealSpeed < 0.01;
+  const effectiveBpm = detectedBpm > 0 ? (detectedBpm * bpmMultiplier * currentSpeed) : 0;
 
   const btnClass = (enabled: boolean) =>
     `px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider rounded transition-colors ${
@@ -226,6 +234,29 @@ export function LooperToolbar({ instrumentId, color, sensitivity, onSensitivityC
         <button className={mulBtnClass(1)} onClick={() => setLooperBpmMultiplier(instrumentId, 1)} title="Normal">1×</button>
         <button className={mulBtnClass(0.5)} onClick={() => setLooperBpmMultiplier(instrumentId, 0.5)} title="Double-time (halve loop length)">×2</button>
       </div>
+
+      {/* SYNC button + effective BPM */}
+      <button
+        className={`px-2 py-0.5 text-[9px] font-medium uppercase tracking-wider rounded transition-colors cursor-pointer ml-1 ${
+          isSynced
+            ? 'bg-cyan-500/20 text-cyan-400'
+            : detectedBpm > 0
+              ? 'text-text-primary hover:bg-white/10'
+              : 'text-text-secondary/30 cursor-default'
+        }`}
+        disabled={detectedBpm <= 0}
+        onClick={() => detectedBpm > 0 && autoMatchBpm(instrumentId)}
+        title={detectedBpm > 0
+          ? `Sync speed to project BPM (${projectBpm}). Current effective: ${effectiveBpm.toFixed(0)} BPM`
+          : 'No BPM detected — cannot sync'}
+      >
+        Sync
+      </button>
+      {effectiveBpm > 0 && !isSynced && (
+        <span className="text-[8px] text-text-secondary/40 font-mono">
+          {effectiveBpm.toFixed(0)}
+        </span>
+      )}
 
       <div className="w-px h-4 bg-border/40 mx-1" />
 

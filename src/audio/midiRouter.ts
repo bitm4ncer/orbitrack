@@ -3,12 +3,26 @@
 import { useStore } from '../state/store';
 import { onMidiCC, onMidiNote, isMidiEnabled } from './midiController';
 import { getSynthEngine } from './synthManager';
-import { triggerSample } from './sampler';
+import { triggerSample, loadSamples } from './sampler';
+import { initAudio } from './engine';
 import type { MidiCCMapping, MidiNoteMapping } from '../types/midi';
 
 let unsubscribeCC: (() => void) | null = null;
 let unsubscribeNote: (() => void) | null = null;
 const heldMidiNotes = new Map<number, number>();
+
+let audioReady = false;
+async function ensureAudioReady(): Promise<boolean> {
+  if (audioReady) return true;
+  try {
+    await initAudio();
+    await loadSamples();
+    audioReady = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function startMidiRouting(
   ccMappings: MidiCCMapping[],
@@ -31,8 +45,14 @@ export function startMidiRouting(
   unsubscribeNote = onMidiNote((mapping, velocity) => {
     const noteNumber = (mapping as any).note;
 
-    // Route MIDI notes to selected instrument (synth or sampler)
-    routeMidiNote(noteNumber, velocity);
+    // Ensure audio context is started (needs user gesture — MIDI input counts)
+    if (!audioReady) {
+      ensureAudioReady().then((ok) => {
+        if (ok) routeMidiNote(noteNumber, velocity);
+      });
+    } else {
+      routeMidiNote(noteNumber, velocity);
+    }
 
     // Also check for explicit mappings
     const applicableMappings = noteMappings.filter(m => m.note === noteNumber);
@@ -64,21 +84,24 @@ function routeMidiNote(noteNumber: number, velocity: number): void {
       const engine = getSynthEngine(inst.id, inst.orbitIndex, inst.engineParams);
 
       if (velocity > 0) {
-        // Note on - synth handles true polyphony with 8 voices
+        // Note on — velocity arrives as 0-1, noteOnNow expects 0-127
         heldMidiNotes.set(noteNumber, noteNumber);
-        engine.noteOnNow(noteNumber, velocity);
+        engine.noteOnNow(noteNumber, velocity * 127);
       } else {
-        // Note off - release the synth voice
+        // Note off - release the specific voice for this note
         heldMidiNotes.delete(noteNumber);
-        if (heldMidiNotes.size === 0) {
-          engine.noteOff();
-        }
+        engine.noteOffForNote(noteNumber);
       }
     } else if (inst.type === 'sampler' && inst.sampleName) {
       if (velocity > 0) {
-        // Note on - trigger sample with velocity-scaled volume
+        // Note on — pitch-shift from MIDI note, velocity as dB attenuation
         heldMidiNotes.set(noteNumber, noteNumber);
-        triggerSample(inst.sampleName, undefined, inst.volume * velocity, 1.0);
+        const rootNote = inst.samplerParams?.rootNote ?? 60;
+        const speed = (inst.samplerParams?.speed ?? 1) * Math.pow(2, (noteNumber - rootNote) / 12);
+        // velocity 0-1 → dB: 1.0 = 0dB, 0.5 ≈ -6dB, 0.1 ≈ -20dB
+        const velocityDb = 20 * Math.log10(Math.max(0.001, velocity));
+        const volume = inst.volume + velocityDb;
+        triggerSample(inst.sampleName, undefined, volume, speed);
       } else {
         // Note off - just remove from tracking (sample plays to completion)
         heldMidiNotes.delete(noteNumber);
@@ -112,12 +135,14 @@ function routeCCMessage(mapping: MidiCCMapping, value: number): void {
 
     case 'effectParam':
       if (mapping.orbitIndex !== undefined && mapping.effectIndex !== undefined && mapping.paramName) {
-        console.log('[MIDI] Effect param:', {
-          orbitIndex: mapping.orbitIndex,
-          effectIndex: mapping.effectIndex,
-          paramName: mapping.paramName,
-          value,
-        });
+        const instrument = store.instruments.find(i => i.orbitIndex === mapping.orbitIndex);
+        if (instrument) {
+          const effects = store.instrumentEffects[instrument.id] ?? [];
+          const effect = effects[mapping.effectIndex];
+          if (effect) {
+            store.setEffectParam(instrument.id, effect.id, mapping.paramName, value);
+          }
+        }
       }
       break;
 

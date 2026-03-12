@@ -35,6 +35,18 @@ export function VUMeter() {
     // Allocate once outside the draw loop — avoids 16 KB GC pressure every frame
     let dataBuffer: Float32Array | null = null;
 
+    // Cache gradient — only depends on meterW which is constant for this effect lifecycle
+    const ctx0 = canvas.getContext('2d');
+    let meterGradient: CanvasGradient | null = null;
+    if (ctx0) {
+      meterGradient = ctx0.createLinearGradient(0, 0, meterW, 0);
+      meterGradient.addColorStop(0,    '#16a34a'); // dark green
+      meterGradient.addColorStop(0.55, '#22c55e'); // green
+      meterGradient.addColorStop(0.75, '#f59e0b'); // amber
+      meterGradient.addColorStop(0.88, '#f97316'); // orange
+      meterGradient.addColorStop(1.0,  '#ef4444'); // red
+    }
+
     const draw = () => {
       const analyser = getMasterAnalyser();
       const ctx = canvas.getContext('2d');
@@ -94,14 +106,8 @@ export function VUMeter() {
 
       // Level bar (left → right)
       const barW = Math.round(s.level * meterW);
-      if (barW > 0) {
-        const gradient = ctx.createLinearGradient(0, 0, meterW, 0);
-        gradient.addColorStop(0,    '#16a34a'); // dark green
-        gradient.addColorStop(0.55, '#22c55e'); // green
-        gradient.addColorStop(0.75, '#f59e0b'); // amber
-        gradient.addColorStop(0.88, '#f97316'); // orange
-        gradient.addColorStop(1.0,  '#ef4444'); // red
-        ctx.fillStyle = gradient;
+      if (barW > 0 && meterGradient) {
+        ctx.fillStyle = meterGradient;
         ctx.fillRect(0, 1, barW, CANVAS_H - 2);
       }
 

@@ -23,6 +23,7 @@ import { initRecordingSync } from './storage/recordingSync';
 import { restoreAutosave, initSessionAutosave } from './storage/sessionAutosave';
 import { initUndoHistory } from './state/undoHistory';
 import { parseShareHash, decodeSetFromUrl } from './storage/urlShare';
+import { perfMonitor } from './debug/perfMonitor';
 
 function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
   const result: SampleEntry[] = [];
@@ -46,6 +47,19 @@ function App() {
   const isSamplerSelected = selectedInstrument?.type === 'sampler';
   const isLooperSelected = selectedInstrument?.type === 'looper';
   const hasSelection = !!selectedInstrument;
+
+  // Performance monitor — toggle with Ctrl+Shift+P or window.__orbeatPerf
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>).__orbeatPerf = perfMonitor;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.code === 'KeyP') {
+        e.preventDefault();
+        perfMonitor.toggle();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const [layerSidebarOpen, setLayerSidebarOpen] = useState(true);
   const [fxSidebarOpen, setFxSidebarOpen] = useState(true);

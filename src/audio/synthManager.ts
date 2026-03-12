@@ -79,3 +79,8 @@ export function getAllEngines(): Map<string, SynthEngine> {
   }
   return result;
 }
+
+/** Number of active synth engines (for perf monitoring). */
+export function getActiveSynthCount(): number {
+  return engines.size;
+}

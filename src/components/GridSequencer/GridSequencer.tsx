@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { useStore } from '../../state/store';
+import { startMidiRecording, stopMidiRecording } from '../../audio/midiRecorder';
 import { noteNameWithOctave, NOTE_NAMES, SCALES, SCALE_KEYS, isNoteInScale } from '../../utils/music';
 import { CHORD_PRESETS } from '../../utils/chordPresets';
 import { GenerateButton } from './GenerateButton';
@@ -90,6 +91,8 @@ export function GridSequencer() {
   const gridResolution = useStore((s) => s.gridResolution);
   const scaleRoot = useStore((s) => s.scaleRoot);
   const scaleType = useStore((s) => s.scaleType);
+  const midiRecordArmed = useStore((s) => s.midiRecordArmed);
+  const midiRecordMode = useStore((s) => s.midiRecordMode);
 
   const dragRef = useRef<DragState | null>(null);
   const gridBodyRef = useRef<HTMLDivElement>(null);
@@ -857,6 +860,34 @@ export function GridSequencer() {
           {scaleSelector}
           <div className="ml-auto flex items-center gap-1">
             <span className="text-[10px] text-text-secondary mr-2">{loopSize} steps</span>
+            {midiRecordArmed && (
+              <button
+                onClick={() => useStore.getState().setMidiRecordMode(midiRecordMode === 'overdub' ? 'replace' : 'overdub')}
+                className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
+                  midiRecordMode === 'replace'
+                    ? 'bg-red-500/20 text-red-400'
+                    : 'bg-white/5 text-text-secondary'
+                }`}
+                title={`Record mode: ${midiRecordMode}`}
+              >
+                {midiRecordMode === 'overdub' ? 'OVR' : 'REP'}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                const next = !midiRecordArmed;
+                useStore.getState().setMidiRecordArmed(next);
+                if (next) startMidiRecording(); else stopMidiRecording();
+              }}
+              className={`w-3.5 h-3.5 rounded-full border transition-all ${
+                midiRecordArmed
+                  ? isPlaying
+                    ? 'bg-red-500 border-red-400 animate-pulse shadow-[0_0_6px_rgba(239,68,68,0.5)]'
+                    : 'bg-red-500/60 border-red-400/60'
+                  : 'bg-transparent border-text-secondary/30 hover:border-red-400/50'
+              }`}
+              title={midiRecordArmed ? 'Disarm MIDI record' : 'Arm MIDI record'}
+            />
           </div>
         </div>
 
@@ -947,6 +978,34 @@ export function GridSequencer() {
 
         <div className="ml-auto flex items-center gap-1">
           <span className="text-[10px] text-text-secondary mr-2">{loopSize} steps</span>
+          {midiRecordArmed && (
+            <button
+              onClick={() => useStore.getState().setMidiRecordMode(midiRecordMode === 'overdub' ? 'replace' : 'overdub')}
+              className={`text-[9px] px-1.5 py-0.5 rounded transition-colors ${
+                midiRecordMode === 'replace'
+                  ? 'bg-red-500/20 text-red-400'
+                  : 'bg-white/5 text-text-secondary'
+              }`}
+              title={`Record mode: ${midiRecordMode}`}
+            >
+              {midiRecordMode === 'overdub' ? 'OVR' : 'REP'}
+            </button>
+          )}
+          <button
+            onClick={() => {
+              const next = !midiRecordArmed;
+              useStore.getState().setMidiRecordArmed(next);
+              if (next) startMidiRecording(); else stopMidiRecording();
+            }}
+            className={`w-3.5 h-3.5 rounded-full border transition-all ${
+              midiRecordArmed
+                ? isPlaying
+                  ? 'bg-red-500 border-red-400 animate-pulse shadow-[0_0_6px_rgba(239,68,68,0.5)]'
+                  : 'bg-red-500/60 border-red-400/60'
+                : 'bg-transparent border-text-secondary/30 hover:border-red-400/50'
+            }`}
+            title={midiRecordArmed ? 'Disarm MIDI record' : 'Arm MIDI record'}
+          />
           {octaveButtons}
         </div>
       </div>

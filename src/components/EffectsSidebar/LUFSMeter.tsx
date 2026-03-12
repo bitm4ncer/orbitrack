@@ -110,6 +110,10 @@ export function LUFSMeter() {
 
     let W = 0;
     let vuDataBuffer: Float32Array | null = null;
+    // Cache gradients — recreated only when meter width changes
+    let cachedVuGrad: CanvasGradient | null = null;
+    let cachedLufsGrad: CanvasGradient | null = null;
+    let cachedGradW = 0;
 
     const draw = (timestamp: number) => {
       const cw = container.clientWidth || 220;
@@ -124,6 +128,23 @@ export function LUFSMeter() {
       if (!vuCtx || !lufsCtx) { rafRef.current = requestAnimationFrame(draw); return; }
 
       const meterW = W - CLIP_W;
+
+      // Rebuild cached gradients when width changes
+      if (cachedGradW !== meterW) {
+        const vuCtx0 = vuCanvas.getContext('2d');
+        const lufsCtx0 = lufsCanvas.getContext('2d');
+        if (vuCtx0 && lufsCtx0) {
+          cachedVuGrad = vuCtx0.createLinearGradient(0, 0, meterW, 0);
+          cachedVuGrad.addColorStop(0,    '#16a34a'); cachedVuGrad.addColorStop(0.55, '#22c55e');
+          cachedVuGrad.addColorStop(0.75, '#f59e0b'); cachedVuGrad.addColorStop(0.88, '#f97316');
+          cachedVuGrad.addColorStop(1.0,  '#ef4444');
+          cachedLufsGrad = lufsCtx0.createLinearGradient(0, 0, W - CLIP_W, 0);
+          cachedLufsGrad.addColorStop(0,    '#1e3a1e'); cachedLufsGrad.addColorStop(0.55, '#22c55e');
+          cachedLufsGrad.addColorStop(0.75, '#f59e0b'); cachedLufsGrad.addColorStop(1.0,  '#ef4444');
+          cachedGradW = meterW;
+        }
+      }
+
       const ls = lufsState.current;
       const vs = vuState.current;
 
@@ -152,12 +173,8 @@ export function LUFSMeter() {
       vuCtx.fillStyle = '#0c0c14'; vuCtx.fillRect(0, 0, W, VU_H);
       vuCtx.fillStyle = '#1a1a28'; vuCtx.fillRect(0, 1, meterW, VU_H - 2);
       const barW = Math.round(vs.level * meterW);
-      if (barW > 0) {
-        const g = vuCtx.createLinearGradient(0, 0, meterW, 0);
-        g.addColorStop(0,    '#16a34a'); g.addColorStop(0.55, '#22c55e');
-        g.addColorStop(0.75, '#f59e0b'); g.addColorStop(0.88, '#f97316');
-        g.addColorStop(1.0,  '#ef4444');
-        vuCtx.fillStyle = g; vuCtx.fillRect(0, 1, barW, VU_H - 2);
+      if (barW > 0 && cachedVuGrad) {
+        vuCtx.fillStyle = cachedVuGrad; vuCtx.fillRect(0, 1, barW, VU_H - 2);
       }
       vuCtx.fillStyle = '#0c0c14';
       for (const { frac } of DB_TICKS) { const x = Math.round(frac * meterW); if (x > 0 && x < meterW) vuCtx.fillRect(x, 0, 1, VU_H); }
@@ -233,13 +250,8 @@ export function LUFSMeter() {
 
       // LUFS bar (integrated) — gradient from green (safe) to red (over target)
       const intFrac = isFinite(intLUFS) ? Math.max(0, Math.min(1, (intLUFS + LUFS_FLOOR) / LUFS_FLOOR)) : 0;
-      if (intFrac > 0) {
-        const ig = lufsCtx.createLinearGradient(0, 0, W - CLIP_W, 0);
-        ig.addColorStop(0,    '#1e3a1e');
-        ig.addColorStop(0.55, '#22c55e');
-        ig.addColorStop(0.75, '#f59e0b');
-        ig.addColorStop(1.0,  '#ef4444');
-        lufsCtx.fillStyle = ig;
+      if (intFrac > 0 && cachedLufsGrad) {
+        lufsCtx.fillStyle = cachedLufsGrad;
         lufsCtx.fillRect(0, 0, Math.round(intFrac * (W - CLIP_W)), barH);
       }
 
