@@ -370,7 +370,12 @@ export function LoopBrowser() {
             <p className="text-[9px] text-accent/70 animate-pulse">Extracting audio…</p>
           )}
           {urlError && (
-            <p className="text-[9px] text-red-400">{urlError}</p>
+            <div className="space-y-1">
+              <p className="text-[9px] text-red-400">{urlError}</p>
+              <p className="text-[9px] text-text-secondary/50">
+                For best results, run cobalt locally — see Settings &gt; Audio
+              </p>
+            </div>
           )}
           {urlSuccess && (
             <p className="text-[9px] text-green-400">Imported!</p>

@@ -268,15 +268,34 @@ function CobaltSettingsSection() {
       <h3 className="text-sm font-semibold text-text-primary mb-4">URL Audio Import</h3>
 
       <div className="space-y-3">
+        {/* Local Docker setup instructions */}
+        <div className="p-3 bg-bg-tertiary/50 rounded border border-border/30 space-y-2">
+          <p className="text-xs font-medium text-text-primary">Run cobalt locally for best results</p>
+          <p className="text-[11px] text-text-secondary/60 leading-relaxed">
+            Local Docker uses your home IP — no blocking by YouTube, TikTok, or SoundCloud.
+          </p>
+          <code className="block text-[10px] text-accent/80 bg-background/50 p-2 rounded border border-border/20 font-mono leading-relaxed select-all break-all">
+            docker run -d -p 9000:9000 -e API_URL=http://localhost:9000 -e API_CORS_WILDCARD=1 ghcr.io/imputnet/cobalt:latest
+          </code>
+          <p className="text-[10px] text-text-secondary/40">
+            Then set endpoint below to <span className="font-mono text-accent/50">http://localhost:9000</span>
+          </p>
+        </div>
+
         <div className="space-y-1">
           <label className="text-xs font-medium text-text-secondary">Cobalt API Endpoint</label>
           <input
             type="url"
             value={endpoint}
             onChange={(e) => handleEndpointChange(e.target.value)}
-            placeholder={DEFAULT_ENDPOINT}
+            placeholder="http://localhost:9000"
             className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded outline-none focus:border-accent transition-colors"
           />
+          {endpoint === DEFAULT_ENDPOINT && (
+            <p className="text-[10px] text-text-secondary/40">
+              Using default server (some content may be blocked — local Docker recommended)
+            </p>
+          )}
         </div>
 
         <div className="space-y-1">
@@ -303,7 +322,7 @@ function CobaltSettingsSection() {
         </div>
 
         <p className="text-[11px] text-text-secondary/40 leading-relaxed">
-          Powered by <span className="text-accent/60">cobalt.tools</span> — supports TikTok, YouTube, SoundCloud, Instagram & more. You can self-host cobalt or use a community instance.
+          Powered by <a href="https://cobalt.tools" target="_blank" rel="noopener noreferrer" className="text-accent/60 hover:text-accent transition-colors">cobalt.tools</a> — supports TikTok, YouTube, SoundCloud, Instagram & more.
         </p>
       </div>
     </div>

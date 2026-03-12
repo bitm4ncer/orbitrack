@@ -6,7 +6,7 @@
 const COBALT_ENDPOINT_KEY = 'orbitrack_cobalt_endpoint';
 const COBALT_API_KEY_KEY = 'orbitrack_cobalt_api_key';
 
-const DEFAULT_ENDPOINT = 'https://orbeat-cobalt.onrender.com';
+const DEFAULT_ENDPOINT = 'https://orbitrack-cobalt.onrender.com';
 
 export function getCobaltEndpoint(): string {
   try {

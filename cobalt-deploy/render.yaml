@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: cobalt
+    name: orbitrack-cobalt
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
@@ -10,4 +10,4 @@ services:
       - key: API_CORS_WILDCARD
         value: "1"
       - key: API_URL
-        value: https://cobalt-xxxx.onrender.com
+        value: https://orbitrack-cobalt.onrender.com
