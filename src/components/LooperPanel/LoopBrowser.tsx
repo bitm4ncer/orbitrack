@@ -6,6 +6,8 @@ import { getAllCachedBpms } from '../../audio/bpmCache';
 import type { SampleEntry } from '../../audio/sampleApi';
 import type { LooperParams } from '../../types/looper';
 import { DEFAULT_LOOPER_PARAMS } from '../../types/looper';
+import { extractAudioFromUrl } from '../../audio/videoImport';
+import { getCobaltEndpoint, getCobaltApiKey } from '../../storage/cobaltSettings';
 
 function Knob({ label, value, min, max, step = 0.001, decimals = 2, unit = '', color, size = 36, onChange }: {
   label: string; value: number; min: number; max: number;
@@ -74,6 +76,14 @@ export function LoopBrowser() {
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputId = useId();
 
+  // URL import state
+  const [showUrlInput, setShowUrlInput] = useState(false);
+  const [urlValue, setUrlValue] = useState('');
+  const [urlLoading, setUrlLoading] = useState(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
+  const [urlSuccess, setUrlSuccess] = useState(false);
+  const urlAbortRef = useRef<AbortController | null>(null);
+
   // Build BPM lookup from both localStorage cache and currently loaded instruments
   const bpmMap = useMemo(() => {
     const map: Record<string, number> = { ...getAllCachedBpms() };
@@ -110,6 +120,16 @@ export function LoopBrowser() {
       const folder: SampleEntry = {
         name: 'Imported', path: '__imported_loops__', type: 'folder',
         children: importedLoops.map((c) => ({ name: c.name, path: c.key, type: 'file' as const })),
+      };
+      walk([folder], 0);
+    }
+
+    // Show URL-imported samples
+    const importedUrls = customSamples.filter((c) => c.key.startsWith('__imported_url__/'));
+    if (importedUrls.length > 0) {
+      const folder: SampleEntry = {
+        name: 'Imported (URL)', path: '__imported_urls__', type: 'folder',
+        children: importedUrls.map((c) => ({ name: c.name, path: c.key, type: 'file' as const })),
       };
       walk([folder], 0);
     }
@@ -172,6 +192,51 @@ export function LoopBrowser() {
     }
     e.target.value = '';
   };
+
+  const handleUrlImport = async () => {
+    const endpoint = getCobaltEndpoint();
+    if (!endpoint) { setUrlError('Configure a cobalt endpoint in Settings > Audio'); return; }
+    if (!urlValue.trim()) return;
+
+    setUrlLoading(true);
+    setUrlError(null);
+    urlAbortRef.current = new AbortController();
+
+    try {
+      const result = await extractAudioFromUrl(urlValue.trim(), {
+        apiEndpoint: endpoint,
+        apiKey: getCobaltApiKey() || undefined,
+        signal: urlAbortRef.current.signal,
+      });
+
+      const url = URL.createObjectURL(result.blob);
+      const name = result.filename.replace(/\.[^.]+$/, '') || 'url-import';
+      const key = `__imported_url__/${name}_${Date.now()}`;
+      addCustomSample({ key, url, name });
+
+      if (selectedId) assignLoop(selectedId, key, name);
+
+      setUrlValue('');
+      setUrlSuccess(true);
+      setTimeout(() => setUrlSuccess(false), 2500);
+    } catch (e: unknown) {
+      if ((e as Error).name !== 'AbortError') {
+        setUrlError((e as Error).message || 'Import failed');
+      }
+    } finally {
+      setUrlLoading(false);
+      urlAbortRef.current = null;
+    }
+  };
+
+  const handleUrlCancel = () => {
+    urlAbortRef.current?.abort();
+    setUrlLoading(false);
+    setUrlError(null);
+  };
+
+  // Cleanup abort on unmount
+  useEffect(() => () => { urlAbortRef.current?.abort(); }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setFocusIdx((i) => Math.min(i + 1, displayList.length - 1)); }
@@ -244,19 +309,74 @@ export function LoopBrowser() {
         </div>
       )}
 
-      {/* Loop Browser header + Import */}
+      {/* Loop Browser header + Import + URL */}
       <div className="flex items-center justify-between px-4 pt-3 pb-1 shrink-0">
         <span className="text-[10px] text-text-secondary uppercase tracking-wider font-medium">
           Loop Browser
         </span>
-        <label htmlFor={fileInputId}
-          className="text-[9px] px-2 py-0.5 rounded border border-border hover:border-white/20 text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
-          title="Import loop files">
-          + Import
-          <input id={fileInputId} type="file" accept=".wav,.mp3,.ogg,.flac,.aiff" multiple
-            className="hidden" onChange={handleFileImport} />
-        </label>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => { setShowUrlInput((v) => !v); setUrlError(null); setUrlSuccess(false); }}
+            className={`text-[9px] px-2 py-0.5 rounded border transition-colors cursor-pointer ${
+              showUrlInput
+                ? 'border-accent/50 text-accent bg-accent/10'
+                : 'border-border hover:border-white/20 text-text-secondary hover:text-text-primary'
+            }`}
+            title="Import audio from URL (TikTok, YouTube, SoundCloud…)"
+          >
+            URL
+          </button>
+          <label htmlFor={fileInputId}
+            className="text-[9px] px-2 py-0.5 rounded border border-border hover:border-white/20 text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
+            title="Import loop files">
+            + Import
+            <input id={fileInputId} type="file" accept=".wav,.mp3,.ogg,.flac,.aiff" multiple
+              className="hidden" onChange={handleFileImport} />
+          </label>
+        </div>
       </div>
+
+      {/* URL import bar */}
+      {showUrlInput && (
+        <div className="px-4 py-2 border-b border-border/50 shrink-0 space-y-1.5">
+          <div className="flex gap-1.5">
+            <input
+              type="url"
+              placeholder="Paste video/audio URL…"
+              value={urlValue}
+              onChange={(e) => { setUrlValue(e.target.value); setUrlError(null); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !urlLoading) handleUrlImport(); }}
+              disabled={urlLoading}
+              className="flex-1 bg-bg-tertiary border border-border rounded px-2 py-1 text-[11px] text-text-primary placeholder-text-secondary/40 outline-none focus:border-accent/50 transition-colors disabled:opacity-50"
+            />
+            {urlLoading ? (
+              <button
+                onClick={handleUrlCancel}
+                className="text-[9px] px-2 py-0.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer shrink-0"
+              >
+                Cancel
+              </button>
+            ) : (
+              <button
+                onClick={handleUrlImport}
+                disabled={!urlValue.trim()}
+                className="text-[9px] px-2 py-0.5 rounded border border-accent/30 text-accent hover:bg-accent/10 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
+              >
+                Go
+              </button>
+            )}
+          </div>
+          {urlLoading && (
+            <p className="text-[9px] text-accent/70 animate-pulse">Extracting audio…</p>
+          )}
+          {urlError && (
+            <p className="text-[9px] text-red-400">{urlError}</p>
+          )}
+          {urlSuccess && (
+            <p className="text-[9px] text-green-400">Imported!</p>
+          )}
+        </div>
+      )}
 
       {/* Search */}
       <div className="px-4 py-2 border-b border-border/50 shrink-0">

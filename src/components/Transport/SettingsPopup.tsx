@@ -5,6 +5,8 @@ import { useStore } from '../../state/store';
 import { MidiSettingsPanel } from '../MidiSettings/MidiSettingsPanel';
 import { getAudioInputDevices, requestMicPermission, getInputLevel, isCapturing, getCaptureDuration, onAudioDeviceChange, type AudioInputDevice } from '../../audio/audioInput';
 import { getAutosaveEnabled, setAutosaveEnabled, getAutosaveInterval, setAutosaveInterval } from '../../storage/sessionAutosave';
+import { getCobaltEndpoint, setCobaltEndpoint, getCobaltApiKey, setCobaltApiKey, DEFAULT_ENDPOINT } from '../../storage/cobaltSettings';
+import { testCobaltConnection } from '../../audio/videoImport';
 
 interface SettingsSection {
   id: string;
@@ -238,6 +240,76 @@ function AudioInputSection() {
   );
 }
 
+function CobaltSettingsSection() {
+  const [endpoint, setEndpoint] = useState(() => getCobaltEndpoint());
+  const [apiKey, setApiKey] = useState(() => getCobaltApiKey());
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+
+  const handleEndpointChange = (val: string) => {
+    setEndpoint(val);
+    setCobaltEndpoint(val);
+    setTestStatus('idle');
+  };
+
+  const handleApiKeyChange = (val: string) => {
+    setApiKey(val);
+    setCobaltApiKey(val);
+    setTestStatus('idle');
+  };
+
+  const handleTest = async () => {
+    setTestStatus('testing');
+    const ok = await testCobaltConnection(endpoint, apiKey || undefined);
+    setTestStatus(ok ? 'ok' : 'fail');
+  };
+
+  return (
+    <div className="border-t border-border/30 pt-4 mt-4">
+      <h3 className="text-sm font-semibold text-text-primary mb-4">URL Audio Import</h3>
+
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-text-secondary">Cobalt API Endpoint</label>
+          <input
+            type="url"
+            value={endpoint}
+            onChange={(e) => handleEndpointChange(e.target.value)}
+            placeholder={DEFAULT_ENDPOINT}
+            className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded outline-none focus:border-accent transition-colors"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-text-secondary">API Key <span className="text-text-secondary/40">(optional)</span></label>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => handleApiKeyChange(e.target.value)}
+            placeholder="For private instances"
+            className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded outline-none focus:border-accent transition-colors"
+          />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleTest}
+            disabled={testStatus === 'testing' || !endpoint.trim()}
+            className="px-3 py-1.5 text-xs font-medium rounded border border-border bg-bg-tertiary hover:bg-bg-tertiary/80 text-text-primary transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+          >
+            {testStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+          </button>
+          {testStatus === 'ok' && <span className="text-xs text-green-400">Connected</span>}
+          {testStatus === 'fail' && <span className="text-xs text-red-400">Connection failed</span>}
+        </div>
+
+        <p className="text-[11px] text-text-secondary/40 leading-relaxed">
+          Powered by <span className="text-accent/60">cobalt.tools</span> — supports TikTok, YouTube, SoundCloud, Instagram & more. You can self-host cobalt or use a community instance.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPopup({ onClose }: { onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<string>('info');
   const masterVolume = useStore((s) => s.masterVolume);
@@ -418,6 +490,7 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
                   </div>
 
                   <AudioInputSection />
+                  <CobaltSettingsSection />
                 </div>
               )}
 

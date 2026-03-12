@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: cobalt
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: API_PORT
+        value: "10000"
+      - key: API_CORS_WILDCARD
+        value: "1"
+      - key: API_URL
+        value: https://cobalt-xxxx.onrender.com
