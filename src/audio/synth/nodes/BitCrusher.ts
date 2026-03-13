@@ -1,7 +1,9 @@
 import { GainNode_ } from './Gain';
 
-// BitCrusher implemented as a simple pass-through with bit reduction
-// Uses a WaveShaperNode to approximate bit crushing without ScriptProcessorNode
+// Reduced from 65536 to 4096 — sufficient for bit-crush staircase effect.
+// At 16 bits (65536 steps), the curve is effectively linear anyway.
+const CURVE_SIZE = 4096;
+
 export class BitCrusher {
   private dryGain: GainNode_;
   private wetGain: GainNode_;
@@ -30,13 +32,15 @@ export class BitCrusher {
   }
 
   setBitDepth(bitDepth: number): void {
-    this.bits = Math.max(1, Math.min(16, Math.round(bitDepth)));
-    const steps = Math.pow(2, this.bits);
-    const nSamples = 65536;
-    const curve = new Float32Array(nSamples);
+    const newBits = Math.max(1, Math.min(16, Math.round(bitDepth)));
+    if (newBits === this.bits && this.node.curve) return; // skip if unchanged
+    this.bits = newBits;
 
-    for (let i = 0; i < nSamples; i++) {
-      const x = (i * 2) / nSamples - 1; // -1 to 1
+    const steps = Math.pow(2, this.bits);
+    const curve = new Float32Array(CURVE_SIZE);
+
+    for (let i = 0; i < CURVE_SIZE; i++) {
+      const x = (i * 2) / CURVE_SIZE - 1;
       curve[i] = Math.round(x * steps) / steps;
     }
 

@@ -353,8 +353,18 @@ export class ModulationEngine {
     return this.readLFO(slotIdx);
   }
 
+  private _frameToggle = false;
+
   private poll = (): void => {
     if (!this.running) return;
+
+    // Throttle to ~30Hz — skip every other frame. 30Hz is well above
+    // perceptible for LFO parameter modulation; halves polling CPU.
+    this._frameToggle = !this._frameToggle;
+    if (this._frameToggle) {
+      this.rafId = requestAnimationFrame(this.poll);
+      return;
+    }
 
     const params = this.getParams();
     const voicesActive = this.hasActiveVoices ? this.hasActiveVoices() : true;

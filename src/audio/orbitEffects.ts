@@ -21,6 +21,7 @@ import { getSuperdoughAudioController } from 'superdough';
 import type { Effect } from '../types/effects';
 import { isAudioReady } from './engine';
 import { DELAY_SYNC_DIVS } from './effectParams';
+import { log } from '../logging/logger';
 
 const MAX_PHASER_STAGES = 12;
 
@@ -140,6 +141,12 @@ const TREMOLO_WAVEFORMS: OscillatorType[] = ['sine', 'triangle', 'square'];
 const RING_WAVEFORMS: OscillatorType[] = ['sine', 'triangle', 'sawtooth'];
 
 interface OrbitEffectChain {
+  // Bypass state — when true, summingNode/synthInputGain route directly to outputNode
+  // and the DSP chain is disconnected from the signal path.
+  bypassed: boolean;
+  _summingNode: AudioNode;   // orbit's summing node (stored for reconnection)
+  _outputNode: AudioNode;    // orbit's output node (stored for reconnection)
+
   // EQ3 (3-band always-on)
   eqLow: BiquadFilterNode;
   eqMid: BiquadFilterNode;
@@ -267,6 +274,10 @@ interface OrbitEffectChain {
 const chains = new Map<number, OrbitEffectChain>();
 const orbitAnalysers = new Map<number, AnalyserNode>();
 
+// Standalone synthInputGain nodes for orbits that have no effect chain yet.
+// These connect directly to the orbit's outputNode until effects are enabled.
+const _standaloneSynthInputs = new Map<number, GainNode>();
+
 export function getOrbitAnalyser(orbitIndex: number): AnalyserNode | null {
   if (orbitAnalysers.has(orbitIndex)) return orbitAnalysers.get(orbitIndex)!;
   if (!isAudioReady()) return null;
@@ -385,7 +396,7 @@ function createChain(ac: AudioContext): OrbitEffectChain {
 
   const dbPreGain = ac.createGain(); dbPreGain.gain.value = 1;
   const dbSaturator = ac.createWaveShaper();
-  dbSaturator.oversample = '4x';
+  dbSaturator.oversample = '2x';
   dbSaturator.curve = makeDistortionCurve(0, 0.3) as Float32Array<ArrayBuffer>;
 
   const dbLowShelf = ac.createBiquadFilter();
@@ -528,7 +539,7 @@ function createChain(ac: AudioContext): OrbitEffectChain {
   distortPreGain.gain.value = 1;
 
   const distortWaveshaper = ac.createWaveShaper();
-  distortWaveshaper.oversample = '4x';
+  distortWaveshaper.oversample = '2x';
   distortWaveshaper.curve = makeDistortionCurve(0, 0) as Float32Array<ArrayBuffer>;
 
   const distortPostGain = ac.createGain();
@@ -927,6 +938,9 @@ function createChain(ac: AudioContext): OrbitEffectChain {
     dbDry, dbWet, dbMix, dbPreGain, dbSaturator, dbLowShelf, dbCompressor, dbOutput,
     limiterComp, limiterMakeup, limiterDry, limiterWet, limiterMix,
     intercepted: false,
+    bypassed: false,
+    _summingNode: null! as AudioNode,   // set in ensureIntercepted
+    _outputNode: null! as AudioNode,    // set in ensureIntercepted
     _prevDistortType: -1,
     _prevDistortDrive: -1,
     _prevBcBits: -1,
@@ -946,6 +960,8 @@ function ensureIntercepted(orbitIndex: number): OrbitEffectChain {
     const ac = summingNode.context as AudioContext;
 
     const chain = createChain(ac);
+    chain._summingNode = summingNode;
+    chain._outputNode = outputNode;
     chains.set(orbitIndex, chain);
 
     try {
@@ -954,12 +970,64 @@ function ensureIntercepted(orbitIndex: number): OrbitEffectChain {
       // May not be connected yet or already intercepted
     }
 
+    // Also disconnect any standalone synthInputGain that was routing direct
+    const standaloneSig = _standaloneSynthInputs.get(orbitIndex);
+    if (standaloneSig) {
+      try { standaloneSig.disconnect(); } catch { /* ignore */ }
+      _standaloneSynthInputs.delete(orbitIndex);
+    }
+
     summingNode.connect(chain.eqLow);
+    chain.synthInputGain.connect(chain.eqLow);
     chain.limiterMix.connect(outputNode);
     chain.intercepted = true;
+    log.debug('orbitFx', `Chain created for orbit ${orbitIndex}`);
   }
 
   return chains.get(orbitIndex)!;
+}
+
+/**
+ * Bypass the effect chain — disconnect DSP nodes from signal path
+ * and route summingNode + synthInputGain directly to outputNode.
+ * Uses smooth gain crossfade to avoid clicks.
+ */
+function bypassChain(chain: OrbitEffectChain): void {
+  if (chain.bypassed) return;
+  const { _summingNode: sumNode, _outputNode: outNode } = chain;
+
+  // Stop any running schedulers
+  chain.tranceGateScheduler.stop();
+
+  // Disconnect chain from signal path
+  try { sumNode.disconnect(chain.eqLow); } catch { /* ignore */ }
+  try { chain.synthInputGain.disconnect(chain.eqLow); } catch { /* ignore */ }
+  try { chain.limiterMix.disconnect(outNode); } catch { /* ignore */ }
+
+  // Route direct: summingNode → outputNode, synthInputGain → outputNode
+  sumNode.connect(outNode);
+  chain.synthInputGain.connect(outNode);
+
+  chain.bypassed = true;
+}
+
+/**
+ * Un-bypass the effect chain — reconnect DSP nodes into signal path.
+ */
+function unbypassChain(chain: OrbitEffectChain): void {
+  if (!chain.bypassed) return;
+  const { _summingNode: sumNode, _outputNode: outNode } = chain;
+
+  // Disconnect direct paths
+  try { sumNode.disconnect(outNode); } catch { /* ignore */ }
+  try { chain.synthInputGain.disconnect(outNode); } catch { /* ignore */ }
+
+  // Reconnect through the chain
+  sumNode.connect(chain.eqLow);
+  chain.synthInputGain.connect(chain.eqLow);
+  chain.limiterMix.connect(outNode);
+
+  chain.bypassed = false;
 }
 
 const BIQUAD_FILTER_TYPES: BiquadFilterType[] = ['lowpass', 'highpass', 'bandpass', 'notch'];
@@ -998,58 +1066,21 @@ export function applyOrbitToneEffects(orbitIndex: number, effects: Effect[], bpm
     || tranceEffect || drumbussEffect || stereoimageEffect || limiterEffect;
 
   if (!hasAny) {
-    const chain = ensureIntercepted(orbitIndex);
-    // Reset all to transparent / bypassed
-    chain.eqLow.gain.value          = 0;
-    chain.eqMid.gain.value          = 0;
-    chain.eqHigh.gain.value         = 0;
-    chain.chorusWetGain.gain.value  = 0;
-    chain.chorusDryGain.gain.value  = 1;
-    chain.phaserWetGain.gain.value  = 0;
-    chain.phaserDryGain.gain.value  = 1;
-    chain.filterLFOGain.gain.value  = 0;
-    chain.filterWetGain.gain.value  = 0;
-    chain.filterDryGain.gain.value  = 1;
-    chain.distortWetGain.gain.value = 0;
-    chain.distortDryGain.gain.value = 1;
-    chain.reverbWetGain.gain.value  = 0;
-    chain.reverbDryGain.gain.value  = 1;
-    chain.delayWetGain.gain.value   = 0;
-    chain.delayDryGain.gain.value   = 1;
-    chain.delayModLFOGain.gain.value = 0;
-    chain.delayTap2Gain.gain.value  = 0;
-    chain.delayTap3Gain.gain.value  = 0;
-    chain.bcWetGain.gain.value      = 0;
-    chain.bcDryGain.gain.value      = 1;
-    chain.eqBandsWetGain.gain.value = 0;
-    chain.eqBandsDryGain.gain.value = 1;
-    chain.tremoloLFOGain.gain.value = 0;
-    chain.tremoloAmpGain.gain.value = 1;
-    chain.ringWetGain.gain.value          = 0;
-    chain.ringDryGain.gain.value          = 1;
-    chain.compressor.threshold.value      = -100;
-    chain.compressor.ratio.value          = 1;
-    chain.compressorMakeup.gain.value     = 1;
-    chain.tranceGateScheduler.stop();
-    chain.tranceDryGain.gain.value        = 1;
-    chain.tranceWetGain.gain.value        = 0;
-    chain.ppDryGain.gain.value            = 1;
-    chain.ppWetGain.gain.value            = 0;
-    chain.ppFeedGain.gain.value           = 0;
-    chain.dbDry.gain.value                = 1;
-    chain.dbWet.gain.value                = 0;
-    chain.siDry.gain.value                = 1; chain.siWet.gain.value = 0;
-    chain.siDL.gain.value = 1; chain.siDR.gain.value = 1;
-    chain.siCL.gain.value = 0; chain.siCR.gain.value = 0;
-    chain.limiterDry.gain.value           = 1;
-    chain.limiterWet.gain.value           = 0;
-    chain.limiterComp.threshold.value     = 0;
-    chain.limiterComp.ratio.value         = 1;
+    // No effects enabled — bypass the chain entirely (or skip creation).
+    // This is the single biggest performance win: audio flows directly from
+    // summingNode → outputNode instead of through 100+ DSP nodes.
+    const chain = chains.get(orbitIndex);
+    if (!chain) return; // no chain exists, nothing to do — orbit routes direct by default
+    bypassChain(chain);
     tranceGatePhaseRef.delete(orbitIndex);
     return;
   }
 
   const chain = ensureIntercepted(orbitIndex);
+
+  // If chain was bypassed, reconnect the DSP nodes into the signal path
+  if (chain.bypassed) unbypassChain(chain);
+
   const now   = chain.eqLow.context.currentTime;
   const ramp  = 0.02; // 20 ms smoothing
 
@@ -1485,13 +1516,28 @@ export function getParaEQBands(orbitIndex: number): BiquadFilterNode[] | null {
 }
 
 export function getSynthOrbitInput(orbitIndex: number): GainNode | null {
-  // Lazily create orbit chain on first synth access (e.g. MIDI input while transport stopped)
+  // If the full chain exists, use its synthInputGain (works for both bypassed and active)
+  const chain = chains.get(orbitIndex);
+  if (chain) return chain.synthInputGain;
+
+  // No chain yet — create a lightweight standalone GainNode routed direct to outputNode.
+  // This avoids creating the full 100+ node chain just because a synth is playing
+  // on an orbit with no effects. The chain will be created later if effects are enabled.
+  if (_standaloneSynthInputs.has(orbitIndex)) return _standaloneSynthInputs.get(orbitIndex)!;
+
   try {
-    const chain = ensureIntercepted(orbitIndex);
-    return chain.synthInputGain;
+    const controller = getSuperdoughAudioController();
+    const orbit = controller.getOrbit(orbitIndex);
+    const outputNode = orbit.output as unknown as AudioNode;
+    const ac = outputNode.context as AudioContext;
+
+    const sig = ac.createGain();
+    sig.gain.value = 1;
+    sig.connect(outputNode);
+    _standaloneSynthInputs.set(orbitIndex, sig);
+    return sig;
   } catch {
-    // Audio context not ready yet — fall back to existing chain if any
-    return chains.get(orbitIndex)?.synthInputGain ?? null;
+    return null;
   }
 }
 
@@ -1558,6 +1604,7 @@ export function destroyOrbitChain(orbitIndex: number): void {
     }
 
     chains.delete(orbitIndex);
+    log.debug('orbitFx', `Chain destroyed for orbit ${orbitIndex}`);
   }
 
   // Clean up analyser side-tap
@@ -1569,6 +1616,13 @@ export function destroyOrbitChain(orbitIndex: number): void {
 
   // Clean up trance gate phase ref
   tranceGatePhaseRef.delete(orbitIndex);
+
+  // Clean up standalone synth input if any
+  const standaloneSig = _standaloneSynthInputs.get(orbitIndex);
+  if (standaloneSig) {
+    try { standaloneSig.disconnect(); } catch { /* ignore */ }
+    _standaloneSynthInputs.delete(orbitIndex);
+  }
 }
 
 /** Number of active orbit effect chains (for perf monitoring). */

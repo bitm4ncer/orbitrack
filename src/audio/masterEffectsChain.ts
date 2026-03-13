@@ -140,6 +140,13 @@ function makeDistortionCurve(type: number, drive: number): Float32Array {
 export interface MasterChain {
   masterInput:  GainNode;
   masterOutput: GainNode;
+  // Bypass state: when true, masterInput routes directly to masterOutput
+  bypassed: boolean;
+  // Curve-cache sentinels — avoid rebuilding WaveShaper curves when params unchanged
+  _prevDistortType: number;
+  _prevDistortDrive: number;
+  _prevBcBits: number;
+  _prevDbDrive: number;
   // EQ3
   eqLow: BiquadFilterNode; eqMid: BiquadFilterNode; eqHigh: BiquadFilterNode;
   // Chorus
@@ -216,7 +223,7 @@ export function createMasterChain(ac: AudioContext): MasterChain {
   const dbWet = ac.createGain(); dbWet.gain.value = 0;
   const dbMix = ac.createGain(); dbMix.gain.value = 1;
   const dbPreGain = ac.createGain(); dbPreGain.gain.value = 1;
-  const dbSaturator = ac.createWaveShaper(); dbSaturator.oversample = '4x';
+  const dbSaturator = ac.createWaveShaper(); dbSaturator.oversample = '2x';
   dbSaturator.curve = makeDistortionCurve(0, 0.3) as Float32Array<ArrayBuffer>;
   const dbLowShelf = ac.createBiquadFilter(); dbLowShelf.type = 'lowshelf'; dbLowShelf.frequency.value = 80; dbLowShelf.gain.value = 3;
   const dbCompressor = ac.createDynamicsCompressor();
@@ -274,7 +281,7 @@ export function createMasterChain(ac: AudioContext): MasterChain {
 
   // Distortion
   const distortPreGain    = ac.createGain(); distortPreGain.gain.value = 1;
-  const distortWaveshaper = ac.createWaveShaper(); distortWaveshaper.oversample = '4x';
+  const distortWaveshaper = ac.createWaveShaper(); distortWaveshaper.oversample = '2x';
   distortWaveshaper.curve = makeDistortionCurve(0, 0) as Float32Array<ArrayBuffer>;
   const distortPostGain   = ac.createGain(); distortPostGain.gain.value = 1;
   const distortTone       = ac.createBiquadFilter(); distortTone.type = 'lowpass'; distortTone.frequency.value = 8000;
@@ -444,6 +451,11 @@ export function createMasterChain(ac: AudioContext): MasterChain {
     ppDelay1, ppDelay2, ppFeedGain, ppHiCut, ppPanL, ppPanR, ppWetGain, ppDryGain, ppMix,
     dbDry, dbWet, dbMix, dbPreGain, dbSaturator, dbLowShelf, dbCompressor, dbOutput,
     limiterComp, limiterMakeup, limiterDry, limiterWet, limiterMix,
+    bypassed: false,
+    _prevDistortType: -1,
+    _prevDistortDrive: -1,
+    _prevBcBits: -1,
+    _prevDbDrive: -1,
   };
 }
 
@@ -500,6 +512,32 @@ export function applyEffectsToChain(chain: MasterChain, effects: Effect[], bpm =
   const drumbussEffect   = effects.find((e) => e.type === 'drumbuss'     && e.enabled);
   const stereoimageEffect= effects.find((e) => e.type === 'stereoimage'  && e.enabled);
   const limiterEffect    = effects.find((e) => e.type === 'limiter'      && e.enabled);
+
+  const hasAny = eq3Effect || chorusEffect || phaserEffect || filterEffect
+    || distortEffect || reverbEffect || delayEffect || bcEffect
+    || parameEffect || tremoloEffect || ringmodEffect || compressorEffect
+    || tranceEffect || drumbussEffect || stereoimageEffect || limiterEffect;
+
+  // True bypass: when no effects are enabled, route masterInput → masterOutput directly,
+  // completely removing ~80 DSP nodes from the signal path.
+  if (!hasAny) {
+    if (!chain.bypassed) {
+      chain.tranceGateScheduler.stop();
+      try { chain.masterInput.disconnect(chain.eqLow); } catch { /* ignore */ }
+      try { chain.limiterMix.disconnect(chain.masterOutput); } catch { /* ignore */ }
+      chain.masterInput.connect(chain.masterOutput);
+      chain.bypassed = true;
+    }
+    return;
+  }
+
+  // Un-bypass if needed
+  if (chain.bypassed) {
+    try { chain.masterInput.disconnect(chain.masterOutput); } catch { /* ignore */ }
+    chain.masterInput.connect(chain.eqLow);
+    chain.limiterMix.connect(chain.masterOutput);
+    chain.bypassed = false;
+  }
 
   const now  = chain.eqLow.context.currentTime;
   const ramp = 0.02;
@@ -560,7 +598,12 @@ export function applyEffectsToChain(chain: MasterChain, effects: Effect[], bpm =
   // Distortion
   if (distortEffect) {
     const p = distortEffect.params; const amount = p.amount ?? 1;
-    chain.distortWaveshaper.curve = makeDistortionCurve(Math.max(0, Math.min(3, Math.round(p.type ?? 0))), p.drive ?? 0.5) as Float32Array<ArrayBuffer>;
+    const dType = Math.max(0, Math.min(3, Math.round(p.type ?? 0)));
+    const dDrive = p.drive ?? 0.5;
+    if (dType !== chain._prevDistortType || dDrive !== chain._prevDistortDrive) {
+      chain._prevDistortType = dType; chain._prevDistortDrive = dDrive;
+      chain.distortWaveshaper.curve = makeDistortionCurve(dType, dDrive) as Float32Array<ArrayBuffer>;
+    }
     chain.distortTone.frequency.setTargetAtTime(p.tone ?? 8000, now, ramp);
     chain.distortPostGain.gain.setTargetAtTime(Math.pow(10, (p.output ?? 0) / 20), now, ramp);
     chain.distortDryGain.gain.setTargetAtTime(Math.cos(amount * Math.PI / 2), now, ramp);
@@ -616,7 +659,11 @@ export function applyEffectsToChain(chain: MasterChain, effects: Effect[], bpm =
   // BitCrusher
   if (bcEffect) {
     const p = bcEffect.params; const amount = p.amount ?? 1;
-    chain.bcBits.curve = makeBitCrushCurve(Math.max(1, Math.min(16, Math.round(p.bits ?? 16)))) as Float32Array<ArrayBuffer>;
+    const bcBitsVal = Math.max(1, Math.min(16, Math.round(p.bits ?? 16)));
+    if (bcBitsVal !== chain._prevBcBits) {
+      chain._prevBcBits = bcBitsVal;
+      chain.bcBits.curve = makeBitCrushCurve(bcBitsVal) as Float32Array<ArrayBuffer>;
+    }
     if (chain.bcSR instanceof AudioWorkletNode) {
       const dsParam = chain.bcSR.parameters.get('downsample');
       if (dsParam) dsParam.setTargetAtTime(Math.max(0, Math.min(1, p.downsample ?? 0)), now, ramp);
@@ -699,7 +746,10 @@ export function applyEffectsToChain(chain: MasterChain, effects: Effect[], bpm =
   if (drumbussEffect) {
     const p = drumbussEffect.params; const drive = Math.max(0, Math.min(1, p.drive ?? 0.3));
     chain.dbPreGain.gain.setTargetAtTime(1 + drive * 9, now, ramp);
-    chain.dbSaturator.curve = makeDistortionCurve(0, drive) as Float32Array<ArrayBuffer>;
+    if (drive !== chain._prevDbDrive) {
+      chain._prevDbDrive = drive;
+      chain.dbSaturator.curve = makeDistortionCurve(0, drive) as Float32Array<ArrayBuffer>;
+    }
     chain.dbLowShelf.gain.setTargetAtTime(p.low ?? 3, now, ramp);
     chain.dbCompressor.ratio.setTargetAtTime(Math.max(1, p.compress ?? 2), now, ramp);
     chain.dbOutput.gain.setTargetAtTime(Math.pow(10, (p.output ?? 0) / 20), now, ramp);

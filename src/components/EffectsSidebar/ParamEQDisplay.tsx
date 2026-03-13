@@ -72,7 +72,7 @@ export function ParamEQDisplay({ orbitIndex, color, bands, onChange }: Props) {
     canvas.width  = W;
     canvas.height = H;
 
-    const fftBuf  = new Uint8Array(1024);
+    let fftBuf  = new Uint8Array(1024);
     const magBuf  = new Float32Array(N_FREQS);
     const phaseBuf = new Float32Array(N_FREQS);
 
@@ -99,8 +99,9 @@ export function ParamEQDisplay({ orbitIndex, color, bands, onChange }: Props) {
         if (fftBuf.length !== binCount) {
           // recreate if size mismatch (shouldn't happen but guard it)
         }
-        const buf = new Uint8Array(binCount);
-        analyser.getByteFrequencyData(buf);
+        if (fftBuf.length !== binCount) fftBuf = new Uint8Array(binCount);
+        analyser.getByteFrequencyData(fftBuf);
+        const buf = fftBuf;
         const nyquist = analyser.context.sampleRate / 2;
 
         ctx.beginPath();

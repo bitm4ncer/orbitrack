@@ -67,6 +67,72 @@ export function useKeyboardShortcuts(): void {
         }
       }
 
+      // Delete selected scene, instrument(s), or effect — Backspace / Delete / X
+      if ((e.code === 'Backspace' || e.code === 'Delete' || e.code === 'KeyX') && !isMod && !e.shiftKey) {
+        const s = useStore.getState();
+        if (s.renamingId) return; // don't delete while renaming
+        if (s.selectedSceneId) {
+          e.preventDefault();
+          s.deleteScene(s.selectedSceneId);
+          return;
+        }
+        if (s.selectedInstrumentIds.length > 0) {
+          e.preventDefault();
+          for (const id of [...s.selectedInstrumentIds]) {
+            useStore.getState().removeInstrument(id);
+          }
+          return;
+        }
+      }
+
+      // Live Mode: digit keys 1-9 launch scene, 0 or Escape stops
+      const state = useStore.getState();
+      if (state.liveMode) {
+        if (e.key >= '1' && e.key <= '9' && !isMod) {
+          const idx = parseInt(e.key, 10) - 1;
+          const scene = state.scenes[idx];
+          if (scene) {
+            e.preventDefault();
+            await ensureAudio();
+            if (!state.isPlaying) {
+              useStore.getState().launchScene(scene.id);
+              toggleTransport();
+            } else {
+              state.launchScene(scene.id);
+            }
+          }
+          return;
+        }
+        if ((e.key === '0' || e.code === 'Escape') && !isMod) {
+          e.preventDefault();
+          state.stopLiveScene();
+          return;
+        }
+
+        // Space in live mode: start first/selected scene or stop all
+        if (e.code === 'Space') {
+          e.preventDefault();
+          await ensureAudio();
+          if (state.isPlaying) {
+            // Stop transport and clear live state
+            toggleTransport();
+            state.stopLiveScene();
+          } else {
+            // Start the selected scene, or the first scene
+            const targetScene = state.scenes.find((s) => s.id === state.selectedSceneId)
+              ?? state.scenes[0];
+            if (targetScene) {
+              // Set scene BEFORE starting transport so first tick filters correctly
+              useStore.getState().launchScene(targetScene.id);
+              toggleTransport();
+            } else {
+              toggleTransport();
+            }
+          }
+          return;
+        }
+      }
+
       if (e.code === 'Space') {
         e.preventDefault();
         await ensureAudio();

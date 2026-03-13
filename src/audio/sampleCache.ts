@@ -5,6 +5,42 @@ import type { SampleEntry } from './sampleApi';
 
 const MAX_CACHE = 50;
 const loaded = new Set<string>();
+/** URLs confirmed to be unreachable (404, timeout, etc.) — avoids retrying */
+const badUrls = new Set<string>();
+
+const FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * Validate that a URL returns audio data before handing it to superdough.
+ * superdough's loadBuffer caches fetch promises permanently, so a 404 poisons
+ * the cache forever. Pre-validating avoids that.
+ */
+async function validateSampleUrl(url: string): Promise<boolean> {
+  if (badUrls.has(url)) return false;
+  // Blob and data URLs are always valid (local)
+  if (url.startsWith('blob:') || url.startsWith('data:')) return true;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const res = await fetch(url, { method: 'HEAD', signal: controller.signal });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      console.warn(`[sampleCache] ${res.status} for ${url.split('/').slice(-2).join('/')}`);
+      badUrls.add(url);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn(`[sampleCache] fetch failed for ${url.split('/').slice(-2).join('/')}:`, err);
+    badUrls.add(url);
+    return false;
+  }
+}
+
+/** Check if a URL is known to be bad (404'd previously) */
+export function isBadSampleUrl(url: string): boolean {
+  return badUrls.has(url);
+}
 
 function evictIfNeeded(): void {
   if (loaded.size >= MAX_CACHE) {
@@ -58,7 +94,13 @@ export async function preloadSample(path: string): Promise<void> {
     const ac = getSdAudioContext();
     if (!ac) { loaded.delete(path); return; }
     const base = SAMPLE_BASE_URL;
-    await loadBuffer(`${base}${path}`, ac, sdKey, 0);
+    const url = `${base}${path}`;
+    // Validate URL before passing to superdough (which caches permanently)
+    if (!await validateSampleUrl(url)) {
+      loaded.delete(path);
+      return;
+    }
+    await loadBuffer(url, ac, sdKey, 0);
   } catch {
     loaded.delete(path); // don't count failed loads
   }

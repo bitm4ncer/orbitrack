@@ -36,20 +36,6 @@ function readSampleDir(dirPath: string, urlPrefix: string): SampleEntry[] {
   return result;
 }
 
-function copyDirSync(src: string, dest: string): void {
-  if (!fs.existsSync(src)) return;
-  fs.mkdirSync(dest, { recursive: true });
-  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-    const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
-    if (entry.isDirectory()) {
-      copyDirSync(srcPath, destPath);
-    } else {
-      fs.copyFileSync(srcPath, destPath);
-    }
-  }
-}
-
 const MIME_TYPES: Record<string, string> = {
   '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg',
@@ -61,17 +47,13 @@ const MIME_TYPES: Record<string, string> = {
 
 export function sampleListPlugin(): Plugin {
   let rootDir: string;
-  let outDir: string;
-  let isBuild: boolean;
-  // Normalised base without trailing slash: '/Orbitrack/' → '/Orbitrack', '/' → ''
+  // Normalised base without trailing slash: '/orbitrack/' → '/orbitrack', '/' → ''
   let basePath: string;
 
   return {
     name: 'sample-list',
     configResolved(config) {
       rootDir = config.root;
-      outDir = path.resolve(config.root, config.build.outDir);
-      isBuild = config.command === 'build';
       const b = config.base ?? '/';
       basePath = b.endsWith('/') ? b.slice(0, -1) : b;
     },
@@ -81,12 +63,20 @@ export function sampleListPlugin(): Plugin {
         const raw = req.url || '';
         const url = basePath && raw.startsWith(basePath) ? raw.slice(basePath.length) : raw;
 
-        // Serve sample tree JSON — only from root samples/ folder
+        // Serve sample tree JSON
         if (url === '/samples.json' || url === '/api/samples') {
           const rootSamples = path.join(rootDir, 'samples');
-          const tree = readSampleDir(rootSamples, 'samples');
+          const publicDir = path.join(rootDir, 'public');
+          let json: string;
+          if (fs.existsSync(rootSamples) && fs.readdirSync(rootSamples).length > 0) {
+            json = JSON.stringify(readSampleDir(rootSamples, 'samples'));
+          } else {
+            // No local samples dir — serve committed manifest from public/
+            const fallback = path.join(publicDir, 'samples.json');
+            json = fs.existsSync(fallback) ? fs.readFileSync(fallback, 'utf-8') : '[]';
+          }
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify(tree));
+          res.end(json);
           return;
         }
 
@@ -106,12 +96,19 @@ export function sampleListPlugin(): Plugin {
           }
         }
 
-        // Serve loop tree JSON — from root loops/ folder
+        // Serve loop tree JSON
         if (url === '/loops.json' || url === '/api/loops') {
           const rootLoops = path.join(rootDir, 'loops');
-          const tree = readSampleDir(rootLoops, 'loops');
+          const publicDir = path.join(rootDir, 'public');
+          let json: string;
+          if (fs.existsSync(rootLoops) && fs.readdirSync(rootLoops).length > 0) {
+            json = JSON.stringify(readSampleDir(rootLoops, 'loops'));
+          } else {
+            const fallback = path.join(publicDir, 'loops.json');
+            json = fs.existsSync(fallback) ? fs.readFileSync(fallback, 'utf-8') : '[]';
+          }
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify(tree));
+          res.end(json);
           return;
         }
 
@@ -135,46 +132,14 @@ export function sampleListPlugin(): Plugin {
       });
     },
     generateBundle() {
-      const rootSamples = path.join(rootDir, 'samples');
-      const rootLoops = path.join(rootDir, 'loops');
       const publicDir = path.join(rootDir, 'public');
 
-      // If local sample/loop dirs exist, scan them to generate manifests.
-      // Otherwise fall back to committed public/samples.json & public/loops.json
-      // (used in CI where sample dirs are not checked out).
-      const hasSampleDir = fs.existsSync(rootSamples) && fs.readdirSync(rootSamples).length > 1;
-      const hasLoopDir = fs.existsSync(rootLoops) && fs.readdirSync(rootLoops).length > 0;
-
-      const sampleJson = hasSampleDir
-        ? JSON.stringify(readSampleDir(rootSamples, 'samples'))
-        : fs.readFileSync(path.join(publicDir, 'samples.json'), 'utf-8');
+      // Emit committed manifests from public/ — audio files are served from R2 CDN.
+      const sampleJson = fs.readFileSync(path.join(publicDir, 'samples.json'), 'utf-8');
       this.emitFile({ type: 'asset', fileName: 'samples.json', source: sampleJson });
 
-      const loopJson = hasLoopDir
-        ? JSON.stringify(readSampleDir(rootLoops, 'loops'))
-        : fs.readFileSync(path.join(publicDir, 'loops.json'), 'utf-8');
+      const loopJson = fs.readFileSync(path.join(publicDir, 'loops.json'), 'utf-8');
       this.emitFile({ type: 'asset', fileName: 'loops.json', source: loopJson });
-    },
-    closeBundle() {
-      if (!isBuild) return;
-
-      const hasCdn = !!process.env.VITE_SAMPLE_CDN;
-
-      if (hasCdn) {
-        // CDN mode: only copy Default/ samples as fallback
-        const defaultSrc = path.join(rootDir, 'samples', 'Default');
-        const defaultDest = path.join(outDir, 'samples', 'Default');
-        copyDirSync(defaultSrc, defaultDest);
-      } else {
-        // No CDN: copy everything (local / dev builds)
-        const rootSamples = path.join(rootDir, 'samples');
-        const distSamples = path.join(outDir, 'samples');
-        copyDirSync(rootSamples, distSamples);
-
-        const rootLoops = path.join(rootDir, 'loops');
-        const distLoops = path.join(outDir, 'loops');
-        copyDirSync(rootLoops, distLoops);
-      }
     },
   };
 }

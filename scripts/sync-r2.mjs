@@ -123,7 +123,9 @@ async function cleanOldPrefixes() {
   }
 }
 
-const root = path.resolve(import.meta.dirname, '..');
+// Accept optional source root as CLI arg (defaults to project root)
+const root = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve(import.meta.dirname, '..');
+console.log(`Source root: ${root}`);
 await syncDir(path.join(root, 'samples'), 'samples');
 await syncDir(path.join(root, 'loops'), 'loops');
 await cleanOldPrefixes();

@@ -37,9 +37,19 @@ export function WaveformView({ sampleUrl, begin, end, attack = 0, color = '#7dd3
       ? sampleUrl
       : SAMPLE_BASE_URL + sampleUrl;
 
-    fetch(url)
-      .then((r) => r.arrayBuffer())
-      .then((buf) => ctx.decodeAudioData(buf))
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+
+    fetch(url, { signal: controller.signal })
+      .then((r) => {
+        clearTimeout(timeout);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.arrayBuffer();
+      })
+      .then((buf) => {
+        if (buf.byteLength === 0) throw new Error('empty response');
+        return ctx.decodeAudioData(buf);
+      })
       .then((decoded) => {
         // Merge channels to mono peak array (512 buckets)
         const buckets = 512;
@@ -68,6 +78,11 @@ export function WaveformView({ sampleUrl, begin, end, attack = 0, color = '#7dd3
         setDuration(0);
       })
       .finally(() => setLoading(false));
+
+    return () => {
+      controller.abort();
+      clearTimeout(timeout);
+    };
   }, [sampleUrl]);
 
   // Sync local begin/end when props change and not dragging

@@ -64,6 +64,7 @@ export function EQCurveDisplay({
     const magMid   = new Float32Array(N_FREQS);
     const magHigh  = new Float32Array(N_FREQS);
     const phaseBuf = new Float32Array(N_FREQS);
+    let fftBuf: Uint8Array | null = null;
 
     const draw = () => {
       rafRef.current = requestAnimationFrame(draw);
@@ -88,8 +89,9 @@ export function EQCurveDisplay({
       const analyser = getOrbitAnalyser(orbitIndex);
       if (analyser) {
         const binCount = analyser.frequencyBinCount;
-        const buf      = new Uint8Array(binCount);
-        analyser.getByteFrequencyData(buf);
+        if (!fftBuf || fftBuf.length !== binCount) fftBuf = new Uint8Array(binCount);
+        analyser.getByteFrequencyData(fftBuf);
+        const buf = fftBuf;
         const nyquist = analyser.context.sampleRate / 2;
 
         ctx.beginPath();

@@ -5,6 +5,7 @@ import { AddEffectMenu } from './AddEffectMenu';
 import { LUFSMeter } from './LUFSMeter';
 import { WaveformView } from './WaveformView';
 import { EffectKnob } from './EffectKnob';
+import { PerformanceMonitor } from './PerformanceMonitor';
 import { type RecordingFormat } from '../../audio/recorder';
 
 function formatDuration(ms: number): string {
@@ -567,6 +568,7 @@ export function EffectsSidebar() {
   const reorderSceneEffects = useStore((s) => s.reorderSceneEffects);
   const masterEffects   = useStore((s) => s.masterEffects);
   const isRecording     = useStore((s) => s.isRecording);
+  const showPerformanceMonitor = useStore((s) => s.showPerformanceMonitor);
 
   // 'master' | 'instrument' | 'scene'
   const [fxView, setFxView] = useState<'master' | 'instrument' | 'scene'>('master');
@@ -706,6 +708,9 @@ export function EffectsSidebar() {
             : selectedId && <AddEffectMenu instrumentId={selectedId} />
         }
       </div>
+
+      {/* Performance Monitor */}
+      {showPerformanceMonitor && <PerformanceMonitor />}
 
       {/* Master section */}
       <div className="shrink-0 border-t border-border" style={{ padding: 20 }}>

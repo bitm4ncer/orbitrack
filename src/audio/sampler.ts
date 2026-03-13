@@ -6,15 +6,27 @@ let previewPlayer: Tone.Player | null = null;
 
 // Legacy aliases for default instruments
 const LEGACY_ALIASES: Record<string, string> = {
-  kick: 'samples/Default/kick.wav',
-  snare: 'samples/Default/snare.wav',
-  hihat: 'samples/Default/hihat.wav',
-  clap: 'samples/Default/clap.wav',
+  kick: 'samples/Akei/MPC-3000/Drums/MPC-3000_Kick_001.wav',
+  snare: 'samples/Akei/MPC-3000/Drums/MPC-3000_Snare_001.wav',
+  hihat: 'samples/Akei/MPC-3000/Drums/MPC-3000_HiHat_001.wav',
+  clap: 'samples/Akei/MPC-3000/Drums/MPC-3000_Clap_001.wav',
 };
 
 function ensureOutput(): Tone.Gain {
-  // Recreate if output was disposed or belongs to a stale audio context
-  if (!output || output.disposed) {
+  const ctx = Tone.getContext();
+  const isStale = !output || output.disposed || output.context !== ctx;
+
+  if (isStale) {
+    // Context changed — all existing players are stale, clear them
+    if (output && output.context !== ctx) {
+      for (const [, entry] of players) {
+        try { entry.player.dispose(); } catch { /* ok */ }
+      }
+      players.clear();
+    }
+    if (output && !output.disposed) {
+      try { output.dispose(); } catch { /* ok */ }
+    }
     output = new Tone.Gain(1).toDestination();
   }
   return output;

@@ -31,6 +31,7 @@ export class Reverb {
   private node: ConvolverNode;
   private dryGain: GainNode_;
   private wetGain: GainNode_;
+  private _currentType = '';
 
   constructor(ac: AudioContext) {
     this.ac = ac;
@@ -60,8 +61,10 @@ export class Reverb {
   }
 
   setType(val: string): void {
+    if (val === this._currentType) return; // skip if unchanged
     const config = REVERB_CONFIGS[val];
     if (!config) return;
+    this._currentType = val;
     this.node.buffer = createReverbBuffer(this.ac, config.duration, config.decay);
   }
 }

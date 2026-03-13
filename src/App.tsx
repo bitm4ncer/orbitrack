@@ -8,6 +8,7 @@ import { LooperEditor } from './components/LooperPanel/LooperEditor';
 import { LoopBrowser } from './components/LooperPanel/LoopBrowser';
 import { EffectsSidebar } from './components/EffectsSidebar/EffectsSidebar';
 import { TrackTimeline } from './components/TrackMode/TrackTimeline';
+import { LiveBar } from './components/LiveMode/LiveBar';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { usePianoKeyboard } from './hooks/usePianoKeyboard';
 import { useResizable } from './hooks/useResizable';
@@ -24,6 +25,7 @@ import { restoreFromSetId, restoreLegacyAutosave, initSessionAutosave, getLastSe
 import { initUndoHistory } from './state/undoHistory';
 import { parseShareHash, decodeSetFromUrl } from './storage/urlShare';
 import { perfMonitor } from './debug/perfMonitor';
+import { LogConsole } from './components/LogConsole/LogConsole';
 
 function flattenFiles(entries: SampleEntry[]): SampleEntry[] {
   const result: SampleEntry[] = [];
@@ -40,6 +42,9 @@ function App() {
   useMidiSetup();
   useMidiClock();
   const trackMode = useStore((s) => s.trackMode);
+  const liveMode = useStore((s) => s.liveMode);
+  const logEnabled = useStore((s) => s.logEnabled);
+  const showLogConsole = useStore((s) => s.showLogConsole);
   const selectedId = useStore((s) => s.selectedInstrumentId);
   const instruments = useStore((s) => s.instruments);
   const selectedInstrument = instruments.find((i) => i.id === selectedId);
@@ -282,6 +287,15 @@ function App() {
       >
         {trackMode && <TrackTimeline />}
       </div>
+
+      <div
+        className="overflow-hidden shrink-0 transition-[max-height] duration-300"
+        style={{ maxHeight: liveMode ? '340px' : '0px' }}
+      >
+        {liveMode && <LiveBar />}
+      </div>
+
+      {logEnabled && showLogConsole && <LogConsole />}
 
       <TransportBar />
     </div>

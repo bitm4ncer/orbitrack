@@ -1,8 +1,9 @@
 import * as Tone from 'tone';
-import { samples, loadBuffer, getAudioContext as getSdAudioContext, loadWorklets } from 'superdough';
+import { samples, loadBuffer, getAudioContext as getSdAudioContext, loadWorklets, setMaxPolyphony } from 'superdough';
 import { initRoutingEngine } from './routingEngine';
 import { initSceneBusesFromState } from './sceneBus';
 import { SAMPLE_BASE_URL } from './sampleBaseUrl';
+import { log, setLogAudioContext } from '../logging/logger';
 
 let initialized = false;
 
@@ -37,17 +38,17 @@ console.log = (...args: unknown[]) => {
 // registration those sounds are never found and playback silently fails.
 samples({
   _base: SAMPLE_BASE_URL,
-  kick: 'samples/Default/kick.wav',
-  snare: 'samples/Default/snare.wav',
-  hihat: 'samples/Default/hihat.wav',
-  clap: 'samples/Default/clap.wav',
+  kick: 'samples/Akei/MPC-3000/Drums/MPC-3000_Kick_001.wav',
+  snare: 'samples/Akei/MPC-3000/Drums/MPC-3000_Snare_001.wav',
+  hihat: 'samples/Akei/MPC-3000/Drums/MPC-3000_HiHat_001.wav',
+  clap: 'samples/Akei/MPC-3000/Drums/MPC-3000_Clap_001.wav',
 });
 
 const DEFAULT_SAMPLES: Record<string, string> = {
-  kick: 'samples/Default/kick.wav',
-  snare: 'samples/Default/snare.wav',
-  hihat: 'samples/Default/hihat.wav',
-  clap: 'samples/Default/clap.wav',
+  kick: 'samples/Akei/MPC-3000/Drums/MPC-3000_Kick_001.wav',
+  snare: 'samples/Akei/MPC-3000/Drums/MPC-3000_Snare_001.wav',
+  hihat: 'samples/Akei/MPC-3000/Drums/MPC-3000_HiHat_001.wav',
+  clap: 'samples/Akei/MPC-3000/Drums/MPC-3000_Clap_001.wav',
 };
 
 export async function initAudio(): Promise<void> {
@@ -61,6 +62,8 @@ export async function initAudio(): Promise<void> {
   const sdCtx = getSdAudioContext() as AudioContext;
   Tone.setContext(sdCtx);
   await Tone.start();
+  setLogAudioContext(sdCtx);
+  log.info('engine', 'AudioContext created', { sampleRate: sdCtx.sampleRate, state: sdCtx.state, baseLatency: sdCtx.baseLatency });
 
   // 200ms lookahead: buffers against brief main-thread blocks without
   // throwing off the step-counter logic in transport.ts (which uses
@@ -71,24 +74,37 @@ export async function initAudio(): Promise<void> {
   // This also causes superdough to fully initialize its internal gainNode.
   try {
     await loadWorklets();
+    log.info('engine', 'Superdough worklets loaded');
   } catch (e) {
     console.warn('[engine] superdough worklets failed to load:', e);
+    log.error('engine', 'Superdough worklets failed to load', e);
   }
 
   // Load our bitcrusher sample-rate-reduction AudioWorklet
   try {
     await sdCtx.audioWorklet.addModule(import.meta.env.BASE_URL + 'bitcrusher-processor.js');
+    log.info('engine', 'Bitcrusher worklet loaded');
   } catch (e) {
     console.warn('[engine] bitcrusher worklet failed to load:', e);
+    log.error('engine', 'Bitcrusher worklet failed to load', e);
   }
 
   // Pre-decode all default samples into superdough's buffer cache so the
   // first note plays immediately without a loading delay.
   const base = SAMPLE_BASE_URL;
   const ac = getSdAudioContext();
-  await Promise.all(
-    Object.entries(DEFAULT_SAMPLES).map(([name, path]) => loadBuffer(`${base}${path}`, ac, name, 0))
+  await Promise.allSettled(
+    Object.entries(DEFAULT_SAMPLES).map(([name, path]) =>
+      loadBuffer(`${base}${path}`, ac, name, 0).catch((e) =>
+        console.warn(`[engine] default sample "${name}" failed to load:`, e)
+      )
+    )
   );
+
+  // Cap superdough polyphony — 128 default is too many concurrent AudioNode
+  // trees for weak hardware. 48 voices is plenty for a step sequencer.
+  setMaxPolyphony(48);
+  log.info('engine', 'Polyphony capped at 48 voices');
 
   // Wire superdough output → masterGain → masterAnalyser → destination.
   // Called after loadWorklets() so superdough's gainNode is guaranteed to exist.
@@ -96,6 +112,7 @@ export async function initAudio(): Promise<void> {
   initRoutingEngine();
 
   initialized = true;
+  log.info('engine', 'Audio engine initialized', { sampleRate: sdCtx.sampleRate, lookAhead: 0.2 });
 
   // Re-initialize scene buses if scenes exist in store (e.g. from autosave restore)
   initSceneBusesFromStore();
@@ -126,5 +143,6 @@ export function registerSampleForPlayback(pathOrUrl: string, blobUrl?: string): 
     });
   }
 
+  log.debug('engine', `Sample registered: ${key}`, { path: pathOrUrl, blob: !!blobUrl });
   return key;
 }

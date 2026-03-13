@@ -13,6 +13,7 @@ import { DEFAULT_EFFECT_PARAMS } from '../audio/effectParams';
 import { loadSample } from '../audio/sampler';
 import { registerSampleForPlayback } from '../audio/engine';
 import { preloadSample, preloadCustomSample } from '../audio/sampleCache';
+import { SAMPLE_BASE_URL } from '../audio/sampleBaseUrl';
 import type { LooperParams, LooperEditorState } from '../types/looper';
 import { DEFAULT_LOOPER_PARAMS, createLooperEditorState } from '../types/looper';
 import { sliceBuffer, deleteRange, silenceRange, insertBuffer, extractPeaks, bufferToBlobUrl, revokeBlobUrl } from '../audio/bufferOps';
@@ -200,6 +201,18 @@ export interface StoreState {
   arrangement: ArrangementStep[];
   trackPosition: number;
 
+  // Live Mode (Ableton-style session view)
+  liveMode: boolean;
+  liveLaunchMode: 'queue' | 'stack';
+  liveActiveSceneId: string | null;
+  liveQueuedSceneId: string | null;
+  liveLaunchQuantize: 1 | 2 | 4 | 8;
+  liveBarCountdown: number;
+  liveBarsElapsed: number;
+  // Stack mode: multiple scenes active simultaneously
+  liveActiveSceneIds: string[];
+  liveQueuedToggles: string[]; // scene IDs queued to toggle at next bar boundary
+
   // Transport actions
   setBpm: (bpm: number) => void;
   setStepsPerBeat: (stepsPerBeat: number) => void;
@@ -269,6 +282,14 @@ export interface StoreState {
   spinMode?: boolean;
   orbitDisplayMode: 'classic' | 'led' | 'rotate' | 'chase';
   setOrbitDisplayMode: (mode: 'classic' | 'led' | 'rotate' | 'chase') => void;
+  showPerformanceMonitor: boolean;
+  setShowPerformanceMonitor: (enabled: boolean) => void;
+
+  // Logging
+  logEnabled: boolean;
+  showLogConsole: boolean;
+  setLogEnabled: (enabled: boolean) => void;
+  setShowLogConsole: (show: boolean) => void;
 
   // Grid resolution: 1 = every step (1/16), 2 = 1/8, 4 = 1/4, 8 = 1/2
   gridResolution: number;
@@ -327,6 +348,7 @@ export interface StoreState {
   setSceneVolume: (groupId: string, volume: number) => void;
   toggleSceneCollapsed: (groupId: string) => void;
   renameScene: (groupId: string, name: string) => void;
+  deleteScene: (sceneId: string) => void;
   setRenamingId: (id: string | null) => void;
   addSceneEffect: (groupId: string, type: EffectType) => void;
   removeSceneEffect: (groupId: string, effectId: string) => void;
@@ -346,6 +368,17 @@ export interface StoreState {
   duplicateArrangementStep: (stepId: string) => void;
   setTrackPosition: (index: number) => void;
   setTrackStepProgress: (progress: number) => void;
+
+  // Live Mode actions
+  toggleLiveMode: () => void;
+  setLiveLaunchMode: (mode: 'queue' | 'stack') => void;
+  launchScene: (sceneId: string) => void;
+  stopLiveScene: () => void;
+  setLiveLaunchQuantize: (bars: 1 | 2 | 4 | 8) => void;
+  setLiveBarCountdown: (n: number) => void;
+  setLiveBarsElapsed: (n: number) => void;
+  switchToQueuedScene: () => void;
+  processStackToggles: () => void;
 
   // Recording
   isRecording: boolean;
@@ -439,6 +472,7 @@ export interface StoreState {
     scaleType: string;
     trackMode: boolean;
     arrangement: ArrangementStep[];
+    liveLaunchQuantize: 1 | 2 | 4 | 8;
   };
   loadSet: (set: OrbitrackSet) => void;
   newSet: () => void;
@@ -468,6 +502,17 @@ export const useStore = create<StoreState>((set, get) => ({
   trackMode: false,
   arrangement: [],
   trackPosition: -1,
+
+  // Live Mode
+  liveMode: false,
+  liveLaunchMode: 'queue' as 'queue' | 'stack',
+  liveActiveSceneId: null,
+  liveQueuedSceneId: null,
+  liveLaunchQuantize: 1 as 1 | 2 | 4 | 8,
+  liveBarCountdown: 0,
+  liveBarsElapsed: 0,
+  liveActiveSceneIds: [] as string[],
+  liveQueuedToggles: [] as string[],
 
   // Grid sequencer — pre-populate C4 (MIDI 60) for all default instrument hits
   gridNotes: (() => {
@@ -501,6 +546,25 @@ export const useStore = create<StoreState>((set, get) => ({
   setOrbitDisplayMode: (mode: 'classic' | 'led' | 'rotate' | 'chase') => {
     localStorage.setItem('orbitrack:orbitDisplayMode', mode);
     set({ orbitDisplayMode: mode });
+  },
+
+  showPerformanceMonitor: localStorage.getItem('orbitrack:showPerformanceMonitor') === 'true',
+  setShowPerformanceMonitor: (enabled: boolean) => {
+    localStorage.setItem('orbitrack:showPerformanceMonitor', enabled ? 'true' : 'false');
+    set({ showPerformanceMonitor: enabled });
+  },
+
+  logEnabled: localStorage.getItem('orbitrack:logEnabled') === 'true',
+  showLogConsole: localStorage.getItem('orbitrack:showLogConsole') === 'true',
+  setLogEnabled: (enabled: boolean) => {
+    localStorage.setItem('orbitrack:logEnabled', enabled ? 'true' : 'false');
+    const { log } = require('../logging/logger');
+    if (enabled) log.enable(); else log.disable();
+    set({ logEnabled: enabled });
+  },
+  setShowLogConsole: (show: boolean) => {
+    localStorage.setItem('orbitrack:showLogConsole', show ? 'true' : 'false');
+    set({ showLogConsole: show });
   },
 
   // Scale filter
@@ -1738,6 +1802,29 @@ export const useStore = create<StoreState>((set, get) => ({
       scenes: s.scenes.map((g) => g.id === groupId ? { ...g, name } : g),
     })),
 
+  deleteScene: (sceneId) => {
+    const s = get();
+    const group = s.scenes.find((g) => g.id === sceneId);
+    if (!group) return;
+    // Unroute all instruments from the scene bus
+    for (const instId of group.instrumentIds) {
+      const inst = s.instruments.find((i) => i.id === instId);
+      if (inst) unrouteOrbitFromScene(inst.orbitIndex);
+    }
+    destroySceneBus(sceneId);
+    const scenes = s.scenes.filter((g) => g.id !== sceneId);
+    const sceneEffects = { ...s.sceneEffects };
+    delete sceneEffects[sceneId];
+    // Clear arrangement steps referencing this scene
+    const arrangement = s.arrangement.filter((step) => step.sceneId !== sceneId);
+    set({
+      scenes,
+      sceneEffects,
+      arrangement,
+      selectedSceneId: s.selectedSceneId === sceneId ? null : s.selectedSceneId,
+    });
+  },
+
   setRenamingId: (id) => set({ renamingId: id }),
 
   addSceneEffect: (groupId, type) =>
@@ -1866,6 +1953,8 @@ export const useStore = create<StoreState>((set, get) => ({
     return {
       trackMode: newTrackMode,
       trackPosition: newTrackMode && s.arrangement.length > 0 ? 0 : -1,
+      // Mutual exclusivity: disable live mode when enabling track mode
+      ...(newTrackMode ? { liveMode: false, liveActiveSceneId: null, liveQueuedSceneId: null, liveBarCountdown: 0, liveBarsElapsed: 0 } : {}),
     };
   }),
 
@@ -1906,6 +1995,100 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setTrackPosition: (index) => set({ trackPosition: index }),
   setTrackStepProgress: (progress) => set({ trackStepProgress: progress }),
+
+  // Live Mode
+  toggleLiveMode: () => set((s) => {
+    const newLiveMode = !s.liveMode;
+    return {
+      liveMode: newLiveMode,
+      // Mutual exclusivity: disable track mode
+      ...(newLiveMode ? { trackMode: false, trackPosition: -1 } : {}),
+      // Clear live state when disabling
+      ...(!newLiveMode ? {
+        liveActiveSceneId: null, liveQueuedSceneId: null,
+        liveBarCountdown: 0, liveBarsElapsed: 0,
+        liveActiveSceneIds: [], liveQueuedToggles: [],
+      } : {}),
+    };
+  }),
+
+  setLiveLaunchMode: (mode) => set(() => ({
+    liveLaunchMode: mode,
+    liveActiveSceneId: null, liveQueuedSceneId: null,
+    liveBarCountdown: 0, liveBarsElapsed: 0,
+    liveActiveSceneIds: [], liveQueuedToggles: [],
+  })),
+
+  launchScene: (sceneId) => set((s) => {
+    if (s.liveLaunchMode === 'stack') {
+      // Stack mode: toggle scene in/out — queue for bar boundary
+      const alreadyQueued = s.liveQueuedToggles.includes(sceneId);
+      if (alreadyQueued) {
+        // Cancel the queued toggle
+        return { liveQueuedToggles: s.liveQueuedToggles.filter((id) => id !== sceneId) };
+      }
+      // If nothing is active and nothing queued, activate immediately
+      if (s.liveActiveSceneIds.length === 0 && s.liveQueuedToggles.length === 0) {
+        return {
+          liveActiveSceneIds: [sceneId],
+          liveQueuedToggles: [],
+          liveBarCountdown: 0,
+          liveBarsElapsed: 0,
+        };
+      }
+      // Queue toggle at next bar boundary
+      return {
+        liveQueuedToggles: [...s.liveQueuedToggles, sceneId],
+        liveBarCountdown: s.liveBarCountdown || s.liveLaunchQuantize,
+      };
+    }
+
+    // Queue mode (original behavior)
+    // Re-launching the active scene → clear queue
+    if (sceneId === s.liveActiveSceneId) {
+      return { liveQueuedSceneId: null, liveBarCountdown: 0 };
+    }
+    // Nothing playing → activate immediately
+    if (!s.liveActiveSceneId) {
+      return { liveActiveSceneId: sceneId, liveQueuedSceneId: null, liveBarCountdown: 0, liveBarsElapsed: 0 };
+    }
+    // Already playing → queue with quantize
+    return { liveQueuedSceneId: sceneId, liveBarCountdown: s.liveLaunchQuantize };
+  }),
+
+  stopLiveScene: () => set({
+    liveActiveSceneId: null,
+    liveQueuedSceneId: null,
+    liveBarCountdown: 0,
+    liveBarsElapsed: 0,
+    liveActiveSceneIds: [],
+    liveQueuedToggles: [],
+  }),
+
+  setLiveLaunchQuantize: (bars) => set({ liveLaunchQuantize: bars }),
+  setLiveBarCountdown: (n) => set({ liveBarCountdown: n }),
+  setLiveBarsElapsed: (n) => set({ liveBarsElapsed: n }),
+
+  switchToQueuedScene: () => set((s) => ({
+    liveActiveSceneId: s.liveQueuedSceneId,
+    liveQueuedSceneId: null,
+    liveBarCountdown: 0,
+    liveBarsElapsed: 0,
+  })),
+
+  processStackToggles: () => set((s) => {
+    if (s.liveQueuedToggles.length === 0) return {};
+    const active = new Set(s.liveActiveSceneIds);
+    for (const id of s.liveQueuedToggles) {
+      if (active.has(id)) active.delete(id);
+      else active.add(id);
+    }
+    return {
+      liveActiveSceneIds: [...active],
+      liveQueuedToggles: [],
+      liveBarCountdown: 0,
+    };
+  }),
 
   // Recording
   isRecording: false,
@@ -2009,14 +2192,13 @@ export const useStore = create<StoreState>((set, get) => ({
   looperEditors: {},
 
   assignLoop: (instrumentId, loopPath, displayName) => {
-    const baseUrl = (import.meta.env.BASE_URL as string) ?? '/';
     // Resolve blob URL from customSamples for imported samples
     const customSample = get().customSamples.find((cs) => cs.key === loopPath);
     const url = customSample?.url
       ? customSample.url
       : loopPath.startsWith('blob:') || loopPath.startsWith('http')
         ? loopPath
-        : baseUrl.replace(/\/$/, '') + '/' + loopPath;
+        : SAMPLE_BASE_URL + loopPath;
 
     const sdKey = registerSampleForPlayback(loopPath);
     loadSample(loopPath, url);
@@ -2032,8 +2214,14 @@ export const useStore = create<StoreState>((set, get) => ({
     // Decode audio and init editor — reuse Tone.js AudioContext
     const ctx = Tone.getContext().rawContext as AudioContext;
     fetch(url)
-      .then((r) => r.arrayBuffer())
-      .then((buf) => ctx.decodeAudioData(buf))
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status} for ${loopPath}`);
+        return r.arrayBuffer();
+      })
+      .then((buf) => {
+        if (buf.byteLength === 0) throw new Error('empty response');
+        return ctx.decodeAudioData(buf);
+      })
       .then((decoded) => {
         get().initLooperEditor(instrumentId, decoded);
       })
@@ -2627,6 +2815,8 @@ export const useStore = create<StoreState>((set, get) => ({
       scaleType: s.scaleType,
       trackMode: s.trackMode,
       arrangement: s.arrangement,
+      liveLaunchQuantize: s.liveLaunchQuantize,
+      liveLaunchMode: s.liveLaunchMode,
     };
   },
 
@@ -2693,6 +2883,15 @@ export const useStore = create<StoreState>((set, get) => ({
       scaleType: orbitrackSet.scaleType ?? 'chromatic',
       trackMode: orbitrackSet.trackMode ?? false,
       arrangement: orbitrackSet.arrangement ?? [],
+      liveLaunchQuantize: ((orbitrackSet as unknown as Record<string, unknown>).liveLaunchQuantize as 1 | 2 | 4 | 8) ?? 1,
+      liveLaunchMode: ((orbitrackSet as unknown as Record<string, unknown>).liveLaunchMode as 'queue' | 'stack') ?? 'queue',
+      liveMode: false,
+      liveActiveSceneId: null,
+      liveQueuedSceneId: null,
+      liveBarCountdown: 0,
+      liveBarsElapsed: 0,
+      liveActiveSceneIds: [],
+      liveQueuedToggles: [],
     });
 
     // Persist last set ID for session restore on next load
@@ -2790,6 +2989,15 @@ export const useStore = create<StoreState>((set, get) => ({
       trackMode: false,
       arrangement: [],
       trackPosition: -1,
+      liveMode: false,
+      liveLaunchMode: 'queue' as 'queue' | 'stack',
+      liveActiveSceneId: null,
+      liveQueuedSceneId: null,
+      liveLaunchQuantize: 1,
+      liveBarCountdown: 0,
+      liveBarsElapsed: 0,
+      liveActiveSceneIds: [],
+      liveQueuedToggles: [],
     });
 
     // Clear last set ID so autosave doesn't run for unsaved new sets
@@ -2829,3 +3037,8 @@ export const useStore = create<StoreState>((set, get) => ({
     import('./undoHistory').then((m) => m.clearHistory());
   },
 }));
+
+// Auto-enable logger if persisted
+if (useStore.getState().logEnabled) {
+  import('../logging/logger').then(({ log }) => log.enable());
+}

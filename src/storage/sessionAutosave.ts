@@ -40,12 +40,20 @@ export function setAutosaveEnabled(enabled: boolean): void {
 
 export function getAutosaveInterval(): number {
   const raw = localStorage.getItem('orbitrack:autosave:interval');
-  const ms = raw ? parseInt(raw, 10) : 3000;
-  return isNaN(ms) ? 3000 : ms;
+  const ms = raw ? parseInt(raw, 10) : 30000;
+  return isNaN(ms) ? 30000 : ms;
 }
 
 export function setAutosaveInterval(ms: number): void {
   localStorage.setItem('orbitrack:autosave:interval', String(ms));
+}
+
+export function getInitialAutosave(): boolean {
+  return localStorage.getItem('orbitrack:autosave:initialAutosave') === 'true';
+}
+
+export function setInitialAutosave(enabled: boolean): void {
+  localStorage.setItem('orbitrack:autosave:initialAutosave', String(enabled));
 }
 
 export function getLastSetId(): string | null {
@@ -120,6 +128,9 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 async function saveSession(): Promise<void> {
   const s = useStore.getState();
   let setId = s.currentSetId;
+
+  // If initial autosave is off, skip unsaved projects (no manual save yet)
+  if (!setId && !getInitialAutosave()) return;
 
   // Auto-create a session ID so unsaved projects also persist across reloads
   if (!setId) {
@@ -203,6 +214,7 @@ function debouncedSave(): void {
 
   if (debounceTimer) clearTimeout(debounceTimer);
   const interval = getAutosaveInterval();
+  if (interval <= 0) return;
   debounceTimer = setTimeout(() => {
     saveSession().catch((e) => console.error('[autosave] save failed:', e));
   }, interval);

@@ -325,6 +325,8 @@ export function TransportBar() {
   const setStepsPerBeat = useStore((s) => s.setStepsPerBeat);
   const trackMode = useStore((s) => s.trackMode);
   const toggleTrackMode = useStore((s) => s.toggleTrackMode);
+  const liveMode = useStore((s) => s.liveMode);
+  const toggleLiveMode = useStore((s) => s.toggleLiveMode);
   const [infoOpen, setInfoOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
@@ -404,6 +406,23 @@ export function TransportBar() {
           title="Toggle Track Mode"
         >
           TRACK
+        </button>
+        <button
+          onClick={toggleLiveMode}
+          className={`px-2 py-1 text-xs rounded font-mono tracking-wide transition-colors border cursor-pointer
+            ${liveMode ? 'border-current' : 'text-muted-foreground hover:text-[#e7a2aa] border-transparent'}`}
+          style={
+            liveMode
+              ? {
+                  backgroundColor: '#e7a2aa',
+                  color: '#1a1a1a',
+                  borderColor: '#d4868f',
+                }
+              : {}
+          }
+          title="Toggle Live Mode"
+        >
+          LIVE
         </button>
       </div>
 

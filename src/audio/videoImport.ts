@@ -63,7 +63,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   'error.api.link.unsupported': 'This platform is not supported',
   'error.api.fetch.fail': 'Could not fetch the content — it may be private or deleted',
   'error.api.fetch.rate': 'Rate limited — try again in a moment',
-  'error.api.youtube.login': 'YouTube requires cookies on the server — see Settings > Audio',
+  'error.api.youtube.login': 'YouTube requires cookies on the server — see Settings > Sources',
   'error.api.content.video.unavailable': 'Video is unavailable or region-locked',
   'error.api.content.video.live': 'Live streams cannot be downloaded',
   'error.api.content.post.age': 'Age-restricted content cannot be accessed',

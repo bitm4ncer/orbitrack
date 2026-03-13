@@ -4,9 +4,10 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useStore } from '../../state/store';
 import { MidiSettingsPanel } from '../MidiSettings/MidiSettingsPanel';
 import { getAudioInputDevices, requestMicPermission, getInputLevel, isCapturing, getCaptureDuration, onAudioDeviceChange, type AudioInputDevice } from '../../audio/audioInput';
-import { getAutosaveEnabled, setAutosaveEnabled, getAutosaveInterval, setAutosaveInterval } from '../../storage/sessionAutosave';
+import { getAutosaveEnabled, setAutosaveEnabled, getAutosaveInterval, setAutosaveInterval, getInitialAutosave, setInitialAutosave } from '../../storage/sessionAutosave';
 import { getCobaltEndpoint, setCobaltEndpoint, getCobaltApiKey, setCobaltApiKey, DEFAULT_ENDPOINT } from '../../storage/cobaltSettings';
 import { testCobaltConnection } from '../../audio/videoImport';
+import { log } from '../../logging/logger';
 
 interface SettingsSection {
   id: string;
@@ -18,8 +19,10 @@ const SECTIONS: SettingsSection[] = [
   { id: 'info', label: 'Info', icon: 'info' },
   { id: 'midi', label: 'MIDI', icon: 'midi' },
   { id: 'audio', label: 'Audio', icon: 'audio' },
+  { id: 'sources', label: 'Sources', icon: 'sources' },
   { id: 'storage', label: 'Storage', icon: 'storage' },
   { id: 'display', label: 'Display', icon: 'display' },
+  { id: 'log', label: 'Log', icon: 'log' },
   { id: 'shortcuts', label: 'Shortcuts', icon: 'shortcuts' },
   { id: 'about', label: 'About', icon: 'about' },
 ];
@@ -38,8 +41,12 @@ function renderIcon(iconName: string): React.ReactNode {
       return <svg className={iconProps} fill="none" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="1" stroke="currentColor" strokeWidth="2"/><path d="M8 17h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M9 20h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
     case 'shortcuts':
       return <svg className={iconProps} fill="none" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
+    case 'sources':
+      return <svg className={iconProps} fill="none" viewBox="0 0 24 24"><path d="M12 2v8l3-3M12 10l-3-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M20 12v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M4 22h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
     case 'storage':
       return <svg className={iconProps} fill="none" viewBox="0 0 24 24"><path d="M4 7v10c0 1.1.9 2 2 2h12a2 2 0 002-2V7" stroke="currentColor" strokeWidth="2"/><path d="M20 7H4a2 2 0 01-2-2V5a2 2 0 012-2h16a2 2 0 012 2v0a2 2 0 01-2 2z" stroke="currentColor" strokeWidth="2"/><path d="M10 12h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
+    case 'log':
+      return <svg className={iconProps} fill="none" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M7 9l3 3-3 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M13 15h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
     case 'about':
       return <svg className={iconProps} fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><path d="M12 16v-4M12 8h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
     default:
@@ -240,7 +247,178 @@ function AudioInputSection() {
   );
 }
 
-function CobaltSettingsSection() {
+function getDockerDownloadUrl(): { url: string; label: string } {
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('win')) return { url: 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe', label: 'Download Docker Desktop for Windows' };
+  if (ua.includes('mac')) {
+    // Apple Silicon detection via platform or userAgent
+    const isArm = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1
+      || ua.includes('arm') || navigator.platform === 'MacARM';
+    return isArm
+      ? { url: 'https://desktop.docker.com/mac/main/arm64/Docker.dmg', label: 'Download Docker Desktop for Mac (Apple Silicon)' }
+      : { url: 'https://desktop.docker.com/mac/main/amd64/Docker.dmg', label: 'Download Docker Desktop for Mac (Intel)' };
+  }
+  return { url: 'https://docs.docker.com/desktop/install/linux/', label: 'Install Docker Desktop for Linux' };
+}
+
+function downloadCobaltInstaller(): void {
+  const ua = navigator.userAgent.toLowerCase();
+  const isWindows = ua.includes('win');
+
+  const windowsScript = `@echo off
+echo ============================================
+echo   orbitrack - cobalt installer
+echo ============================================
+echo.
+
+where docker >nul 2>nul
+if %errorlevel% neq 0 (
+    echo Docker is not installed or not in PATH.
+    echo Please install Docker Desktop first, then run this script again.
+    echo https://www.docker.com/products/docker-desktop/
+    pause
+    exit /b 1
+)
+
+:: Check if Docker daemon is responding
+docker info >nul 2>nul
+if %errorlevel% equ 0 goto :dockerready
+
+echo Docker Desktop is not running. Starting it...
+start "" "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe"
+echo Waiting for Docker to start...
+set /a attempts=0
+
+:waitloop
+timeout /t 3 /nobreak >nul
+docker info >nul 2>nul
+if %errorlevel% equ 0 goto :dockerready
+set /a attempts+=1
+if %attempts% geq 30 (
+    echo.
+    echo Docker did not start after 90 seconds.
+    echo Please start Docker Desktop manually and run this script again.
+    pause
+    exit /b 1
+)
+echo   Still waiting... (%attempts%/30)
+goto :waitloop
+
+:dockerready
+echo Docker is running.
+echo.
+
+echo Pulling cobalt image...
+docker pull ghcr.io/imputnet/cobalt:latest
+if %errorlevel% neq 0 (
+    echo.
+    echo Failed to pull image.
+    pause
+    exit /b 1
+)
+
+echo.
+echo Stopping old cobalt container if running...
+docker stop orbitrack-cobalt >nul 2>nul
+docker rm orbitrack-cobalt >nul 2>nul
+
+echo.
+echo Starting cobalt on port 9000...
+docker run -d --name orbitrack-cobalt -p 9000:9000 -e API_URL=http://localhost:9000 -e API_CORS_WILDCARD=1 --restart unless-stopped ghcr.io/imputnet/cobalt:latest
+
+if %errorlevel% equ 0 (
+    echo.
+    echo ============================================
+    echo   cobalt is running at http://localhost:9000
+    echo   Set this as your endpoint in orbitrack
+    echo   Sources settings.
+    echo ============================================
+) else (
+    echo.
+    echo Failed to start container. Check Docker Desktop.
+)
+echo.
+pause
+`;
+
+  const unixScript = `#!/bin/bash
+echo "============================================"
+echo "  orbitrack - cobalt installer"
+echo "============================================"
+echo ""
+
+if ! command -v docker &> /dev/null; then
+    echo "Docker is not installed or not in PATH."
+    echo "Please install Docker Desktop first, then run this script again."
+    echo "https://www.docker.com/products/docker-desktop/"
+    exit 1
+fi
+
+# Check if Docker daemon is responding
+if ! docker info &> /dev/null; then
+    echo "Docker Desktop is not running. Starting it..."
+    if [[ "$(uname)" == "Darwin" ]]; then
+        open -a Docker
+    else
+        systemctl --user start docker-desktop 2>/dev/null || true
+    fi
+    echo "Waiting for Docker to start..."
+    attempts=0
+    while ! docker info &> /dev/null; do
+        sleep 3
+        attempts=$((attempts + 1))
+        if [ $attempts -ge 30 ]; then
+            echo "Docker did not start after 90 seconds."
+            echo "Please start Docker Desktop manually and run this script again."
+            exit 1
+        fi
+        echo "  Still waiting... ($attempts/30)"
+    done
+fi
+echo "Docker is running."
+echo ""
+
+echo "Pulling cobalt image..."
+docker pull ghcr.io/imputnet/cobalt:latest || { echo "Failed to pull image."; exit 1; }
+
+echo ""
+echo "Stopping old cobalt container if running..."
+docker stop orbitrack-cobalt 2>/dev/null
+docker rm orbitrack-cobalt 2>/dev/null
+
+echo ""
+echo "Starting cobalt on port 9000..."
+docker run -d --name orbitrack-cobalt -p 9000:9000 \\
+  -e API_URL=http://localhost:9000 \\
+  -e API_CORS_WILDCARD=1 \\
+  --restart unless-stopped \\
+  ghcr.io/imputnet/cobalt:latest
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "============================================"
+    echo "  cobalt is running at http://localhost:9000"
+    echo "  Set this as your endpoint in orbitrack"
+    echo "  Sources settings."
+    echo "============================================"
+else
+    echo ""
+    echo "Failed to start container. Check Docker."
+fi
+`;
+
+  const content = isWindows ? windowsScript : unixScript;
+  const filename = isWindows ? 'orbitrack-cobalt-install.bat' : 'orbitrack-cobalt-install.sh';
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function SourcesSettings() {
   const [endpoint, setEndpoint] = useState(() => getCobaltEndpoint());
   const [apiKey, setApiKey] = useState(() => getCobaltApiKey());
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
@@ -263,67 +441,106 @@ function CobaltSettingsSection() {
     setTestStatus(ok ? 'ok' : 'fail');
   };
 
+  const docker = getDockerDownloadUrl();
+
   return (
-    <div className="border-t border-border/30 pt-4 mt-4">
-      <h3 className="text-sm font-semibold text-text-primary mb-4">URL Audio Import</h3>
-
-      <div className="space-y-3">
-        {/* Local Docker setup instructions */}
-        <div className="p-3 bg-bg-tertiary/50 rounded border border-border/30 space-y-2">
-          <p className="text-xs font-medium text-text-primary">Run cobalt locally for best results</p>
-          <p className="text-[11px] text-text-secondary/60 leading-relaxed">
-            Local Docker uses your home IP — no blocking by YouTube, TikTok, or SoundCloud.
-          </p>
-          <code className="block text-[10px] text-accent/80 bg-background/50 p-2 rounded border border-border/20 font-mono leading-relaxed select-all break-all">
-            docker run -d -p 9000:9000 -e API_URL=http://localhost:9000 -e API_CORS_WILDCARD=1 ghcr.io/imputnet/cobalt:latest
-          </code>
-          <p className="text-[10px] text-text-secondary/40">
-            Then set endpoint below to <span className="font-mono text-accent/50">http://localhost:9000</span>
-          </p>
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-text-secondary">Cobalt API Endpoint</label>
-          <input
-            type="url"
-            value={endpoint}
-            onChange={(e) => handleEndpointChange(e.target.value)}
-            placeholder="http://localhost:9000"
-            className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded outline-none focus:border-accent transition-colors"
-          />
-          {endpoint === DEFAULT_ENDPOINT && (
-            <p className="text-[10px] text-text-secondary/40">
-              Using default server (some content may be blocked — local Docker recommended)
-            </p>
-          )}
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-text-secondary">API Key <span className="text-text-secondary/40">(optional)</span></label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => handleApiKeyChange(e.target.value)}
-            placeholder="For private instances"
-            className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded outline-none focus:border-accent transition-colors"
-          />
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleTest}
-            disabled={testStatus === 'testing' || !endpoint.trim()}
-            className="px-3 py-1.5 text-xs font-medium rounded border border-border bg-bg-tertiary hover:bg-bg-tertiary/80 text-text-primary transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-          >
-            {testStatus === 'testing' ? 'Testing...' : 'Test Connection'}
-          </button>
-          {testStatus === 'ok' && <span className="text-xs text-green-400">Connected</span>}
-          {testStatus === 'fail' && <span className="text-xs text-red-400">Connection failed</span>}
-        </div>
-
-        <p className="text-[11px] text-text-secondary/40 leading-relaxed">
-          Powered by <a href="https://cobalt.tools" target="_blank" rel="noopener noreferrer" className="text-accent/60 hover:text-accent transition-colors">cobalt.tools</a> — supports TikTok, YouTube, SoundCloud, Instagram & more.
+    <div className="p-6 space-y-6">
+      <div>
+        <h3 className="text-sm font-semibold text-text-primary mb-1">Cobalt Media Fetch</h3>
+        <p className="text-xs text-text-secondary/50 mb-4">
+          Import audio from YouTube, TikTok, SoundCloud, Instagram & more via{' '}
+          <a href="https://cobalt.tools" target="_blank" rel="noopener noreferrer" className="text-accent/60 hover:text-accent transition-colors">cobalt.tools</a>.
+          Run cobalt locally for the best results — datacenter IPs are often blocked.
         </p>
+      </div>
+
+      {/* Step 1: Install Docker */}
+      <div>
+        <h3 className="text-sm font-semibold text-text-primary mb-3">1. Install Docker</h3>
+        <div className="p-3 bg-bg-tertiary/50 rounded border border-border/30 space-y-3">
+          <p className="text-xs text-text-secondary/70 leading-relaxed">
+            cobalt runs as a Docker container. Install Docker Desktop if you don't have it yet.
+          </p>
+          <a
+            href={docker.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded border border-accent/30 bg-accent/10 text-accent hover:bg-accent/20 transition-colors"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+            </svg>
+            {docker.label}
+          </a>
+          <p className="text-[10px] text-text-secondary/40">Free for personal use</p>
+        </div>
+      </div>
+
+      {/* Step 2: One-click cobalt install */}
+      <div>
+        <h3 className="text-sm font-semibold text-text-primary mb-3">2. Start Cobalt</h3>
+        <div className="p-3 bg-bg-tertiary/50 rounded border border-border/30 space-y-3">
+          <p className="text-xs text-text-secondary/70 leading-relaxed">
+            Download and run this script to pull the cobalt image and start it on port 9000.
+          </p>
+          <button
+            onClick={downloadCobaltInstaller}
+            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded border border-accent/30 bg-accent/10 text-accent hover:bg-accent/20 transition-colors cursor-pointer"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+            </svg>
+            Download Installer Script
+          </button>
+          <p className="text-[10px] text-text-secondary/40">
+            Requires Docker Desktop running. The script pulls the image, removes any old container, and starts cobalt.
+          </p>
+        </div>
+      </div>
+
+      {/* Step 3: Configure endpoint */}
+      <div>
+        <h3 className="text-sm font-semibold text-text-primary mb-3">3. Configure</h3>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">Cobalt API Endpoint</label>
+            <input
+              type="url"
+              value={endpoint}
+              onChange={(e) => handleEndpointChange(e.target.value)}
+              placeholder="http://localhost:9000"
+              className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded outline-none focus:border-accent transition-colors"
+            />
+            {endpoint === DEFAULT_ENDPOINT && (
+              <p className="text-[10px] text-text-secondary/40">
+                Using default server (some content may be blocked — local Docker recommended)
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">API Key <span className="text-text-secondary/40">(optional)</span></label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => handleApiKeyChange(e.target.value)}
+              placeholder="For private instances"
+              className="w-full px-2 py-1.5 text-xs bg-background border border-border rounded outline-none focus:border-accent transition-colors"
+            />
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleTest}
+              disabled={testStatus === 'testing' || !endpoint.trim()}
+              className="px-3 py-1.5 text-xs font-medium rounded border border-border bg-bg-tertiary hover:bg-bg-tertiary/80 text-text-primary transition-colors disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+            >
+              {testStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+            </button>
+            {testStatus === 'ok' && <span className="text-xs text-green-400">Connected</span>}
+            {testStatus === 'fail' && <span className="text-xs text-red-400">Connection failed</span>}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -509,12 +726,19 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
                   </div>
 
                   <AudioInputSection />
-                  <CobaltSettingsSection />
                 </div>
+              )}
+
+              {activeTab === 'sources' && (
+                <SourcesSettings />
               )}
 
               {activeTab === 'display' && (
                 <DisplaySettings />
+              )}
+
+              {activeTab === 'log' && (
+                <LogSettings />
               )}
 
               {activeTab === 'shortcuts' && (
@@ -588,9 +812,135 @@ const ORB_MODES: { id: 'classic' | 'led' | 'rotate' | 'chase'; label: string; de
   { id: 'rotate', label: 'Dot Ring', desc: 'Fixed circle of dots — colored hits rotate past bottom indicator' },
 ];
 
+function LogSettings() {
+  const logEnabled = useStore((s) => s.logEnabled);
+  const setLogEnabled = useStore((s) => s.setLogEnabled);
+  const showLogConsole = useStore((s) => s.showLogConsole);
+  const setShowLogConsole = useStore((s) => s.setShowLogConsole);
+  const [bufferCount, setBufferCount] = useState(log.getCount());
+  const [sessionDur, setSessionDur] = useState(0);
+  const [snapshots, setSnapshots] = useState(log.getSnapshotCount());
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setBufferCount(log.getCount());
+      setSessionDur(log.getSessionDuration());
+      setSnapshots(log.getSnapshotCount());
+    }, 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const fmtDuration = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const h = Math.floor(m / 60);
+    if (h > 0) return `${h}h ${m % 60}m ${s % 60}s`;
+    if (m > 0) return `${m}m ${s % 60}s`;
+    return `${s}s`;
+  };
+
+  const btnClass = 'px-3 py-1.5 text-xs font-medium rounded border border-border bg-bg-tertiary hover:bg-bg-tertiary/80 text-text-primary transition-colors cursor-pointer';
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h3 className="text-sm font-semibold text-text-primary mb-1">Log & Diagnostics</h3>
+        <p className="text-xs text-text-secondary/50 mb-4">Structured logging for performance analysis and debugging</p>
+
+        <div className="space-y-3">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={logEnabled}
+              onChange={(e) => setLogEnabled(e.target.checked)}
+              className="accent-accent w-3.5 h-3.5"
+            />
+            <div>
+              <span className="text-xs text-text-primary font-medium">Enable Logging</span>
+              <p className="text-[10px] text-text-secondary/50 mt-0.5">Captures engine events, performance data, and state changes</p>
+            </div>
+          </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showLogConsole}
+              onChange={(e) => setShowLogConsole(e.target.checked)}
+              className="accent-accent w-3.5 h-3.5"
+            />
+            <div>
+              <span className="text-xs text-text-primary font-medium">Show Console Panel</span>
+              <p className="text-[10px] text-text-secondary/50 mt-0.5">Display the log console at the bottom of the screen</p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      {/* Session Stats */}
+      <div className="border-t border-border/30 pt-4">
+        <h3 className="text-xs font-semibold text-text-secondary/70 uppercase tracking-wider mb-3">Session Stats</h3>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-bg-tertiary/30 rounded-lg p-3 text-center">
+            <div className="text-lg font-mono text-accent">{bufferCount.toLocaleString()}</div>
+            <div className="text-[10px] text-text-secondary/50 mt-0.5">/ 5,000 entries</div>
+          </div>
+          <div className="bg-bg-tertiary/30 rounded-lg p-3 text-center">
+            <div className="text-lg font-mono text-text-primary">{logEnabled ? fmtDuration(sessionDur) : '—'}</div>
+            <div className="text-[10px] text-text-secondary/50 mt-0.5">session duration</div>
+          </div>
+          <div className="bg-bg-tertiary/30 rounded-lg p-3 text-center">
+            <div className="text-lg font-mono text-[#a78bfa]">{snapshots}</div>
+            <div className="text-[10px] text-text-secondary/50 mt-0.5">perf snapshots</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="border-t border-border/30 pt-4">
+        <h3 className="text-xs font-semibold text-text-secondary/70 uppercase tracking-wider mb-3">Actions</h3>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className={btnClass}
+            onClick={() => log.takePerformanceSnapshot()}
+            disabled={!logEnabled}
+            style={{ opacity: logEnabled ? 1 : 0.4 }}
+          >
+            Take Snapshot
+          </button>
+          <button className={btnClass} onClick={() => log.downloadAsJSON()} disabled={bufferCount === 0} style={{ opacity: bufferCount > 0 ? 1 : 0.4 }}>
+            Download JSON
+          </button>
+          <button className={btnClass} onClick={() => log.downloadAsText()} disabled={bufferCount === 0} style={{ opacity: bufferCount > 0 ? 1 : 0.4 }}>
+            Download TXT
+          </button>
+          <button
+            className={`${btnClass} ${bufferCount > 0 ? 'hover:border-red-400/50 hover:text-red-400' : ''}`}
+            onClick={() => { log.clear(); setBufferCount(0); }}
+            disabled={bufferCount === 0}
+            style={{ opacity: bufferCount > 0 ? 1 : 0.4 }}
+          >
+            Clear Logs
+          </button>
+        </div>
+      </div>
+
+      {/* Info */}
+      <div className="border-t border-border/30 pt-4">
+        <div className="text-[10px] text-text-secondary/40 space-y-1 font-mono">
+          <p>Ring buffer: 5,000 entries max (oldest overwritten)</p>
+          <p>Perf snapshots: auto every 30s when logging is active</p>
+          <p>Zero overhead when disabled — all log calls are no-ops</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DisplaySettings() {
   const orbitDisplayMode = useStore((s) => s.orbitDisplayMode);
   const setOrbitDisplayMode = useStore((s) => s.setOrbitDisplayMode);
+  const showPerformanceMonitor = useStore((s) => s.showPerformanceMonitor);
+  const setShowPerformanceMonitor = useStore((s) => s.setShowPerformanceMonitor);
 
   return (
     <div className="p-6 space-y-6">
@@ -645,6 +995,23 @@ function DisplaySettings() {
             <p className="mt-1">Current: {window.devicePixelRatio.toFixed(2)}x</p>
           </div>
         </div>
+      </div>
+
+      {/* Performance */}
+      <div className="border-t border-border/30 pt-4">
+        <h3 className="text-sm font-semibold text-text-primary mb-4">Diagnostics</h3>
+        <label className="flex items-center gap-3 p-3 bg-bg-tertiary/50 rounded border border-border/30 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showPerformanceMonitor}
+            onChange={(e) => setShowPerformanceMonitor(e.target.checked)}
+            className="accent-accent"
+          />
+          <div>
+            <p className="text-xs font-medium text-text-primary">Performance Monitor</p>
+            <p className="text-xs text-text-secondary/60 mt-0.5">Show FPS, audio latency, and voice count in Effects panel</p>
+          </div>
+        </label>
       </div>
     </div>
   );
@@ -784,6 +1151,7 @@ function OrbPreview({ mode, active }: { mode: 'classic' | 'led' | 'rotate' | 'ch
 function StorageSettings() {
   const [enabled, setEnabled] = useState(getAutosaveEnabled);
   const [interval, setInterval_] = useState(getAutosaveInterval);
+  const [initialAutosave, setInitialAutosave_] = useState(getInitialAutosave);
 
   const handleToggle = (checked: boolean) => {
     setEnabled(checked);
@@ -793,6 +1161,11 @@ function StorageSettings() {
   const handleInterval = (ms: number) => {
     setInterval_(ms);
     setAutosaveInterval(ms);
+  };
+
+  const handleInitialAutosave = (checked: boolean) => {
+    setInitialAutosave_(checked);
+    setInitialAutosave(checked);
   };
 
   return (
@@ -810,6 +1183,19 @@ function StorageSettings() {
             <span className="text-xs text-text-secondary">Enable autosave</span>
           </label>
 
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={initialAutosave}
+              onChange={(e) => handleInitialAutosave(e.target.checked)}
+              disabled={!enabled}
+              className="accent-accent w-3.5 h-3.5"
+            />
+            <span className={`text-xs ${enabled ? 'text-text-secondary' : 'text-text-secondary/40'}`}>
+              Autosave before first manual save
+            </span>
+          </label>
+
           <div className="space-y-1.5">
             <label className="text-[11px] font-medium text-text-secondary/60 uppercase tracking-wider">
               Autosave interval
@@ -820,15 +1206,19 @@ function StorageSettings() {
               disabled={!enabled}
               className="w-full px-3 py-2 text-xs bg-bg-tertiary text-text-primary border border-border rounded outline-none focus:border-accent disabled:opacity-40 transition-opacity"
             >
-              <option value={1000}>Quick (1s)</option>
-              <option value={3000}>Normal (3s)</option>
-              <option value={5000}>Relaxed (5s)</option>
-              <option value={10000}>Slow (10s)</option>
+              <option value={5000}>5s</option>
+              <option value={30000}>30s</option>
+              <option value={60000}>1 min</option>
+              <option value={300000}>5 min</option>
+              <option value={900000}>15 min</option>
+              <option value={1800000}>30 min</option>
+              <option value={3600000}>60 min</option>
+              <option value={0}>Never</option>
             </select>
           </div>
 
           <p className="text-[11px] text-text-secondary/40 leading-relaxed">
-            Autosave activates after your first manual save. Each save creates a version snapshot you can restore from My Sets.
+            Each autosave creates a version snapshot you can restore from My Sets. Enable "before first manual save" to also autosave new unsaved projects.
           </p>
         </div>
       </div>

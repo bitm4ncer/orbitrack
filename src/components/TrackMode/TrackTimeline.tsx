@@ -1,89 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../../state/store';
 import type { InstrumentScene } from '../../types/scene';
+import { MiniOrb } from '../shared/MiniOrb';
 
 const BLOCK_H = 150; // pixels, 250% of original ~60px
-
-function MiniOrb({ instrumentId, isSceneSelected }: { instrumentId: string; isSceneSelected: boolean }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number | null>(null);
-  const selectInstrument = useStore((s) => s.selectInstrument);
-  const isPlaying = useStore((s) => s.isPlaying);
-  const inst = useStore((s) => s.instruments.find(i => i.id === instrumentId));
-  const instName = inst?.name ?? '';
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !inst) return;
-
-    let rotation = 0;
-    const draw = () => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const w = canvas.width;
-      const h = canvas.height;
-      const cx = w / 2;
-      const cy = h / 2;
-      const radius = w / 2 - 3;
-
-      // Clear
-      ctx.clearRect(0, 0, w, h);
-
-      // Outer ring
-      ctx.strokeStyle = 'rgba(180, 180, 180, 0.8)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Hit position dots (only rotate if playing, clockwise)
-      if (inst.hitPositions && inst.hitPositions.length > 0) {
-        inst.hitPositions.forEach((angle) => {
-          const rad = (angle * Math.PI * 2 + (isPlaying ? rotation : 0)) % (Math.PI * 2);
-          const x = cx + Math.cos(rad) * (radius - 4);
-          const y = cy + Math.sin(rad) * (radius - 4);
-          ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
-          ctx.beginPath();
-          ctx.arc(x, y, 2, 0, Math.PI * 2);
-          ctx.fill();
-        });
-      }
-
-      // Bottom indicator
-      ctx.fillStyle = 'rgba(220, 220, 220, 0.8)';
-      ctx.beginPath();
-      ctx.arc(cx, cy + radius - 2, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      if (isPlaying) rotation += 0.02;
-      rafRef.current = requestAnimationFrame(draw);
-    };
-
-    rafRef.current = requestAnimationFrame(draw);
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    };
-  }, [inst, isPlaying]);
-
-  return (
-    <div
-      className="cursor-pointer rounded transition-colors flex-shrink-0"
-      style={{
-        width: 48,
-        height: 48,
-        border: isSceneSelected ? '1px solid rgba(200, 200, 200, 0.6)' : '1px solid transparent',
-      }}
-      title={instName}
-      onClick={(e) => {
-        e.stopPropagation();
-        selectInstrument(instrumentId);
-      }}
-    >
-      <canvas ref={canvasRef} width={48} height={48} style={{ display: 'block', width: 48, height: 48 }} />
-    </div>
-  );
-}
 
 interface SceneBlockProps {
   step: { id: string; sceneId: string; bars: number };
@@ -208,7 +128,7 @@ function SceneBlock({
       {/* Mini orbs grid */}
       <div className="flex flex-wrap gap-1 overflow-hidden flex-1 px-2 pb-2 pt-1 items-start content-start">
         {scene.instrumentIds.map(instId => (
-          <MiniOrb key={instId} instrumentId={instId} isSceneSelected={isSelected} />
+          <MiniOrb key={instId} instrumentId={instId} isSelected={isSelected} />
         ))}
       </div>
 

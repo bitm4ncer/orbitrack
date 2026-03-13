@@ -195,7 +195,7 @@ export function LoopBrowser() {
 
   const handleUrlImport = async () => {
     const endpoint = getCobaltEndpoint();
-    if (!endpoint) { setUrlError('Configure a cobalt endpoint in Settings > Audio'); return; }
+    if (!endpoint) { setUrlError('Configure a cobalt endpoint in Settings > Sources'); return; }
     if (!urlValue.trim()) return;
 
     setUrlLoading(true);

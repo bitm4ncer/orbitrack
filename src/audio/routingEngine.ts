@@ -19,6 +19,7 @@
 import { getAudioContext, getSuperdoughAudioController } from 'superdough';
 import { useStore } from '../state/store';
 import { initMasterChain } from './masterEffectsChain';
+import { log } from '../logging/logger';
 
 let masterAnalyser: AnalyserNode | null = null;
 let initialized = false;
@@ -61,7 +62,7 @@ export function initRoutingEngine(): void {
   // Larger fftSize → more samples per RMS frame → smoother, more accurate reading.
   // smoothingTimeConstant only affects FFT magnitude data, NOT getFloatTimeDomainData,
   // so set it to 0 (we apply our own ballistics in the VU meter draw loop).
-  analyser.fftSize = 4096;
+  analyser.fftSize = 2048;
   analyser.smoothingTimeConstant = 0;
   masterAnalyser = analyser;
 
@@ -70,6 +71,7 @@ export function initRoutingEngine(): void {
 
   tryTapDestinationGain();
   initMasterChain();
+  log.info('routing', 'Routing engine initialized', { sampleRate: ctx.sampleRate, fftSize: analyser.fftSize });
 }
 
 export function getMasterAnalyser(): AnalyserNode | null {

@@ -4,6 +4,7 @@ import { triggerSuperdough, triggerLooperSlice } from './superdoughAdapter';
 import { applyOrbitToneEffects } from './orbitEffects';
 import { applySceneEffects, setSceneBusVolume, setSceneBusMuted } from './sceneBus';
 import { syncBpmToEngines } from './synthManager';
+import { log } from '../logging/logger';
 
 let schedulerId: number | null = null;
 let effectSyncId: ReturnType<typeof setInterval> | null = null;
@@ -46,6 +47,9 @@ let _trackCachedArrangementIdx = -1;
 // Track Mode variables — incremented each _tick to track arrangement progression
 let _currentArrangementIdx = 0;
 let _stepLoopCount = 0;  // full loops of _maxLoopSize elapsed in current arrangement step
+
+// Live Mode variables
+let _liveBarCount = 0;
 
 // Position buffer — written by the audio tick (zero React involvement),
 // read by the rAF sync loop which gates UI updates to ~60 fps.
@@ -119,6 +123,7 @@ export function startTransport(): void {
     _currentArrangementIdx = 0;
     _stepLoopCount = 0;
   }
+  _liveBarCount = 0;
 
   if (schedulerId !== null) {
     transport.clear(schedulerId);
@@ -136,6 +141,7 @@ export function startTransport(): void {
   useStore.getState().setPlaying(true);
   startUISync();
   startEffectSync();
+  log.info('transport', 'Transport started', { bpm: state.bpm, stepsPerBeat, trackMode: state.trackMode, liveMode: state.liveMode, instruments: state.instruments.length });
 }
 
 /** Sync orbit effect chains at ~25 Hz — outside the audio callback so the
@@ -208,6 +214,7 @@ export function stopTransport(): void {
   _trackCachedArrangementIdx = -1;
   _currentArrangementIdx = 0;
   _stepLoopCount = 0;
+  _liveBarCount = 0;
 
   if (schedulerId !== null) {
     transport.clear(schedulerId);
@@ -218,6 +225,7 @@ export function stopTransport(): void {
   useStore.getState().setCurrentStep(-1);
   useStore.getState().setTransportProgress(0);
   useStore.getState().setTrackPosition(-1);
+  log.info('transport', 'Transport stopped');
 }
 
 export function toggleTransport(): void {
@@ -232,6 +240,7 @@ export function toggleTransport(): void {
 export function setBpm(bpm: number): void {
   Tone.getTransport().bpm.value = bpm;
   useStore.getState().setBpm(bpm);
+  log.debug('transport', `BPM set to ${bpm}`);
 }
 
 export function getGlobalStep(): number {
@@ -250,11 +259,18 @@ export function cleanupInstrumentCache(id: string): void {
   _sortedHitsMap.delete(id);
 }
 
+let _tickCount = 0;
+
 function tick(time: number): void {
   try {
+    const t0 = log.isEnabled ? performance.now() : 0;
     _tick(time);
+    if (log.isEnabled && ++_tickCount % 100 === 0) {
+      log.perf('transport', 'tick (avg over 100)', performance.now() - t0, { globalStep: _globalStep, maxLoopSize: _maxLoopSize });
+    }
   } catch (e) {
     console.warn('[transport] tick error:', e);
+    log.error('transport', 'Tick error', String(e));
   }
 }
 
@@ -293,6 +309,7 @@ function _tick(time: number): void {
       if (_stepLoopCount >= sceneStep.bars) {
         _stepLoopCount = 0;
         _currentArrangementIdx = (_currentArrangementIdx + 1) % state.arrangement.length;
+        log.info('transport', `Track: advanced to arrangement step ${_currentArrangementIdx}`, { sceneId: state.arrangement[_currentArrangementIdx]?.sceneId });
         _pos.trackPosition = _currentArrangementIdx;
         _pos.trackStepProgress = 0;
         _pos.dirty = true;
@@ -308,27 +325,100 @@ function _tick(time: number): void {
     _pos.dirty = true;
   }
 
+  // Live Mode: bar counting and queued scene switching
+  const liveHasActive = state.liveLaunchMode === 'stack'
+    ? state.liveActiveSceneIds.length > 0
+    : !!state.liveActiveSceneId;
+
+  if (state.liveMode && liveHasActive) {
+    if (globalStep > 0 && globalStep % _maxLoopSize === 0) {
+      _liveBarCount++;
+      const store = useStore.getState();
+
+      if (state.liveLaunchMode === 'stack') {
+        // Stack mode: process queued toggles at bar boundary
+        if (state.liveQueuedToggles.length > 0) {
+          const newCountdown = state.liveBarCountdown - 1;
+          if (newCountdown <= 0) {
+            store.processStackToggles();
+            _liveBarCount = 0;
+          } else {
+            store.setLiveBarCountdown(newCountdown);
+          }
+        }
+      } else {
+        // Queue mode: switch to queued scene at bar boundary
+        if (state.liveQueuedSceneId) {
+          const newCountdown = state.liveBarCountdown - 1;
+          if (newCountdown <= 0) {
+            store.switchToQueuedScene();
+            _liveBarCount = 0;
+          } else {
+            store.setLiveBarCountdown(newCountdown);
+          }
+        }
+      }
+
+      store.setLiveBarsElapsed(_liveBarCount);
+    }
+  }
+
   // Reuse pre-allocated instProgress — clear old keys, then fill.
   for (const k in _instProgress) delete _instProgress[k];
 
-  // Track Mode: cache active-scene instrument sets (rebuilt only when refs change)
+  // Scene membership: cache active-scene instrument sets for Track Mode or Live Mode
   let activeSceneInstIds: Set<string> | null = null;
   let inAnySceneIds: Set<string> | null = null;
+
+  // Determine active scene ID(s) for either mode
+  let _modeActiveSceneId: string | undefined;
+  let _modeActiveSceneIds: string[] | undefined;
+
   if (state.trackMode && state.arrangement.length > 0) {
+    _modeActiveSceneId = state.arrangement[_currentArrangementIdx]?.sceneId;
+  } else if (state.liveMode) {
+    if (state.liveLaunchMode === 'stack' && state.liveActiveSceneIds.length > 0) {
+      _modeActiveSceneIds = state.liveActiveSceneIds;
+    } else if (state.liveActiveSceneId) {
+      _modeActiveSceneId = state.liveActiveSceneId;
+    }
+  }
+
+  const hasActiveScene = !!_modeActiveSceneId || (_modeActiveSceneIds && _modeActiveSceneIds.length > 0);
+
+  if (hasActiveScene) {
+    // Cache key: arrangement idx for track, -2 for live queue, -3 for live stack
+    const cacheKey = state.trackMode ? _currentArrangementIdx : (_modeActiveSceneIds ? -3 : -2);
+    const cacheRef = state.trackMode
+      ? state.arrangement
+      : (_modeActiveSceneIds ? state.liveActiveSceneIds : state.liveActiveSceneId) as unknown;
+
     if (
       state.scenes !== _trackSceneRef ||
-      state.arrangement !== _trackArrangementRef ||
-      _currentArrangementIdx !== _trackCachedArrangementIdx
+      (state.trackMode && state.arrangement !== _trackArrangementRef) ||
+      cacheKey !== _trackCachedArrangementIdx ||
+      cacheRef !== _trackArrangementRef
     ) {
       _trackSceneRef = state.scenes;
-      _trackArrangementRef = state.arrangement;
-      _trackCachedArrangementIdx = _currentArrangementIdx;
+      _trackArrangementRef = cacheRef;
+      _trackCachedArrangementIdx = cacheKey;
 
-      const activeSceneId = state.arrangement[_currentArrangementIdx]?.sceneId;
-      const activeScene = state.scenes.find((s) => s.id === activeSceneId);
-      _trackActiveSceneIdsCache = activeScene
-        ? new Set(activeScene.instrumentIds)
-        : new Set();
+      if (_modeActiveSceneIds) {
+        // Stack mode: union of all active scenes' instruments
+        const unionSet = new Set<string>();
+        for (const sceneId of _modeActiveSceneIds) {
+          const scene = state.scenes.find((s) => s.id === sceneId);
+          if (scene) {
+            for (const id of scene.instrumentIds) unionSet.add(id);
+          }
+        }
+        _trackActiveSceneIdsCache = unionSet;
+      } else {
+        const activeScene = state.scenes.find((s) => s.id === _modeActiveSceneId);
+        _trackActiveSceneIdsCache = activeScene
+          ? new Set(activeScene.instrumentIds)
+          : new Set();
+      }
 
       const anySet = new Set<string>();
       for (const s of state.scenes) {

@@ -10,6 +10,18 @@ https://bitm4ncer.github.io/Orbitrack
 
 ---
 
+**features**
+
+- polyrhythmic step sequencer on a circular grid
+- synth engine + sample bank per instrument
+- per-orbit effects chain (eq, chorus, phaser, filter, distortion, reverb, delay)
+- audio input recording from mic / interface (mono & stereo, monitor mode)
+- midi i/o — clock sync (in/out), cc learn for any knob, note input & recording
+- url track sharing, .orb file export/import
+- ai-assisted pattern generation (ollama / claude / custom llm)
+
+---
+
 **stack**
 
 | layer        | tool                   |

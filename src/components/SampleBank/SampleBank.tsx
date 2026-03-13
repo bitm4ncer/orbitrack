@@ -15,10 +15,10 @@ function midiToLabel(note: number): string {
 
 // Built-in sample alias → actual file path (relative, no leading slash)
 const ALIAS_PATHS: Record<string, string> = {
-  kick: 'samples/Default/kick.wav',
-  snare: 'samples/Default/snare.wav',
-  hihat: 'samples/Default/hihat.wav',
-  clap: 'samples/Default/clap.wav',
+  kick: 'samples/Akei/MPC-3000/Drums/MPC-3000_Kick_001.wav',
+  snare: 'samples/Akei/MPC-3000/Drums/MPC-3000_Snare_001.wav',
+  hihat: 'samples/Akei/MPC-3000/Drums/MPC-3000_HiHat_001.wav',
+  clap: 'samples/Akei/MPC-3000/Drums/MPC-3000_Clap_001.wav',
 };
 
 // Star icon for favorites
