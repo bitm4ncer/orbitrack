@@ -496,7 +496,7 @@ export const useStore = create<StoreState>((set, get) => ({
   orbitDisplayMode: ((): 'classic' | 'led' | 'rotate' | 'chase' => {
     const stored = localStorage.getItem('orbitrack:orbitDisplayMode');
     if (stored === 'classic' || stored === 'led' || stored === 'rotate' || stored === 'chase') return stored;
-    return 'led';
+    return 'chase';
   })(),
   setOrbitDisplayMode: (mode: 'classic' | 'led' | 'rotate' | 'chase') => {
     localStorage.setItem('orbitrack:orbitDisplayMode', mode);

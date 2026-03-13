@@ -582,10 +582,10 @@ export function SettingsPopup({ onClose }: { onClose: () => void }) {
 // ── Display Settings Tab ─────────────────────────────────────────────────────
 
 const ORB_MODES: { id: 'classic' | 'led' | 'rotate' | 'chase'; label: string; desc: string }[] = [
+  { id: 'chase', label: 'Chase', desc: 'Fixed dot ring — colored hits chase clockwise through the grid' },
   { id: 'classic', label: 'Classic', desc: 'Smooth dots on a ring with trigger line' },
   { id: 'led', label: 'LED', desc: 'Fixed grid of LED dots that light up on hits' },
   { id: 'rotate', label: 'Dot Ring', desc: 'Fixed circle of dots — colored hits rotate past bottom indicator' },
-  { id: 'chase', label: 'Chase', desc: 'Fixed dot ring — colored hits chase clockwise through the grid' },
 ];
 
 function DisplaySettings() {
