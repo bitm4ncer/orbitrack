@@ -135,23 +135,25 @@ export function sampleListPlugin(): Plugin {
       });
     },
     generateBundle() {
-      // Emit samples.json from root samples/ only (no public/samples/ merge)
       const rootSamples = path.join(rootDir, 'samples');
-      const sampleTree = readSampleDir(rootSamples, 'samples');
-      this.emitFile({
-        type: 'asset',
-        fileName: 'samples.json',
-        source: JSON.stringify(sampleTree),
-      });
-
-      // Emit loops.json from root loops/
       const rootLoops = path.join(rootDir, 'loops');
-      const loopTree = readSampleDir(rootLoops, 'loops');
-      this.emitFile({
-        type: 'asset',
-        fileName: 'loops.json',
-        source: JSON.stringify(loopTree),
-      });
+      const publicDir = path.join(rootDir, 'public');
+
+      // If local sample/loop dirs exist, scan them to generate manifests.
+      // Otherwise fall back to committed public/samples.json & public/loops.json
+      // (used in CI where sample dirs are not checked out).
+      const hasSampleDir = fs.existsSync(rootSamples) && fs.readdirSync(rootSamples).length > 1;
+      const hasLoopDir = fs.existsSync(rootLoops) && fs.readdirSync(rootLoops).length > 0;
+
+      const sampleJson = hasSampleDir
+        ? JSON.stringify(readSampleDir(rootSamples, 'samples'))
+        : fs.readFileSync(path.join(publicDir, 'samples.json'), 'utf-8');
+      this.emitFile({ type: 'asset', fileName: 'samples.json', source: sampleJson });
+
+      const loopJson = hasLoopDir
+        ? JSON.stringify(readSampleDir(rootLoops, 'loops'))
+        : fs.readFileSync(path.join(publicDir, 'loops.json'), 'utf-8');
+      this.emitFile({ type: 'asset', fileName: 'loops.json', source: loopJson });
     },
     closeBundle() {
       if (!isBuild) return;
