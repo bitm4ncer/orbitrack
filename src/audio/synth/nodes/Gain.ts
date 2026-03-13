@@ -24,12 +24,9 @@ export class GainNode_ {
   }
 
   setGain(val: number, time = 0): void {
-    this.node.gain.cancelScheduledValues(this.ac.currentTime);
-    if (time) {
-      this.node.gain.setValueAtTime(this.node.gain.value, this.ac.currentTime);
-      this.node.gain.setTargetAtTime(val, this.ac.currentTime, time);
-    } else {
-      this.node.gain.setValueAtTime(val, this.ac.currentTime);
-    }
+    const now = this.ac.currentTime;
+    // Always use smooth ramp (20ms default) to prevent clicks on parameter changes.
+    // The old approach (cancelScheduledValues + setValueAtTime) caused instant jumps.
+    this.node.gain.setTargetAtTime(val, now, time || 0.02);
   }
 }

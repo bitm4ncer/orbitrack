@@ -20,7 +20,10 @@ export type LFOTriggerMode = 'free' | 'retrig' | 'envelope';
 
 export type LFOShape = OscillatorType | 'expDecay' | 'expRise' | 'punch' | 'halfSine' | 'staircase';
 
+export type LFOMode = 'lfo' | 'stepseq';
+
 export interface LFOSlotParams {
+  mode: LFOMode;                  // 'lfo' (default) or 'stepseq'
   shape: LFOShape;
   rate: number;                   // Hz (when not tempo-synced)
   tempoSync: boolean;
@@ -29,6 +32,7 @@ export interface LFOSlotParams {
   smooth: number;                 // 0-1
   delay: number;                  // 0-2s fade-in
   phase: number;                  // 0-1 initial phase offset
+  steps: number[];                // 16 values, -1 to +1 (step sequencer mode)
 }
 
 export interface ModAssignment {
@@ -39,6 +43,7 @@ export interface ModAssignment {
 }
 
 export const DEFAULT_LFO_SLOT: LFOSlotParams = {
+  mode: 'lfo',
   shape: 'sine',
   rate: 1,
   tempoSync: false,
@@ -47,6 +52,7 @@ export const DEFAULT_LFO_SLOT: LFOSlotParams = {
   smooth: 0,
   delay: 0,
   phase: 0,
+  steps: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 };
 
 // ── Synth params ────────────────────────────────────────────────────────────
@@ -83,9 +89,10 @@ export interface SynthParams {
   unisonVoices: number;   // 1–7
   unisonDetune: number;   // 0–50 cents spread
   unisonSpread: number;   // 0–1 stereo width
+  unisonDrift: number;    // 0–1 analog drift amount
 
   // Filter
-  filterType: BiquadFilterType;
+  filterType: BiquadFilterType | 'ladder' | 'comb+' | 'comb-';
   filterFreq: number;
   filterQ: number;
   filterAttack: number;
@@ -104,6 +111,10 @@ export interface SynthParams {
   lfo2Shape: OscillatorType;
   lfo2Dest: LFODestination;
 
+  // Ring Mod
+  ringModEnabled: boolean;
+  ringModMix: number;     // 0–1 dry/wet
+
   // FM
   fmEnabled: boolean;
   fmRatio: number;   // 0.5–8
@@ -120,6 +131,7 @@ export interface SynthParams {
   reverbAmount: number;
 
   // Distortion
+  distortionType: number;    // 0=soft, 1=hard, 2=tanh, 3=fold, 4=asym, 5=rectify, 6=fuzz
   distortionDist: number;
   distortionAmount: number;
 
@@ -130,6 +142,10 @@ export interface SynthParams {
   // Wavetable
   wtPosition: number;      // 0–1, position within wavetable bank
 
+  // String oscillator (Karplus-Strong)
+  stringDamping: number;   // 200–12000 Hz (damping filter cutoff)
+  stringDecay: number;     // 0.9–0.999 (feedback amount)
+
   // Modulation (new system — 4 LFO slots + assignments)
   lfos: [LFOSlotParams, LFOSlotParams, LFOSlotParams, LFOSlotParams];
   modAssignments: ModAssignment[];
@@ -137,4 +153,6 @@ export interface SynthParams {
   // Poly / Glide
   maxVoices: number;       // 1–8
   portamentoSpeed: number;
+  portamentoCurve: 'lin' | 'log' | 'exp';  // glide curve shape
+  portamentoLegato: boolean;               // only glide when overlapping notes
 }

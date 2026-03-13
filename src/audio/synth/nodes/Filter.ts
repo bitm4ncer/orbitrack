@@ -27,25 +27,18 @@ export class Filter {
 
   setFreq(freq: number, time = 0): void {
     if (freq < 0 || freq > MAX_FREQ) return;
-    if (time) {
-      this.node.frequency.setTargetAtTime(freq, this.ac.currentTime, time);
-    } else {
-      this.node.frequency.setValueAtTime(freq, this.ac.currentTime);
-    }
+    // Always smooth — instant setValueAtTime causes zipper noise
+    this.node.frequency.setTargetAtTime(freq, this.ac.currentTime, time || 0.02);
   }
 
   setQ(q: number): void {
     if (q < 0 || q > MAX_Q) return;
-    this.node.Q.setValueAtTime(q, this.ac.currentTime);
+    // Smooth Q changes to prevent resonance spikes
+    this.node.Q.setTargetAtTime(q, this.ac.currentTime, 0.02);
   }
 
   setDetune(val: number, time = 0): void {
-    this.node.detune.cancelScheduledValues(this.ac.currentTime);
-    if (time) {
-      this.node.detune.setValueAtTime(this.node.detune.value, this.ac.currentTime);
-      this.node.detune.setTargetAtTime(val, this.ac.currentTime, time);
-    } else {
-      this.node.detune.setValueAtTime(val, this.ac.currentTime);
-    }
+    // Smooth detune changes
+    this.node.detune.setTargetAtTime(val, this.ac.currentTime, time || 0.02);
   }
 }

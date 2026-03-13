@@ -114,31 +114,21 @@ export function GridSequencer() {
 
   const instrument = instruments.find((i) => i.id === selectedId);
 
-  // ── Octave scroll via mouse wheel (or velocity scroll if hovering over note) ──────────────────────────────────────
+  // ── Velocity scroll via mouse wheel when hovering over a note ──────────────────────────────────────
   useEffect(() => {
     const el = gridContainerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      // Only intercept scroll when hovering over a note hit (velocity adjustment)
+      if (!hoveredHitRef.current) return;
+
       e.preventDefault();
       const store = useStore.getState();
-
-      // Check if hovering over a note hit — if so, adjust velocity instead of octave
-      if (hoveredHitRef.current) {
-        const { instrumentId, hitIndex } = hoveredHitRef.current;
-        const vel = store.gridVelocities[instrumentId]?.[hitIndex] ?? 100;
-        const delta = e.deltaY < 0 ? 5 : -5;
-        const newVel = Math.max(1, Math.min(127, vel + delta));
-        store.setGridVelocity(instrumentId, hitIndex, newVel);
-        return;
-      }
-
-      // Otherwise, adjust octave
-      const offset = store.octaveOffset;
-      if (e.deltaY < 0) {
-        store.setOctaveOffset(Math.min(7, offset + 1));
-      } else {
-        store.setOctaveOffset(Math.max(0, offset - 1));
-      }
+      const { instrumentId, hitIndex } = hoveredHitRef.current;
+      const vel = store.gridVelocities[instrumentId]?.[hitIndex] ?? 100;
+      const delta = e.deltaY < 0 ? 5 : -5;
+      const newVel = Math.max(1, Math.min(127, vel + delta));
+      store.setGridVelocity(instrumentId, hitIndex, newVel);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -371,24 +361,24 @@ export function GridSequencer() {
     }
   }, [instrument, selectedNotes, buildStepMap, collectSelectedNoteData]);
 
-  // Scroll to center C4 in viewport (must be before early return)
-  const centerNote = (octaveOffset + 3) * 12;
-  const startNote = Math.max(0, Math.floor(centerNote - 48));
-  const endNote = Math.min(127, Math.floor(centerNote + 24));
+  // Render all 128 MIDI notes for smooth scrolling
   const allRowsForScroll: number[] = [];
-  for (let i = endNote; i >= startNote; i--) allRowsForScroll.push(i);
+  for (let i = 127; i >= 0; i--) allRowsForScroll.push(i);
 
+  // Scroll to center on octaveOffset region when it changes
+  const prevOctaveRef = useRef(octaveOffset);
   useEffect(() => {
-    // Only scroll on initial mount to center C4, don't scroll on every octave change
     if (!scrollContainerRef.current) return;
-    const C4_MIDI = 60;
-    const C4_RowIndex = allRowsForScroll.indexOf(C4_MIDI);
-    if (C4_RowIndex === -1) return;
+    const centerNote = (octaveOffset + 3) * 12;
+    const centerRowIdx = allRowsForScroll.indexOf(Math.min(127, Math.max(0, centerNote)));
+    if (centerRowIdx === -1) return;
 
     const viewportHeight = scrollContainerRef.current.clientHeight;
-    const scrollTop = C4_RowIndex * ROW_H - (viewportHeight / 2) + (ROW_H / 2);
-    scrollContainerRef.current.scrollTop = Math.max(0, scrollTop);
-  }, []);
+    const scrollTop = centerRowIdx * ROW_H - (viewportHeight / 2) + (ROW_H / 2);
+    const behavior = prevOctaveRef.current !== octaveOffset ? 'smooth' : 'auto';
+    scrollContainerRef.current.scrollTo({ top: Math.max(0, scrollTop), behavior: behavior as ScrollBehavior });
+    prevOctaveRef.current = octaveOffset;
+  }, [octaveOffset]);
 
   if (!instrument) {
     return (

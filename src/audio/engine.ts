@@ -129,9 +129,16 @@ export function isAudioReady(): boolean {
  *
  * Returns the key that was registered.
  */
+const registeredSamples = new Set<string>();
+
 export function registerSampleForPlayback(pathOrUrl: string, blobUrl?: string): string {
   const last = pathOrUrl.split('/').pop() ?? pathOrUrl;
   const key = last.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  // Build a dedup key so we only register + log once per unique (key, source) pair
+  const dedupKey = blobUrl ? `${key}:blob` : `${key}:${pathOrUrl}`;
+  if (registeredSamples.has(dedupKey)) return key;
+  registeredSamples.add(dedupKey);
 
   if (blobUrl) {
     // Blob / object URL — must use empty base so superdough stores the URL as-is

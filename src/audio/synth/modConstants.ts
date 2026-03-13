@@ -35,6 +35,7 @@ export const MOD_PARAM_META: Partial<Record<keyof SynthParams, ParamMeta>> = {
   // Unison
   unisonDetune:  { min: 0, max: 50, label: 'Uni Det', unit: '¢' },
   unisonSpread:  { min: 0, max: 1,  label: 'Uni Sprd' },
+  unisonDrift:   { min: 0, max: 1,  label: 'Drift' },
 
   // FM
   fmDepth:       { min: 0, max: 500, label: 'FM Depth', unit: 'Hz' },

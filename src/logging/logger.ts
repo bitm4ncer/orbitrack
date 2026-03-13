@@ -139,7 +139,7 @@ class Logger {
 
   // ── Performance Snapshot ──
 
-  takePerformanceSnapshot() {
+  async takePerformanceSnapshot() {
     this._snapshotCount++;
     // Lazy import to avoid circular deps
     const snap: Record<string, unknown> = {};
@@ -155,11 +155,10 @@ class Logger {
         snap.currentTime = Math.round(ctx.currentTime * 100) / 100;
       }
 
-      // Store state (lazy access)
+      // Store state (lazy access via dynamic import)
       let state: any = null;
       try {
-        // Dynamic require to avoid circular
-        const { useStore } = require('../state/store');
+        const { useStore } = await import('../state/store');
         state = useStore.getState();
       } catch { /* ignore */ }
 

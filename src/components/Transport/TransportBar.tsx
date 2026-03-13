@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../../state/store';
 import { toggleTransport, setBpm } from '../../audio/transport';
@@ -318,6 +318,50 @@ function ShareMenu({ anchorRef, onClose }: { anchorRef: React.RefObject<HTMLButt
   );
 }
 
+function FullscreenButton() {
+  const [isFs, setIsFs] = useState(!!document.fullscreenElement);
+
+  useEffect(() => {
+    const handler = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
+  const toggle = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      document.documentElement.requestFullscreen();
+    }
+  };
+
+  return (
+    <button
+      onClick={toggle}
+      className="w-5 h-5 rounded-full border border-border text-text-secondary hover:border-white/30 hover:text-text-primary transition-colors flex items-center justify-center cursor-pointer"
+      title={isFs ? 'Exit fullscreen' : 'Enter fullscreen'}
+    >
+      <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        {isFs ? (
+          <>
+            <polyline points="4 14 4 10 0 10" />
+            <polyline points="12 2 12 6 16 6" />
+            <polyline points="14 4 12 6" />
+            <polyline points="2 12 4 10" />
+          </>
+        ) : (
+          <>
+            <polyline points="0 6 0 0 6 0" />
+            <polyline points="10 16 16 16 16 10" />
+            <line x1="0" y1="0" x2="5" y2="5" />
+            <line x1="11" y1="11" x2="16" y2="16" />
+          </>
+        )}
+      </svg>
+    </button>
+  );
+}
+
 export function TransportBar() {
   const isPlaying = useStore((s) => s.isPlaying);
   const bpm = useStore((s) => s.bpm);
@@ -461,6 +505,7 @@ export function TransportBar() {
         >
           i
         </button>
+        <FullscreenButton />
       </div>
 
       {infoOpen && <InfoPopup onClose={() => setInfoOpen(false)} />}

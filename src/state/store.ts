@@ -285,6 +285,16 @@ export interface StoreState {
   showPerformanceMonitor: boolean;
   setShowPerformanceMonitor: (enabled: boolean) => void;
 
+  // Synth panel mode: inline sidebar, floating window, or popout browser window
+  synthPanelMode: 'inline' | 'floating' | 'popout';
+  synthFloatPos: { x: number; y: number };
+  synthFloatSize: { w: number; h: number };
+  synthFloatMinimized: boolean;
+  setSynthPanelMode: (mode: 'inline' | 'floating' | 'popout') => void;
+  setSynthFloatPos: (pos: { x: number; y: number }) => void;
+  setSynthFloatSize: (size: { w: number; h: number }) => void;
+  setSynthFloatMinimized: (minimized: boolean) => void;
+
   // Logging
   logEnabled: boolean;
   showLogConsole: boolean;
@@ -554,12 +564,31 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ showPerformanceMonitor: enabled });
   },
 
+  synthPanelMode: (localStorage.getItem('orbitrack:synthPanelMode') as 'inline' | 'floating' | 'popout') || 'inline',
+  synthFloatPos: JSON.parse(localStorage.getItem('orbitrack:synthFloatPos') || '{"x":100,"y":100}'),
+  synthFloatSize: JSON.parse(localStorage.getItem('orbitrack:synthFloatSize') || '{"w":900,"h":600}'),
+  synthFloatMinimized: false,
+  setSynthPanelMode: (mode) => {
+    localStorage.setItem('orbitrack:synthPanelMode', mode);
+    set({ synthPanelMode: mode, synthFloatMinimized: false });
+  },
+  setSynthFloatPos: (pos) => {
+    localStorage.setItem('orbitrack:synthFloatPos', JSON.stringify(pos));
+    set({ synthFloatPos: pos });
+  },
+  setSynthFloatSize: (size) => {
+    localStorage.setItem('orbitrack:synthFloatSize', JSON.stringify(size));
+    set({ synthFloatSize: size });
+  },
+  setSynthFloatMinimized: (minimized) => set({ synthFloatMinimized: minimized }),
+
   logEnabled: localStorage.getItem('orbitrack:logEnabled') === 'true',
   showLogConsole: localStorage.getItem('orbitrack:showLogConsole') === 'true',
   setLogEnabled: (enabled: boolean) => {
     localStorage.setItem('orbitrack:logEnabled', enabled ? 'true' : 'false');
-    const { log } = require('../logging/logger');
-    if (enabled) log.enable(); else log.disable();
+    import('../logging/logger').then(({ log }) => {
+      if (enabled) log.enable(); else log.disable();
+    });
     set({ logEnabled: enabled });
   },
   setShowLogConsole: (show: boolean) => {
@@ -786,6 +815,7 @@ export const useStore = create<StoreState>((set, get) => ({
   removeInstrument: (id) => {
     const s = get();
     const inst = s.instruments.find((i) => i.id === id);
+    import('../logging/logger').then(({ log }) => log.info('store', `Instrument removed: ${inst?.name ?? id}`, { type: inst?.type, orbitIndex: inst?.orbitIndex }));
     // Clean up synth engine if it's a synth instrument
     if (inst?.type === 'synth') removeSynthEngine(id);
     // Destroy the orbit effect chain ONLY if no other instrument shares this orbit
@@ -1373,9 +1403,8 @@ export const useStore = create<StoreState>((set, get) => ({
     // For imported samples (blob URLs), look up the actual blob URL from state
     const customSamples = get().customSamples;
     const custom = customSamples.find((c) => c.key === samplePath);
-    const sdKey = custom
-      ? registerSampleForPlayback(samplePath, custom.url)
-      : registerSampleForPlayback(samplePath);
+    // Register once here — preloadSample skips re-registration via its loaded-set guard
+    const sdKey = registerSampleForPlayback(samplePath, custom?.url);
     loadSample(samplePath, custom?.url ?? samplePath);
     if (custom) {
       void preloadCustomSample(sdKey, custom.url);
@@ -1428,6 +1457,7 @@ export const useStore = create<StoreState>((set, get) => ({
         return { sceneEffects: { ...s.sceneEffects, [gid]: [...prev, effect] } };
       }
       const prev = s.instrumentEffects[instrumentId] ?? [];
+      import('../logging/logger').then(({ log }) => log.info('store', `Effect added: ${type}`, { instrumentId }));
       return { instrumentEffects: { ...s.instrumentEffects, [instrumentId]: [...prev, effect] } };
     }),
 
@@ -2104,7 +2134,10 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   startRecording: () => {
-    if (recStart()) set({ isRecording: true });
+    if (recStart()) {
+      set({ isRecording: true });
+      import('../logging/logger').then(({ log }) => log.info('store', 'Recording started'));
+    }
   },
 
   stopRecording: async () => {
@@ -2118,6 +2151,7 @@ export const useStore = create<StoreState>((set, get) => ({
         folderId: null, format: recordingFormat, order,
       };
       set((s) => ({ isRecording: false, recordings: [...s.recordings, newRec] }));
+      import('../logging/logger').then(({ log }) => log.info('store', `Recording stopped: ${newRec.name}`, { duration: result.duration, format: recordingFormat }));
       dbSaveRec(newRec).catch(console.error);
       postSync({ type: 'recording-added', id: newRec.id });
     } else {
@@ -2821,6 +2855,7 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   loadSet: (orbitrackSet: OrbitrackSet) => {
+    import('../logging/logger').then(({ log }) => log.info('store', `Set loaded: ${orbitrackSet.meta?.name ?? 'unnamed'}`, { instruments: orbitrackSet.instruments?.length, scenes: orbitrackSet.scenes?.length }));
     // Tear down existing group buses before loading new state
     destroyAllSceneBuses();
 
@@ -2900,7 +2935,7 @@ export const useStore = create<StoreState>((set, get) => ({
     } catch { /* quota exceeded or private mode */ }
 
     // Re-init looper editors — async decode + BPM detection
-    const baseUrl = ((import.meta.env.BASE_URL as string) ?? '/').replace(/\/$/, '') + '/';
+    const baseUrl = SAMPLE_BASE_URL;
     for (const inst of orbitrackSet.instruments) {
       if (inst.type === 'looper' && inst.samplePath) {
         const custom = customSamples.find((c) => c.key === inst.samplePath);

@@ -21,7 +21,7 @@ import * as Tone from 'tone';
 import { seedFactory } from './storage/seedFactory';
 import { seedEffectFactory } from './storage/seedEffectFactory';
 import { initRecordingSync } from './storage/recordingSync';
-import { restoreFromSetId, restoreLegacyAutosave, initSessionAutosave, getLastSetId } from './storage/sessionAutosave';
+import { restoreFromSetId, restoreLegacyAutosave, initSessionAutosave, getLastSetId, restoreEmergencySnapshot, clearEmergencySnapshot } from './storage/sessionAutosave';
 import { initUndoHistory } from './state/undoHistory';
 import { parseShareHash, decodeSetFromUrl } from './storage/urlShare';
 import { perfMonitor } from './debug/perfMonitor';
@@ -72,7 +72,23 @@ function App() {
   const { height: bottomHeight, onMouseDown: onResizeMouseDown } = useResizable(DEFAULT_BOTTOM_H);
   const { size: layerWidth, onMouseDown: onLayerResizeDown, isDragging: layerIsDragging } = useResizable(300, 160, 'x');
   const { size: fxWidth, onMouseDown: onFxResizeDown, isDragging: fxIsDragging } = useResizable(300, 160, 'x');
-  const { size: rightPanelWidth, onMouseDown: onRightPanelResizeDown, isDragging: rightIsDragging } = useResizable(300, 160, 'x');
+  // Synth wide mode: measure bottom bar width, override right panel to ~50%
+  const synthWideMode = useStore((s) => s.synthWideMode);
+  const bottomBarRef = useRef<HTMLDivElement>(null);
+  const [bottomBarWidth, setBottomBarWidth] = useState(0);
+
+  useEffect(() => {
+    const el = bottomBarRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => setBottomBarWidth(entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const wideModeOverride = synthWideMode && isSynthSelected
+    ? Math.max(500, Math.floor(bottomBarWidth * 0.5))
+    : null;
+  const { size: rightPanelWidth, onMouseDown: onRightPanelResizeDown, isDragging: rightIsDragging } = useResizable(300, 160, 'x', 1, wideModeOverride);
 
   // Delayed unmount: keep content rendered during the close animation
   const [bottomContentMounted, setBottomContentMounted] = useState(hasSelection);
@@ -132,6 +148,14 @@ function App() {
         // Migration: try legacy __autosave__ entry
         restored = await restoreLegacyAutosave();
       }
+
+      if (!restored) {
+        // Last resort: check for emergency localStorage snapshot (saved on beforeunload)
+        restored = restoreEmergencySnapshot();
+      }
+
+      // Clear emergency snapshot now that we've either restored from it or from IDB
+      clearEmergencySnapshot();
 
       // Seed factory presets & hydrate recordings
       seedFactory();
@@ -255,6 +279,7 @@ function App() {
           </div>
           {bottomContentMounted && (
             <div
+              ref={bottomBarRef}
               className="synth-bottom-bar flex overflow-hidden min-h-0"
               style={{ height: bottomHeight }}
             >

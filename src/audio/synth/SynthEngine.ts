@@ -24,6 +24,9 @@ import { Delay } from './nodes/Delay';
 import { Reverb } from './nodes/Reverb';
 import { Distortion } from './nodes/Distortion';
 import { BitCrusher } from './nodes/BitCrusher';
+import { LadderFilter } from './nodes/LadderFilter';
+import { CombFilter } from './nodes/CombFilter';
+import { KarplusStrong } from './nodes/KarplusStrong';
 import { SYNTH_PRESETS } from './presets';
 import type { SynthParams } from './types';
 import { DEFAULT_LFO_SLOT } from './types';
@@ -35,6 +38,14 @@ import { midiNoteToFreq } from '../../utils/music';
 /** Fill in missing fields for backward-compatible preset loading. */
 function ensureDefaults(p: Partial<SynthParams>): SynthParams {
   if (p.wtPosition === undefined) p.wtPosition = 0;
+  if (p.distortionType === undefined) p.distortionType = 0;
+  if (p.unisonDrift === undefined) p.unisonDrift = 0;
+  if (p.portamentoCurve === undefined) p.portamentoCurve = 'exp';
+  if (p.portamentoLegato === undefined) p.portamentoLegato = false;
+  if (p.ringModEnabled === undefined) p.ringModEnabled = false;
+  if (p.ringModMix === undefined) p.ringModMix = 0.5;
+  if (p.stringDamping === undefined) p.stringDamping = 4000;
+  if (p.stringDecay === undefined) p.stringDecay = 0.995;
   if (!p.lfos) {
     p.lfos = [
       { ...DEFAULT_LFO_SLOT, rate: p.lfo1Rate ?? 4, shape: (p.lfo1Shape as OscillatorType) ?? 'sine' },
@@ -42,6 +53,11 @@ function ensureDefaults(p: Partial<SynthParams>): SynthParams {
       { ...DEFAULT_LFO_SLOT },
       { ...DEFAULT_LFO_SLOT },
     ];
+  }
+  // Ensure LFO slots have new fields
+  for (const lfo of p.lfos) {
+    if (lfo.mode === undefined) (lfo as Record<string, unknown>).mode = 'lfo';
+    if (!lfo.steps) (lfo as Record<string, unknown>).steps = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   }
   if (!p.modAssignments) {
     p.modAssignments = [];
@@ -59,7 +75,7 @@ function ensureDefaults(p: Partial<SynthParams>): SynthParams {
 }
 
 const MAX_VOICES = 8;
-const MAX_UNISON = 5;
+const MAX_UNISON = 7;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PolyVoice: one polyphonic slot
@@ -77,6 +93,15 @@ class PolyVoice {
   fmOsc: OscillatorNode;         // FM modulator
   fmGain: GainNode;              // FM depth → carrier.frequency
   voiceGain: GainNode;           // ADSR envelope
+  // Ring modulation: sub1 × main
+  ringModGain: GainNode;         // main osc passes through; sub1 connects to .gain
+  ringModWetGain: GainNode;      // wet mix for ring mod output
+  ringModActive = false;
+  // String oscillator (Karplus-Strong)
+  stringOsc: KarplusStrong;
+  // Drift: per-unison-voice slow LFOs for analog wander
+  driftOscs: OscillatorNode[];
+  driftGains: GainNode[];
   triggeredAt = 0;
   releaseEnd = 0;                // approx time voice becomes silent
   currentMidiNote: number | null = null; // track which note this voice is playing
@@ -105,6 +130,34 @@ class PolyVoice {
       this.mainPanners.push(panner);
     }
 
+    // Drift oscillators (slow LFOs for analog pitch wander per unison voice)
+    this.driftOscs = [];
+    this.driftGains = [];
+    for (let i = 0; i < MAX_UNISON; i++) {
+      const driftOsc = ac.createOscillator();
+      const driftGain = ac.createGain();
+      // Random rate between 0.1–0.4Hz per voice for independent wander
+      driftOsc.frequency.value = 0.1 + Math.random() * 0.3;
+      driftGain.gain.value = 0; // starts off — enabled via setDrift()
+      driftOsc.connect(driftGain);
+      driftGain.connect(this.mainOscs[i].detune);
+      driftOsc.start();
+      this.driftOscs.push(driftOsc);
+      this.driftGains.push(driftGain);
+    }
+
+    // String oscillator (Karplus-Strong) — connected to voiceGain, muted when not in string mode
+    this.stringOsc = new KarplusStrong(ac);
+    this.stringOsc.connect(this.voiceGain);
+
+    // Ring modulation node (main osc → ringModGain, sub1 → ringModGain.gain = multiplication)
+    this.ringModGain = ac.createGain();
+    this.ringModGain.gain.value = 0; // sub1 will drive this via AudioParam connection
+    this.ringModWetGain = ac.createGain();
+    this.ringModWetGain.gain.value = 0; // ring mod off by default
+    this.ringModGain.connect(this.ringModWetGain);
+    this.ringModWetGain.connect(this.voiceGain);
+
     // Sub oscillators
     this.sub1Osc = ac.createOscillator();
     this.sub1Gain = ac.createGain();
@@ -131,6 +184,35 @@ class PolyVoice {
     }
   }
 
+  /** Enable/disable ring modulation (sub1 × main oscillators) */
+  setRingMod(enabled: boolean, mix: number): void {
+    const now = this.ac.currentTime;
+    if (enabled && !this.ringModActive) {
+      // Wire: main oscs also connect to ringModGain, sub1 connects to ringModGain.gain
+      for (const panner of this.mainPanners) {
+        panner.connect(this.ringModGain);
+      }
+      this.sub1Osc.connect(this.ringModGain.gain);
+      this.ringModActive = true;
+    } else if (!enabled && this.ringModActive) {
+      // Unwire ring mod
+      for (const panner of this.mainPanners) {
+        try { panner.disconnect(this.ringModGain); } catch { /* ignore */ }
+      }
+      try { this.sub1Osc.disconnect(this.ringModGain.gain); } catch { /* ignore */ }
+      this.ringModActive = false;
+    }
+    this.ringModWetGain.gain.setTargetAtTime(enabled ? mix : 0, now, 0.02);
+  }
+
+  /** Update drift amount (0 = off, 1 = max ~15 cents wander) */
+  setDrift(amount: number): void {
+    const maxCents = 15;
+    for (const g of this.driftGains) {
+      g.gain.setTargetAtTime(amount * maxCents, this.ac.currentTime, 0.02);
+    }
+  }
+
   /** Stop all oscillators and disconnect all nodes in this voice. */
   dispose(): void {
     for (const osc of this.mainOscs) {
@@ -139,6 +221,11 @@ class PolyVoice {
     }
     for (const g of this.mainGains) { try { g.disconnect(); } catch { /* ignore */ } }
     for (const p of this.mainPanners) { try { p.disconnect(); } catch { /* ignore */ } }
+    for (const osc of this.driftOscs) { try { osc.stop(); } catch { /* ignore */ } try { osc.disconnect(); } catch { /* ignore */ } }
+    for (const g of this.driftGains) { try { g.disconnect(); } catch { /* ignore */ } }
+    try { this.ringModGain.disconnect(); } catch { /* ignore */ }
+    try { this.ringModWetGain.disconnect(); } catch { /* ignore */ }
+    this.stringOsc.dispose();
     try { this.sub1Osc.stop(); } catch { /* already stopped */ }
     try { this.sub1Osc.disconnect(); } catch { /* ignore */ }
     try { this.sub1Gain.disconnect(); } catch { /* ignore */ }
@@ -158,6 +245,7 @@ class PolyVoice {
     duration: number,
     p: SynthParams,
     gainScale = 1,
+    skipGlide = false,
   ): void {
     const now = Math.max(audioTime, this.ac.currentTime + 0.001);
     const attack = Math.max(p.gainAttack, 0.001);
@@ -180,15 +268,27 @@ class PolyVoice {
     g.setTargetAtTime(0, releaseStart, release / 5);
 
     // Set frequencies with portamento
-    this.setFrequencies(midiNote, p, now);
+    this.setFrequencies(midiNote, p, now, skipGlide);
 
     // Filter envelope
     this.triggerFilterEnv(p, now, attackEnd);
   }
 
-  setFrequencies(midiNote: number, p: SynthParams, when: number): void {
+  setFrequencies(midiNote: number, p: SynthParams, when: number, skipGlide = false): void {
     const freq = midiNoteToFreq(midiNote + Math.round(p.vcoOctave ?? 0) * 12);
-    const glideTime = p.portamentoSpeed > 0 ? p.portamentoSpeed : 0;
+    const glideTime = (!skipGlide && p.portamentoSpeed > 0) ? p.portamentoSpeed : 0;
+    const isString = p.vcoType === 'string';
+
+    // String oscillator mode
+    if (isString) {
+      this.stringOsc.setDamping(p.stringDamping ?? 4000);
+      this.stringOsc.setDecay(p.stringDecay ?? 0.995);
+      this.stringOsc.trigger(freq, when);
+      // Mute all main oscillators
+      for (let i = 0; i < MAX_UNISON; i++) {
+        this.mainGains[i].gain.setValueAtTime(0, when);
+      }
+    }
 
     // Unison main oscillators
     const numUnison = Math.max(1, Math.round(p.unisonVoices));
@@ -215,10 +315,17 @@ class PolyVoice {
         this.mainOscs[i].detune.cancelScheduledValues(when);
         this.mainOscs[i].detune.setValueAtTime(detuneCents, when);
 
+        this.mainOscs[i].frequency.cancelScheduledValues(when);
         if (glideTime > 0) {
-          this.mainOscs[i].frequency.setTargetAtTime(freq, when, glideTime);
+          const curve = p.portamentoCurve ?? 'exp';
+          if (curve === 'lin') {
+            this.mainOscs[i].frequency.linearRampToValueAtTime(freq, when + glideTime * 3);
+          } else if (curve === 'log') {
+            this.mainOscs[i].frequency.exponentialRampToValueAtTime(Math.max(freq, 0.01), when + glideTime * 3);
+          } else {
+            this.mainOscs[i].frequency.setTargetAtTime(freq, when, glideTime);
+          }
         } else {
-          this.mainOscs[i].frequency.cancelScheduledValues(when);
           this.mainOscs[i].frequency.setValueAtTime(freq, when);
         }
 
@@ -284,6 +391,10 @@ export class SynthEngine {
   // Shared signal chain nodes
   private voiceSumNode: GainNode;        // all voices merge here
   private filterNode: BiquadFilterNode;
+  private ladderFilter: LadderFilter;
+  private combFilterPos: CombFilter;
+  private combFilterNeg: CombFilter;
+  private activeFilterType: string = 'lowpass'; // tracks which filter is wired
   private filterEnvGain: GainNode;       // offset for filter envelope
   private distortionNode: Distortion;
   private delayNode: Delay;
@@ -308,6 +419,10 @@ export class SynthEngine {
     this.filterNode.type = 'lowpass';
     this.filterNode.frequency.value = 6000;
     this.filterNode.Q.value = 0;
+
+    this.ladderFilter = new LadderFilter(ac);
+    this.combFilterPos = new CombFilter(ac, false);
+    this.combFilterNeg = new CombFilter(ac, true);
 
     this.filterEnvGain = ac.createGain();
     this.filterEnvGain.gain.value = 0;
@@ -336,10 +451,7 @@ export class SynthEngine {
   init(): void {
     if (this.initialized) return;
 
-    // Signal chain:
-    // voiceSumNode → filterNode → distortion → delay → reverb → volumeNode
-    this.voiceSumNode.connect(this.filterNode);
-
+    // Post-filter signal chain (filter-agnostic):
     this.distortionNode.connect(this.delayNode.getDryInput());
     this.distortionNode.connect(this.delayNode.getWetInput());
 
@@ -351,12 +463,8 @@ export class SynthEngine {
 
     this.reverbNode.connect(this.volumeNode);
 
-    // filterNode → distortion (dry + wet)
-    this.filterNode.connect(this.distortionNode.getDryInput());
-    this.filterNode.connect(this.distortionNode.getWetInput());
-
-    // filterEnvGain → filterNode.detune (used for filter envelope)
-    this.filterEnvGain.connect(this.filterNode.detune);
+    // Wire the initial filter type
+    this.wireFilter(this.params.filterType ?? 'lowpass');
 
     // Voice pool
     for (let i = 0; i < MAX_VOICES; i++) {
@@ -384,6 +492,49 @@ export class SynthEngine {
     this.initialized = true;
   }
 
+  /** Connect voiceSumNode → active filter → distortion, switching between biquad/ladder/comb */
+  private wireFilter(filterType: string): void {
+    // Disconnect previous filter routing
+    try { this.voiceSumNode.disconnect(); } catch { /* ignore */ }
+    try { this.filterNode.disconnect(); } catch { /* ignore */ }
+    try { this.ladderFilter.disconnect(); } catch { /* ignore */ }
+    try { this.combFilterPos.disconnect(); } catch { /* ignore */ }
+    try { this.combFilterNeg.disconnect(); } catch { /* ignore */ }
+    try { this.filterEnvGain.disconnect(); } catch { /* ignore */ }
+
+    const connectToDistortion = (output: AudioNode) => {
+      output.connect(this.distortionNode.getDryInput());
+      output.connect(this.distortionNode.getWetInput());
+    };
+
+    if (filterType === 'ladder') {
+      this.voiceSumNode.connect(this.ladderFilter.getInput());
+      connectToDistortion(this.ladderFilter.getOutput());
+      this.filterEnvGain.connect(this.ladderFilter.detune);
+      this.ladderFilter.setFrequency(this.params.filterFreq);
+      this.ladderFilter.setResonance(this.params.filterQ);
+    } else if (filterType === 'comb+') {
+      this.voiceSumNode.connect(this.combFilterPos.getInput());
+      connectToDistortion(this.combFilterPos.getOutput());
+      this.filterEnvGain.connect(this.combFilterPos.detune);
+      this.combFilterPos.setFrequency(this.params.filterFreq);
+      this.combFilterPos.setResonance(this.params.filterQ);
+    } else if (filterType === 'comb-') {
+      this.voiceSumNode.connect(this.combFilterNeg.getInput());
+      connectToDistortion(this.combFilterNeg.getOutput());
+      this.filterEnvGain.connect(this.combFilterNeg.detune);
+      this.combFilterNeg.setFrequency(this.params.filterFreq);
+      this.combFilterNeg.setResonance(this.params.filterQ);
+    } else {
+      // Standard biquad filter
+      this.voiceSumNode.connect(this.filterNode);
+      connectToDistortion(this.filterNode);
+      this.filterEnvGain.connect(this.filterNode.detune);
+    }
+
+    this.activeFilterType = filterType;
+  }
+
   getOutputNode(): AudioNode {
     return this.volumeNode;
   }
@@ -391,8 +542,13 @@ export class SynthEngine {
   // ─── Note Triggering ───────────────────────────────────────────────────────
 
   noteOn(midiNote: number, audioTime: number, duration: number, gainScale = 1): void {
+    // Legato check: skip glide if no voice is currently playing
+    const hasPlaying = this.params.portamentoLegato
+      ? this.voices.some(v => !v.isIdle(this.ac.currentTime))
+      : true;
+    const skipGlide = this.params.portamentoLegato && !hasPlaying;
     const voice = this.getOrStealVoice(audioTime);
-    voice.trigger(midiNote, audioTime, duration, this.params, gainScale);
+    voice.trigger(midiNote, audioTime, duration, this.params, gainScale, skipGlide);
     this.scheduleFilterEnv(audioTime, duration);
     this.modEngine.onNoteOn(audioTime);
   }
@@ -401,10 +557,15 @@ export class SynthEngine {
   noteOnNow(midiNote: number, velocity?: number): void {
     const now = this.ac.currentTime;
     const p = this.params;
+    // Legato check
+    const hasPlaying = p.portamentoLegato
+      ? this.voices.some(v => !v.isIdle(now))
+      : true;
+    const skipGlide = p.portamentoLegato && !hasPlaying;
     const voice = this.getOrStealVoice(now);
     // Convert velocity (0-127) to gainScale (0-1); default 1 if not provided
     const gainScale = velocity !== undefined ? Math.max(0, velocity / 127) : 1;
-    voice.trigger(midiNote, now, 10, p, gainScale); // 10s sustain — noteOff stops it
+    voice.trigger(midiNote, now, 10, p, gainScale, skipGlide); // 10s sustain — noteOff stops it
     this._lastLiveVoice = voice;
     this.scheduleFilterEnv(now, 10);
     this.modEngine.onNoteOn();
@@ -502,17 +663,33 @@ export class SynthEngine {
       case 'masterVolume':
         this.volumeNode.gain.setTargetAtTime(v, now, 0.02);
         break;
-      case 'filterType':
-        this.filterNode.type = value as BiquadFilterType;
+      case 'filterType': {
+        const ft = value as string;
+        if (ft !== this.activeFilterType) {
+          this.wireFilter(ft);
+        }
+        if (ft === 'lowpass' || ft === 'highpass' || ft === 'bandpass' || ft === 'notch') {
+          this.filterNode.type = ft;
+        }
         break;
+      }
       case 'filterFreq':
         this.filterNode.frequency.setTargetAtTime(Math.max(20, v), now, 0.02);
+        if (this.activeFilterType === 'ladder') this.ladderFilter.setFrequency(v);
+        if (this.activeFilterType === 'comb+') this.combFilterPos.setFrequency(v);
+        if (this.activeFilterType === 'comb-') this.combFilterNeg.setFrequency(v);
         break;
       case 'filterQ':
         this.filterNode.Q.setTargetAtTime(Math.max(0, v), now, 0.02);
+        if (this.activeFilterType === 'ladder') this.ladderFilter.setResonance(v);
+        if (this.activeFilterType === 'comb+') this.combFilterPos.setResonance(v);
+        if (this.activeFilterType === 'comb-') this.combFilterNeg.setResonance(v);
         break;
       case 'distortionDist':
-        this.distortionNode.setDistortion(v);
+        this.distortionNode.setDistortion(v, this.params.distortionType ?? 0);
+        break;
+      case 'distortionType':
+        this.distortionNode.setDistortion(this.params.distortionDist, v);
         break;
       case 'distortionAmount':
         this.distortionNode.setAmount(v);
@@ -581,7 +758,20 @@ export class SynthEngine {
       case 'fmEnabled':
       case 'fmRatio':
       case 'fmDepth':
-        // These take effect on next noteOn — no live update needed for sequencer
+      case 'portamentoCurve':
+      case 'portamentoLegato':
+      case 'stringDamping':
+      case 'stringDecay':
+        // These take effect on next noteOn
+        break;
+      case 'ringModEnabled':
+      case 'ringModMix':
+        for (const voice of this.voices) {
+          voice.setRingMod(this.params.ringModEnabled ?? false, this.params.ringModMix ?? 0.5);
+        }
+        break;
+      case 'unisonDrift':
+        for (const voice of this.voices) voice.setDrift(v);
         break;
     }
   }
@@ -613,14 +803,7 @@ export class SynthEngine {
   /** Update BPM for tempo-synced LFOs */
   setBpm(bpm: number): void {
     this.modEngine.bpm = bpm;
-    // Re-apply LFO rates if any are tempo-synced
-    if (this.params.lfos) {
-      for (let i = 0; i < this.params.lfos.length; i++) {
-        if (this.params.lfos[i].tempoSync) {
-          this.modEngine.updateLFO(i, this.params.lfos[i]);
-        }
-      }
-    }
+    // No need to re-apply — poll() reads bpm directly each frame
   }
 
   getParams(): SynthParams {
@@ -640,11 +823,21 @@ export class SynthEngine {
     const now = this.ac.currentTime;
 
     this.volumeNode.gain.setValueAtTime(p.masterVolume, now);
-    this.filterNode.type = p.filterType;
+    // Switch filter type if needed and sync params
+    const ft = p.filterType ?? 'lowpass';
+    if (ft !== this.activeFilterType) this.wireFilter(ft);
+    if (ft === 'lowpass' || ft === 'highpass' || ft === 'bandpass' || ft === 'notch') {
+      this.filterNode.type = ft;
+    }
     this.filterNode.frequency.setValueAtTime(Math.max(20, p.filterFreq), now);
     this.filterNode.Q.setValueAtTime(Math.max(0, p.filterQ), now);
-    this.distortionNode.setDistortion(p.distortionDist);
+    if (ft === 'ladder') { this.ladderFilter.setFrequency(p.filterFreq); this.ladderFilter.setResonance(p.filterQ); }
+    if (ft === 'comb+') { this.combFilterPos.setFrequency(p.filterFreq); this.combFilterPos.setResonance(p.filterQ); }
+    if (ft === 'comb-') { this.combFilterNeg.setFrequency(p.filterFreq); this.combFilterNeg.setResonance(p.filterQ); }
+    this.distortionNode.setDistortion(p.distortionDist, p.distortionType ?? 0);
     this.distortionNode.setAmount(p.distortionAmount);
+    // Apply drift to all voices
+    for (const voice of this.voices) voice.setDrift(p.unisonDrift ?? 0);
     this.delayNode.setDelayTime(p.delayTime);
     this.delayNode.setFeedback(p.delayFeedback);
     this.delayNode.setTone(p.delayTone);

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useStore } from '../../state/store';
 import { PASTEL_COLORS } from '../../canvas/colors';
+import { getScaleNotesInRange } from '../../generation/scaleUtils';
 import { getOrbitAnalyser } from '../../audio/orbitEffects';
 import { getMasterAnalyser } from '../../audio/routingEngine';
 import type { Instrument } from '../../types/instrument';
@@ -690,14 +691,43 @@ export function InstrumentRack() {
   const addSynth = () => {
     const store = useStore.getState();
     const color = PASTEL_COLORS[store.instruments.length % PASTEL_COLORS.length];
-    const loopSize = 32;
+    const loopSize = 16;
+
+    // Get scale notes in a 2-octave range based on the orb's current key
+    const lo = (store.octaveOffset + 1) * 12;  // e.g. octaveOffset=2 → MIDI 36 (C3)
+    const hi = lo + 23;                         // 2 octaves
+    const scaleNotes = getScaleNotesInRange(store.scaleRoot, store.scaleType, lo, hi);
+
+    // Generate a simple melodic pattern inline — no external generator needed
+    const notes: number[][] = [];
+    const positions: number[] = [];
+    if (scaleNotes.length > 0) {
+      const density = 0.5 + Math.random() * 0.2;
+      let idx = Math.floor(Math.random() * scaleNotes.length);
+      for (let step = 0; step < loopSize; step++) {
+        if (Math.random() > density) continue;
+        notes.push([scaleNotes[idx]]);
+        positions.push(step / loopSize);
+        // Walk: step up, down, or repeat with slight bias upward
+        const r = Math.random();
+        if (r < 0.4) idx = Math.min(idx + 1, scaleNotes.length - 1);
+        else if (r < 0.75) idx = Math.max(idx - 1, 0);
+        // else repeat same note
+      }
+    }
+
+    // Fallback if scale lookup or generation produced nothing
+    const hasNotes = notes.length > 0;
+    const finalPositions = hasNotes ? positions : Array.from({ length: loopSize }, (_, i) => i / loopSize);
+    const finalNotes = hasNotes ? notes : Array.from({ length: loopSize }, () => [60]);
+
     const newInst = {
       id: createId(),
       name: `Synth ${store.instruments.filter((i) => i.type === 'synth').length + 1}`,
       type: 'synth' as const,
       color,
-      hits: loopSize,
-      hitPositions: Array.from({ length: loopSize }, (_, i) => i / loopSize),
+      hits: finalPositions.length,
+      hitPositions: finalPositions,
       loopSize,
       loopSizeLocked: false,
       muted: false,
@@ -705,13 +735,12 @@ export function InstrumentRack() {
       volume: 0,
       orbitIndex: store.instruments.length,
     };
+
     useStore.setState({
       instruments: [...store.instruments, newInst],
-      gridNotes: {
-        ...store.gridNotes,
-        [newInst.id]: Array.from({ length: loopSize }, () => [60]),
-      },
+      gridNotes: { ...store.gridNotes, [newInst.id]: finalNotes },
     });
+
     store.selectInstrument(newInst.id);
   };
 

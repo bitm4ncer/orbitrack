@@ -51,6 +51,7 @@ export class Delay {
 
   setDelayTime(val: number): void {
     if (val < 0 || val > 1) return;
-    this.delayNode.delayTime.setValueAtTime(val, this.ac.currentTime);
+    // Smooth delay time changes to prevent audio glitches
+    this.delayNode.delayTime.setTargetAtTime(val, this.ac.currentTime, 0.02);
   }
 }

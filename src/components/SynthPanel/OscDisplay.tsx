@@ -55,52 +55,60 @@ export function OscDisplay({ waveType, color, wtPosition }: Props) {
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    const W = container.clientWidth || 260;
-    canvas.width  = W;
-    canvas.height = H;
+    const render = () => {
+      const W = Math.round(container.clientWidth) || 260;
+      canvas.width  = W;
+      canvas.height = H;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    const peak = getPeak(waveType, wtPosition);
-    const pad  = 4;
+      const peak = getPeak(waveType, wtPosition);
+      const pad  = 4;
 
-    // Background
-    ctx.fillStyle = '#0e0e18';
-    ctx.fillRect(0, 0, W, H);
+      // Background
+      ctx.fillStyle = '#0e0e18';
+      ctx.fillRect(0, 0, W, H);
 
-    // Center line
-    ctx.strokeStyle = '#2a2a3a';
-    ctx.lineWidth   = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, H / 2);
-    ctx.lineTo(W, H / 2);
-    ctx.stroke();
+      // Center line
+      ctx.strokeStyle = '#2a2a3a';
+      ctx.lineWidth   = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, H / 2);
+      ctx.lineTo(W, H / 2);
+      ctx.stroke();
 
-    // Waveform fill
-    ctx.beginPath();
-    ctx.moveTo(0, H / 2);
-    for (let i = 0; i <= W; i++) {
-      const t = i / W;
-      const y = H / 2 - (ySample(t, waveType, wtPosition) / peak) * (H / 2 - pad);
-      ctx.lineTo(i, y);
-    }
-    ctx.lineTo(W, H / 2);
-    ctx.closePath();
-    ctx.fillStyle = `${color}18`;
-    ctx.fill();
+      // Waveform fill
+      ctx.beginPath();
+      ctx.moveTo(0, H / 2);
+      for (let i = 0; i <= W; i++) {
+        const t = i / W;
+        const y = H / 2 - (ySample(t, waveType, wtPosition) / peak) * (H / 2 - pad);
+        ctx.lineTo(i, y);
+      }
+      ctx.lineTo(W, H / 2);
+      ctx.closePath();
+      ctx.fillStyle = `${color}18`;
+      ctx.fill();
 
-    // Waveform stroke
-    ctx.beginPath();
-    for (let i = 0; i <= W; i++) {
-      const t = i / W;
-      const y = H / 2 - (ySample(t, waveType, wtPosition) / peak) * (H / 2 - pad);
-      i === 0 ? ctx.moveTo(i, y) : ctx.lineTo(i, y);
-    }
-    ctx.strokeStyle = `${color}cc`;
-    ctx.lineWidth   = 1.5;
-    ctx.lineJoin    = 'round';
-    ctx.stroke();
+      // Waveform stroke
+      ctx.beginPath();
+      for (let i = 0; i <= W; i++) {
+        const t = i / W;
+        const y = H / 2 - (ySample(t, waveType, wtPosition) / peak) * (H / 2 - pad);
+        i === 0 ? ctx.moveTo(i, y) : ctx.lineTo(i, y);
+      }
+      ctx.strokeStyle = `${color}cc`;
+      ctx.lineWidth   = 1.5;
+      ctx.lineJoin    = 'round';
+      ctx.stroke();
+    };
+
+    render();
+
+    const ro = new ResizeObserver(() => render());
+    ro.observe(container);
+    return () => ro.disconnect();
   }, [waveType, color, wtPosition]);
 
   return (
@@ -108,7 +116,7 @@ export function OscDisplay({ waveType, color, wtPosition }: Props) {
       <canvas
         ref={canvasRef}
         height={H}
-        className="w-full block"
+        className="block"
         style={{ imageRendering: 'pixelated' }}
       />
     </div>

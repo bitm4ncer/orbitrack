@@ -132,12 +132,13 @@ export function generateAndApply(
   octaveOverride?: OctaveOverride,
 ): GeneratedPattern | null {
   const ctx = buildContext(instrumentId, octaveOverride);
-  if (!ctx) return null;
+  if (!ctx) { console.warn('[generateAndApply] buildContext returned null for', instrumentId); return null; }
 
   const inst = useStore.getState().instruments.find((i) => i.id === instrumentId);
   const sampleName = inst?.sampleName ?? '';
 
   const pattern = runGenerator(ctx, genParams, seed, sampleName);
+  console.log('[generateAndApply] ctx:', ctx, 'pattern events:', pattern.events.length, pattern.events.slice(0, 3));
   applyPattern(instrumentId, pattern);
   return pattern;
 }

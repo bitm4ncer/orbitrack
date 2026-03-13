@@ -817,6 +817,8 @@ function LogSettings() {
   const setLogEnabled = useStore((s) => s.setLogEnabled);
   const showLogConsole = useStore((s) => s.showLogConsole);
   const setShowLogConsole = useStore((s) => s.setShowLogConsole);
+  const showPerformanceMonitor = useStore((s) => s.showPerformanceMonitor);
+  const setShowPerformanceMonitor = useStore((s) => s.setShowPerformanceMonitor);
   const [bufferCount, setBufferCount] = useState(log.getCount());
   const [sessionDur, setSessionDur] = useState(0);
   const [snapshots, setSnapshots] = useState(log.getSnapshotCount());
@@ -874,6 +876,23 @@ function LogSettings() {
             </div>
           </label>
         </div>
+      </div>
+
+      {/* Diagnostics */}
+      <div className="border-t border-border/30 pt-4">
+        <h3 className="text-xs font-semibold text-text-secondary/70 uppercase tracking-wider mb-3">Diagnostics</h3>
+        <label className="flex items-center gap-3 p-3 bg-bg-tertiary/50 rounded border border-border/30 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showPerformanceMonitor}
+            onChange={(e) => setShowPerformanceMonitor(e.target.checked)}
+            className="accent-accent w-3.5 h-3.5"
+          />
+          <div>
+            <span className="text-xs text-text-primary font-medium">Performance Monitor</span>
+            <p className="text-[10px] text-text-secondary/50 mt-0.5">Show FPS, audio latency, and voice count in Effects panel</p>
+          </div>
+        </label>
       </div>
 
       {/* Session Stats */}
@@ -939,8 +958,6 @@ function LogSettings() {
 function DisplaySettings() {
   const orbitDisplayMode = useStore((s) => s.orbitDisplayMode);
   const setOrbitDisplayMode = useStore((s) => s.setOrbitDisplayMode);
-  const showPerformanceMonitor = useStore((s) => s.showPerformanceMonitor);
-  const setShowPerformanceMonitor = useStore((s) => s.setShowPerformanceMonitor);
 
   return (
     <div className="p-6 space-y-6">
@@ -997,22 +1014,6 @@ function DisplaySettings() {
         </div>
       </div>
 
-      {/* Performance */}
-      <div className="border-t border-border/30 pt-4">
-        <h3 className="text-sm font-semibold text-text-primary mb-4">Diagnostics</h3>
-        <label className="flex items-center gap-3 p-3 bg-bg-tertiary/50 rounded border border-border/30 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showPerformanceMonitor}
-            onChange={(e) => setShowPerformanceMonitor(e.target.checked)}
-            className="accent-accent"
-          />
-          <div>
-            <p className="text-xs font-medium text-text-primary">Performance Monitor</p>
-            <p className="text-xs text-text-secondary/60 mt-0.5">Show FPS, audio latency, and voice count in Effects panel</p>
-          </div>
-        </label>
-      </div>
     </div>
   );
 }

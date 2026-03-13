@@ -38,6 +38,7 @@ export function SynthVisualizer({ orbitIndex, color }: Props) {
   const modeRef          = useRef<VisMode>(mode);
   const rafRef           = useRef(0);
   const frameRef         = useRef(0);
+  const widthRef         = useRef(280);
   // Separate rolling buffers for spec and marq
   const specRef          = useRef<[HTMLCanvasElement, CanvasRenderingContext2D] | null>(null);
   const marqRef          = useRef<[HTMLCanvasElement, CanvasRenderingContext2D] | null>(null);
@@ -45,17 +46,32 @@ export function SynthVisualizer({ orbitIndex, color }: Props) {
 
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
+  // Track container width via ResizeObserver
   useEffect(() => {
-    const canvas    = canvasRef.current;
     const container = containerRef.current;
-    if (!canvas || !container) return;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
 
-    const W = container.clientWidth || 280;
-    canvas.width  = W;
-    canvas.height = CANVAS_H;
+    const syncSize = () => {
+      const W = Math.round(container.clientWidth) || 280;
+      if (W === widthRef.current) return;
+      widthRef.current = W;
+      canvas.width = W;
+      canvas.height = CANVAS_H;
+      specRef.current = makeOffscreen(W);
+      marqRef.current = makeOffscreen(W);
+    };
 
-    specRef.current = makeOffscreen(W);
-    marqRef.current = makeOffscreen(W);
+    syncSize();
+
+    const ro = new ResizeObserver(() => syncSize());
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
     const fftBuf  = new Uint8Array(1024);
     const timeBuf = new Uint8Array(512);
@@ -64,6 +80,7 @@ export function SynthVisualizer({ orbitIndex, color }: Props) {
       rafRef.current = requestAnimationFrame(draw);
       frameRef.current++;
 
+      const W = widthRef.current;
       const curMode = modeRef.current;
       // Spec and Marq run every frame; others throttle to ~30fps
       const isScroll = curMode === 'spec' || curMode === 'marq';
@@ -299,7 +316,7 @@ export function SynthVisualizer({ orbitIndex, color }: Props) {
         <canvas
           ref={canvasRef}
           height={CANVAS_H}
-          className="w-full block"
+          className="block"
           style={{ imageRendering: 'pixelated' }}
         />
       </div>

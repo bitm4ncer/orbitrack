@@ -1,11 +1,25 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-export function useResizable(defaultSize: number, min = 80, axis: 'x' | 'y' = 'y', direction: 1 | -1 = 1) {
+export function useResizable(
+  defaultSize: number,
+  min = 80,
+  axis: 'x' | 'y' = 'y',
+  direction: 1 | -1 = 1,
+  overrideSize?: number | null,
+) {
   const [size, setSize] = useState(defaultSize);
   const [isDragging, setIsDragging] = useState(false);
   const drag = useRef<{ startPos: number; startSize: number } | null>(null);
   const sizeRef = useRef(defaultSize);
   const isDraggingRef = useRef(false);
+
+  // External override (e.g. wide mode)
+  useEffect(() => {
+    if (overrideSize != null && !isDraggingRef.current) {
+      sizeRef.current = overrideSize;
+      setSize(overrideSize);
+    }
+  }, [overrideSize]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();

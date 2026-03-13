@@ -22,6 +22,7 @@ import { registerSampleForPlayback } from '../audio/engine';
 import { loadSample } from '../audio/sampler';
 import { generateName } from '../utils/nameGenerator';
 import { gzipAsync, toBase64Url, strToU8 } from './compressionUtils';
+import { getAllEngines } from '../audio/synthManager';
 
 // Legacy autosave ID — used for migration only
 const LEGACY_AUTOSAVE_ID = '__autosave__';
@@ -40,8 +41,8 @@ export function setAutosaveEnabled(enabled: boolean): void {
 
 export function getAutosaveInterval(): number {
   const raw = localStorage.getItem('orbitrack:autosave:interval');
-  const ms = raw ? parseInt(raw, 10) : 30000;
-  return isNaN(ms) ? 30000 : ms;
+  const ms = raw ? parseInt(raw, 10) : 3000;
+  return isNaN(ms) ? 3000 : ms;
 }
 
 export function setAutosaveInterval(ms: number): void {
@@ -49,7 +50,7 @@ export function setAutosaveInterval(ms: number): void {
 }
 
 export function getInitialAutosave(): boolean {
-  return localStorage.getItem('orbitrack:autosave:initialAutosave') === 'true';
+  return localStorage.getItem('orbitrack:autosave:initialAutosave') !== 'false';
 }
 
 export function setInitialAutosave(enabled: boolean): void {
@@ -119,6 +120,117 @@ async function createSnapshot(set: OrbitrackSet): Promise<string> {
   const json = JSON.stringify(setWithoutVersions);
   const compressed = await gzipAsync(strToU8(json));
   return toBase64Url(compressed);
+}
+
+// ── Synth engine → store sync ────────────────────────────────────────────────
+
+/** Flush live synth engine params back into the Zustand store.
+ *  Called before serialization so that the latest knob values are persisted,
+ *  even if the SynthPanel's debounced flush hasn't fired yet. */
+function flushSynthEngineParams(): void {
+  const engines = getAllEngines();
+  if (engines.size === 0) return;
+  const s = useStore.getState();
+  let changed = false;
+  const instruments = s.instruments.map((inst) => {
+    const engine = engines.get(inst.id);
+    if (!engine) return inst;
+    const params = engine.getParams();
+    changed = true;
+    return { ...inst, engineParams: params };
+  });
+  if (changed) {
+    useStore.setState({ instruments });
+  }
+}
+
+// ── Emergency localStorage snapshot ──────────────────────────────────────────
+
+const LS_EMERGENCY_KEY = 'orbitrack:emergencySnapshot';
+
+/** Synchronously save a JSON snapshot of the current state to localStorage.
+ *  Used in beforeunload as a reliable fallback when async IDB writes may not complete. */
+function saveEmergencySnapshot(): void {
+  try {
+    const s = useStore.getState();
+    if (s.instruments.length === 0) return;
+
+    // Minimal serializable state (no custom sample blobs — too large for localStorage)
+    const snap = {
+      bpm: s.bpm,
+      stepsPerBeat: s.stepsPerBeat,
+      masterVolume: s.masterVolume,
+      instruments: s.instruments,
+      gridNotes: s.gridNotes,
+      gridGlide: s.gridGlide,
+      gridLengths: s.gridLengths,
+      gridVelocities: s.gridVelocities,
+      instrumentEffects: s.instrumentEffects,
+      masterEffects: s.masterEffects,
+      scenes: s.scenes,
+      sceneEffects: s.sceneEffects,
+      gridResolution: s.gridResolution,
+      scaleRoot: s.scaleRoot,
+      scaleType: s.scaleType,
+      trackMode: s.trackMode,
+      arrangement: s.arrangement,
+      currentSetName: s.currentSetName,
+      currentSetId: s.currentSetId,
+    };
+    localStorage.setItem(LS_EMERGENCY_KEY, JSON.stringify(snap));
+  } catch {
+    // localStorage quota exceeded — nothing we can do
+  }
+}
+
+/** Try restoring from the emergency localStorage snapshot.
+ *  Returns true if restored. Clears the snapshot afterwards. */
+export function restoreEmergencySnapshot(): boolean {
+  try {
+    const raw = localStorage.getItem(LS_EMERGENCY_KEY);
+    if (!raw) return false;
+    const snap = JSON.parse(raw);
+    if (!snap?.instruments?.length) return false;
+
+    // Build a minimal OrbitrackSet for loadSet
+    const set: OrbitrackSet = {
+      id: snap.currentSetId || '__emergency__' + uid(),
+      version: 1,
+      meta: {
+        id: snap.currentSetId || '__emergency__',
+        name: snap.currentSetName || 'Recovered Session',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      bpm: snap.bpm ?? 128,
+      stepsPerBeat: snap.stepsPerBeat,
+      masterVolume: snap.masterVolume ?? 0,
+      instruments: snap.instruments,
+      gridNotes: snap.gridNotes ?? {},
+      gridGlide: snap.gridGlide ?? {},
+      gridLengths: snap.gridLengths ?? {},
+      gridVelocities: snap.gridVelocities,
+      instrumentEffects: snap.instrumentEffects ?? {},
+      masterEffects: snap.masterEffects,
+      scenes: snap.scenes,
+      sceneEffects: snap.sceneEffects,
+      gridResolution: snap.gridResolution,
+      scaleRoot: snap.scaleRoot,
+      scaleType: snap.scaleType,
+      trackMode: snap.trackMode,
+      arrangement: snap.arrangement,
+    };
+
+    useStore.getState().loadSet(set);
+    clearEmergencySnapshot();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function clearEmergencySnapshot(): void {
+  try { localStorage.removeItem(LS_EMERGENCY_KEY); } catch { /* ignore */ }
 }
 
 // ── Core autosave ───────────────────────────────────────────────────────────
@@ -206,6 +318,9 @@ async function saveSession(): Promise<void> {
   set.meta.updatedAt = Date.now();
 
   await put('sets', set);
+  _dirty = false;
+  // IDB save succeeded — clear emergency snapshot so it doesn't go stale
+  clearEmergencySnapshot();
 }
 
 function debouncedSave(): void {
@@ -355,6 +470,8 @@ export async function restoreLegacyAutosave(): Promise<boolean> {
  * Subscribe to store changes and auto-save on mutations.
  * Call once on app startup.
  */
+let _dirty = false;
+
 export function initSessionAutosave(): void {
   useStore.subscribe(
     (state, prevState) => {
@@ -377,8 +494,27 @@ export function initSessionAutosave(): void {
         state.trackMode !== prevState.trackMode ||
         state.arrangement !== prevState.arrangement
       ) {
+        _dirty = true;
         debouncedSave();
       }
     },
   );
+
+  // Flush pending save on page unload so nothing is lost on reload/close
+  window.addEventListener('beforeunload', () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+
+    // Flush any in-flight synth engine params to the store before serializing
+    flushSynthEngineParams();
+
+    // Synchronous localStorage snapshot — guaranteed to complete before page teardown.
+    // The async IDB save may not finish, so this is the reliable fallback.
+    saveEmergencySnapshot();
+
+    // Also attempt async IDB save (best-effort, may not complete)
+    saveSession().catch(() => {});
+  });
+
+  // Fire an initial save immediately so there's always something in IDB
+  saveSession().catch(() => {});
 }

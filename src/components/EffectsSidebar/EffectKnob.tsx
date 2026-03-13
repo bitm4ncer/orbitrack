@@ -64,6 +64,10 @@ interface EffectKnobProps {
   modulations?: KnobModulation[];
   /** Context menu items (LFO assign, MIDI learn, etc.) */
   contextItems?: KnobContextItem[];
+  /** Called when an LFO drag handle is dropped onto this knob */
+  onLfoDrop?: (lfoSource: string) => void;
+  /** Called when mod ring is dragged to adjust depth */
+  onModDepthChange?: (modIndex: number, newDepth: number) => void;
 }
 
 // ── Context menu rendered via portal ────────────────────────────────────────
@@ -138,7 +142,7 @@ function KnobContextMenu({
 
 export function EffectKnob({
   value, min, max, step, defaultValue, label, color, unit, format,
-  size = 'md', onChange, modulations, contextItems,
+  size = 'md', onChange, modulations, contextItems, onLfoDrop, onModDepthChange,
 }: EffectKnobProps) {
   const px = SIZE_MAP[size];
   const cx = px / 2;
@@ -156,12 +160,17 @@ export function EffectKnob({
   const dotY = cy + indR * Math.sin(toRad(valueDeg));
 
   const [dragging, setDragging] = useState(false);
+  const [dragOverLfo, setDragOverLfo] = useState(false);
+  const [depthDragIdx, setDepthDragIdx] = useState<number | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const dragRef = useRef<{ startY: number; startVal: number } | null>(null);
+  const depthDragRef = useRef<{ startY: number; startDepth: number; idx: number } | null>(null);
 
   const SENSITIVITY = 180; // px for full range
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    // Don't start knob drag if a depth drag is in progress
+    if (depthDragRef.current) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = { startY: e.clientY, startVal: value };
     setDragging(true);
@@ -169,16 +178,27 @@ export function EffectKnob({
   }, [value]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    // Depth ring drag
+    if (depthDragRef.current && onModDepthChange) {
+      const sens = e.shiftKey ? SENSITIVITY * 5 : SENSITIVITY;
+      const delta = -(e.clientY - depthDragRef.current.startY) / sens * 2; // -1 to +1 range
+      const newDepth = Math.max(-1, Math.min(1, depthDragRef.current.startDepth + delta));
+      onModDepthChange(depthDragRef.current.idx, Math.round(newDepth * 100) / 100);
+      return;
+    }
+    // Normal knob drag
     if (!dragRef.current) return;
     const sens = e.shiftKey ? SENSITIVITY * 5 : SENSITIVITY;
     const delta = -(e.clientY - dragRef.current.startY) / sens * (max - min);
     const raw = dragRef.current.startVal + delta;
     onChange(snapToStep(raw, step, min, max));
-  }, [min, max, step, onChange]);
+  }, [min, max, step, onChange, onModDepthChange]);
 
   const handlePointerUp = useCallback(() => {
     dragRef.current = null;
+    depthDragRef.current = null;
     setDragging(false);
+    setDepthDragIdx(null);
   }, []);
 
   const handleDoubleClick = useCallback(() => {
@@ -198,6 +218,40 @@ export function EffectKnob({
     setCtxMenu({ x: e.clientX, y: e.clientY });
   }, [contextItems]);
 
+  // Drag-drop handlers for LFO assignment
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!onLfoDrop) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'link';
+    setDragOverLfo(true);
+  }, [onLfoDrop]);
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverLfo(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverLfo(false);
+    if (!onLfoDrop) return;
+    const lfoSource = e.dataTransfer.getData('lfo-source');
+    if (lfoSource) {
+      onLfoDrop(lfoSource);
+    }
+  }, [onLfoDrop]);
+
+  // Depth ring pointer down — start depth drag on a mod arc
+  const handleModRingPointerDown = useCallback((e: React.PointerEvent, modIdx: number, currentDepth: number) => {
+    if (!onModDepthChange) return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Capture pointer on the parent container so moves are tracked
+    const container = (e.currentTarget as SVGElement).closest('div');
+    if (container) container.setPointerCapture(e.pointerId);
+    depthDragRef.current = { startY: e.clientY, startDepth: currentDepth, idx: modIdx };
+    setDepthDragIdx(modIdx);
+  }, [onModDepthChange]);
+
   const displayVal = format ? format(value) : formatValue(value, step, unit);
   const dimColor = `${color}40`; // 25% opacity for track
   const activeColor = color;
@@ -205,6 +259,12 @@ export function EffectKnob({
   // Modulation ring arcs
   const modR = trackR + (size === 'lg' ? 4 : size === 'md' ? 3.5 : 3);
   const modStroke = size === 'lg' ? 2.5 : size === 'md' ? 2 : 1.5;
+  const modHitStroke = 8; // wider invisible hit area for depth drag
+
+  // Depth drag tooltip
+  const depthTooltip = depthDragIdx !== null && modulations?.[depthDragIdx]
+    ? `${modulations[depthDragIdx].depth > 0 ? '+' : ''}${(modulations[depthDragIdx].depth * 100).toFixed(0)}%`
+    : null;
 
   return (
     <div
@@ -213,7 +273,9 @@ export function EffectKnob({
     >
       <div
         style={{
-          width: px, height: px, cursor: 'ns-resize', position: 'relative',
+          width: px, height: px,
+          cursor: depthDragIdx !== null ? 'ns-resize' : 'ns-resize',
+          position: 'relative',
           borderRadius: '50%',
         }}
         onPointerDown={handlePointerDown}
@@ -223,6 +285,9 @@ export function EffectKnob({
         onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
         onContextMenu={handleContextMenu}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         title={`${label}: ${displayVal}${dragging ? '' : '\nDrag to adjust · Shift = fine · Dbl-click = reset\nRight-click for LFO / MIDI'}`}
       >
         <svg width={px} height={px} style={{ display: 'block' }} overflow="visible">
@@ -242,7 +307,7 @@ export function EffectKnob({
             strokeLinecap="round"
           />
 
-          {/* Modulation range arcs (behind active arc) */}
+          {/* Modulation range arcs + invisible hit areas for depth drag */}
           {modulations && modulations.map((mod, i) => {
             const depthDeg = Math.abs(mod.depth) * RANGE_DEG;
             const modStart = mod.depth >= 0
@@ -252,17 +317,46 @@ export function EffectKnob({
               ? Math.min(START_DEG + RANGE_DEG, valueDeg + depthDeg)
               : valueDeg;
             if (modEnd - modStart < 0.5) return null;
+            const arcD = arcPath(cx, cy, modR, modStart, modEnd);
+            const isDraggingThis = depthDragIdx === i;
             return (
-              <path
-                key={i}
-                d={arcPath(cx, cy, modR, modStart, modEnd)}
-                fill="none"
-                stroke={`${mod.color}70`}
-                strokeWidth={modStroke}
-                strokeLinecap="round"
-              />
+              <g key={i}>
+                {/* Visible mod arc */}
+                <path
+                  d={arcD}
+                  fill="none"
+                  stroke={`${mod.color}${isDraggingThis ? 'cc' : '70'}`}
+                  strokeWidth={isDraggingThis ? modStroke + 1 : modStroke}
+                  strokeLinecap="round"
+                  style={isDraggingThis ? { filter: `drop-shadow(0 0 3px ${mod.color})` } : undefined}
+                />
+                {/* Invisible wider hit area for depth ring drag */}
+                {onModDepthChange && (
+                  <path
+                    d={arcD}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth={modHitStroke}
+                    strokeLinecap="round"
+                    style={{ cursor: 'ns-resize' }}
+                    onPointerDown={(e) => handleModRingPointerDown(e, i, mod.depth)}
+                  />
+                )}
+              </g>
             );
           })}
+
+          {/* Drag-over LFO highlight */}
+          {dragOverLfo && (
+            <circle
+              cx={cx} cy={cy} r={trackR + 2}
+              fill="none"
+              stroke={color}
+              strokeWidth={2}
+              opacity={0.6}
+              style={{ filter: `drop-shadow(0 0 4px ${color})` }}
+            />
+          )}
 
           {/* Active arc */}
           {t > 0.001 && (
@@ -291,6 +385,20 @@ export function EffectKnob({
             style={{ filter: dragging ? `drop-shadow(0 0 2px ${color})` : undefined }}
           />
         </svg>
+
+        {/* Depth drag tooltip */}
+        {depthTooltip && (
+          <div
+            className="absolute text-[8px] font-mono px-1 py-0.5 rounded pointer-events-none"
+            style={{
+              top: -14, left: '50%', transform: 'translateX(-50%)',
+              background: '#1a1a2a', color, border: `1px solid ${color}40`,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {depthTooltip}
+          </div>
+        )}
       </div>
 
       {/* Label + mod dots */}
